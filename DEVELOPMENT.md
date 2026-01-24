@@ -7,7 +7,7 @@ This document lists all commands for building, linting, formatting, and testing 
 ```bash
 # Create virtual environment
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 
 # Install package in editable mode with dev dependencies
 pip install -e ".[dev]"
@@ -77,10 +77,13 @@ black src/ tests/
 # 2. Lint code
 ruff check --fix src/ tests/
 
-# 3. Run tests
+# 3. Type check code
+mypy src/
+
+# 4. Run tests
 pytest
 
-# 4. Build (to ensure package structure is correct)
+# 5. Build
 python -m build
 ```
 

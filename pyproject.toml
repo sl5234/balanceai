@@ -10,10 +10,13 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "appdevcommons",
+    "mcp",
+    "pdfplumber",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "build",
     "pytest>=7.0",
     "black>=23.0",
     "ruff>=0.1.0",
