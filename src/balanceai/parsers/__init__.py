@@ -25,9 +25,11 @@ _parsers: dict[Bank, type[StatementParser]] = {}
 
 def register_parser(bank: Bank):
     """Decorator to register a parser for a bank."""
+
     def decorator(cls: type[StatementParser]):
         _parsers[bank] = cls
         return cls
+
     return decorator
 
 

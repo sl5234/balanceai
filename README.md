@@ -12,7 +12,7 @@ Add to `~/.claude/settings.json`:
 {
   "mcpServers": {
     "balance-ai": {
-      "command": "/Users/sl5234/Workspace/BalanceAI/.venv/bin/python",
+      "command": "/Users/sl5234/Workspace/BalanceAI/venv/bin/python",
       "args": ["-m", "balanceai.server"],
       "cwd": "/Users/sl5234/Workspace/BalanceAI"
     }

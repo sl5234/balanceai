@@ -3,8 +3,7 @@ from pathlib import Path
 
 from balanceai.models import Account, Transaction
 
-
-DATA_DIR = Path(__file__).parent.parent.parent / "data"
+DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 def _ensure_data_dir():
