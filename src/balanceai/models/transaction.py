@@ -37,6 +37,10 @@ class Transaction:
             category=d.get("category"),
         )
 
+    def __lt__(self, other: "Transaction") -> bool:
+        """Enable sorting by date."""
+        return self.date < other.date
+
     @staticmethod
     def generate_id(account_id: str, txn_date: datetime.date, description: str, amount: Decimal) -> str:
         raw = f"{account_id}|{txn_date.isoformat()}|{description}|{amount}"

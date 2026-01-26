@@ -13,7 +13,7 @@ from mcp.server.fastmcp import FastMCP
 from balanceai.models import Bank
 from balanceai.parsers import get_parser
 import balanceai.parsers.chase  # noqa: F401 - register parser
-from balanceai.statements.storage import load_accounts, save_account, save_transactions
+from balanceai.statements.storage import load_accounts, load_transactions_by_account, save_account, save_transactions_by_account
 
 mcp = FastMCP("balanceai")
 
@@ -33,8 +33,14 @@ def upload_statement(file_path: str, bank: Bank) -> dict:
     parser = get_parser(bank)
     account, transactions = parser.parse(file_path)
 
+    account_transactions, added = save_transactions_by_account(account.id, transactions)
+
+    # Update account balance from latest transaction
+    if account_transactions:
+        latest = account_transactions[-1]  # already sorted by date
+        account.balance = latest.new_balance
+
     save_account(account)
-    added = save_transactions(transactions)
 
     return {"account_id": account.id, "transactions_added": added}
 
@@ -62,8 +68,18 @@ def get_balance(account_id: Optional[str] = None) -> list[dict]:
     Returns:
         List of balances with account_id, current, and available amounts
     """
-    # TODO: Load from accounts.json, filter by account_id
-    return []
+    accounts = load_accounts()
+
+    if account_id is not None:
+        accounts = {k: v for k, v in accounts.items() if k == account_id}
+
+    return [
+        {
+            "account_id": acc.id,
+            "current": str(acc.balance) if acc.balance is not None else None,
+        }
+        for acc in accounts.values()
+    ]
 
 
 @mcp.tool()
@@ -83,9 +99,15 @@ def get_transactions(
     Returns:
         List of transactions with id, date, description, amount, and category
     """
-    # TODO: Load from transactions.json
-    # TODO: Apply filters
-    return []
+    transactions = load_transactions_by_account(account_id)
+
+    if start_date is not None:
+        transactions = [t for t in transactions if t.date >= start_date]
+
+    if end_date is not None:
+        transactions = [t for t in transactions if t.date <= end_date]
+
+    return [t.to_dict() for t in transactions]
 
 
 @mcp.tool()

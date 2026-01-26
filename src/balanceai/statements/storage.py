@@ -46,41 +46,69 @@ def save_account(account: Account) -> None:
         json.dump({acc_id: acc.to_dict() for acc_id, acc in accounts.items()}, f, indent=2)
 
 
-def load_transactions() -> list[Transaction]:
-    """Load all transactions from storage."""
+def _load_all_transactions() -> dict[str, list[Transaction]]:
+    """Load all transactions from storage, grouped by account_id."""
     _ensure_data_dir()
     path = DATA_DIR / "transactions.json"
 
     if not path.exists():
         logger.debug("No transactions found in storage")
-        return []
+        return {}
 
     with open(path) as f:
         data = json.load(f)
 
-    return [Transaction.from_dict(t) for t in data]
+    return {
+        account_id: [Transaction.from_dict(t) for t in txns]
+        for account_id, txns in data.items()
+    }
 
 
-def save_transactions(transactions: list[Transaction]) -> int:
-    """
-    Save transactions, skipping duplicates.
-
-    Returns:
-        Number of new transactions added
-    """
-    existing = load_transactions()
-    existing_ids = {t.id for t in existing}
-
-    new_transactions = [t for t in transactions if t.id not in existing_ids]
-    all_transactions = existing + new_transactions
-
+def _save_all_transactions(all_transactions: dict[str, list[Transaction]]) -> None:
+    """Save all transactions to storage."""
     _ensure_data_dir()
     path = DATA_DIR / "transactions.json"
 
     with open(path, "w") as f:
-        json.dump([t.to_dict() for t in all_transactions], f, indent=2)
+        json.dump(
+            {
+                account_id: [t.to_dict() for t in txns]
+                for account_id, txns in all_transactions.items()
+            },
+            f,
+            indent=2,
+        )
 
-    return len(new_transactions)
+
+def load_transactions_by_account(account_id: str | None = None) -> list[Transaction]:
+    """Load transactions from storage, optionally filtered by account_id."""
+    all_transactions = _load_all_transactions()
+
+    if account_id is not None:
+        return all_transactions.get(account_id, [])
+
+    # Return all transactions flattened
+    return [t for txns in all_transactions.values() for t in txns]
+
+
+def save_transactions_by_account(account_id: str, transactions: list[Transaction]) -> tuple[list[Transaction], int]:
+    """
+    Save transactions for an account, skipping duplicates. Transactions are sorted by date.
+
+    Returns:
+        Tuple of (all transactions for the account sorted by date, count of new transactions added)
+    """
+    all_transactions = _load_all_transactions()
+    existing = all_transactions.get(account_id, [])
+    existing_ids = {t.id for t in existing}
+
+    new_transactions = [t for t in transactions if t.id not in existing_ids]
+    account_transactions = sorted(existing + new_transactions)
+
+    all_transactions[account_id] = account_transactions
+    _save_all_transactions(all_transactions)
+
+    return account_transactions, len(new_transactions)
 
 
 def update_transaction(transaction_id: str, **updates) -> bool:
@@ -90,17 +118,16 @@ def update_transaction(transaction_id: str, **updates) -> bool:
     Returns:
         True if transaction was found and updated
     """
-    transactions = load_transactions()
+    all_transactions = _load_all_transactions()
 
-    for txn in transactions:
-        if txn.id == transaction_id:
-            for key, value in updates.items():
-                if hasattr(txn, key):
-                    setattr(txn, key, value)
+    for account_id, transactions in all_transactions.items():
+        for txn in transactions:
+            if txn.id == transaction_id:
+                for key, value in updates.items():
+                    if hasattr(txn, key):
+                        setattr(txn, key, value)
 
-            path = DATA_DIR / "transactions.json"
-            with open(path, "w") as f:
-                json.dump([t.to_dict() for t in transactions], f, indent=2)
-            return True
+                _save_all_transactions(all_transactions)
+                return True
 
     return False
