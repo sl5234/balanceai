@@ -87,3 +87,5 @@ This document outlines best practices and anti-patterns for AI agents working on
 2. **During coding**: Follow style guidelines, write tests
 3. **After coding**: Run linting, formatting, tests (see DEVELOPMENT.md)
 4. **Before committing**: Update relevant documentation
+
+## Constraints

@@ -1,17 +1,26 @@
 from dataclasses import dataclass, asdict
+from enum import Enum
 
 from balanceai.models.bank import Bank
+
+
+class AccountType(str, Enum):
+    DEBIT = "debit"
+    CREDIT = "credit"
+    SAVING = "saving"
+    INVESTMENT = "investment"
 
 
 @dataclass
 class Account:
     id: str  # account number
     bank: Bank
-    account_type: str  # checking, savings, credit_card, investment
+    account_type: AccountType
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d["bank"] = self.bank.value
+        d["account_type"] = self.account_type.value
         return d
 
     @classmethod
@@ -19,5 +28,5 @@ class Account:
         return cls(
             id=d["id"],
             bank=Bank(d["bank"]),
-            account_type=d["account_type"],
+            account_type=AccountType(d["account_type"]),
         )

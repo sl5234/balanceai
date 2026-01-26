@@ -19,26 +19,19 @@ mcp = FastMCP("balanceai")
 
 
 @mcp.tool()
-def upload_statement(file_path: str, bank: Bank, account_id: Optional[str] = None) -> dict:
+def upload_statement(file_path: str, bank: Bank) -> dict:
     """
     Parse and store a bank statement PDF.
 
     Args:
         file_path: Path to the bank statement PDF file
         bank: The bank this statement is from
-        account_id: Optional account ID to use (overrides parsed value)
 
     Returns:
         dict with account_id and number of transactions added
     """
     parser = get_parser(bank)
     account, transactions = parser.parse(file_path)
-
-    # Override account ID if provided
-    if account_id:
-        account.id = account_id
-        for txn in transactions:
-            txn.account_id = account_id
 
     save_account(account)
     added = save_transactions(transactions)
