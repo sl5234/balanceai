@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import NamedTuple
 
 import pdfplumber
+from appdevcommons.hash_generator import HashGenerator
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -51,6 +52,7 @@ class ChaseParser(StatementParser):
         logger.debug("\nExtracted text:\n%s", all_text)
 
         account = self._parse_account_info(all_text)
+        account.id = HashGenerator.generate_hash(account.id)
         beginning_balance, ending_balance = self._parse_balances(all_text)
         transactions = self._parse_transactions(all_text, account.id)
         self._validate_balances(beginning_balance, transactions, ending_balance)

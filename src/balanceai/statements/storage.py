@@ -1,5 +1,14 @@
+import logging
 import json
 from pathlib import Path
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    filename="/Users/sl5234/Workspace/BalanceAI/logs/storage.log",
+    filemode="a",
+)
+logger = logging.getLogger(__name__)
 
 from balanceai.models import Account, Transaction
 
@@ -16,6 +25,7 @@ def load_accounts() -> dict[str, Account]:
     path = DATA_DIR / "accounts.json"
 
     if not path.exists():
+        logger.debug("No accounts found in storage")
         return {}
 
     with open(path) as f:
@@ -42,6 +52,7 @@ def load_transactions() -> list[Transaction]:
     path = DATA_DIR / "transactions.json"
 
     if not path.exists():
+        logger.debug("No transactions found in storage")
         return []
 
     with open(path) as f:

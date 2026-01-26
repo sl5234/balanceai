@@ -13,7 +13,7 @@ from mcp.server.fastmcp import FastMCP
 from balanceai.models import Bank
 from balanceai.parsers import get_parser
 import balanceai.parsers.chase  # noqa: F401 - register parser
-from balanceai.statements.storage import save_account, save_transactions
+from balanceai.statements.storage import load_accounts, save_account, save_transactions
 
 mcp = FastMCP("balanceai")
 
@@ -47,8 +47,8 @@ def list_accounts() -> list[dict]:
     Returns:
         List of accounts with id, name, type, and institution
     """
-    # TODO: Load from accounts.json
-    return []
+    accounts = load_accounts()
+    return [account.to_dict() for account in accounts.values()]
 
 
 @mcp.tool()

@@ -13,7 +13,7 @@ class AccountType(str, Enum):
 
 @dataclass
 class Account:
-    id: str  # account number
+    id: str  # hashed account number
     bank: Bank
     account_type: AccountType
 

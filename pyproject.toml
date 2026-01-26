@@ -9,7 +9,7 @@ description = "Automated accounting tool for receipt handling and bookkeeping"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "appdevcommons",
+    "appdevcommons>=0.1.4",
     "mcp",
     "pdfplumber",
 ]
