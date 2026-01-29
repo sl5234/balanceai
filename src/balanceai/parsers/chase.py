@@ -1,12 +1,14 @@
 import logging
 import re
-import sys
 from datetime import date
 from decimal import Decimal
 from typing import NamedTuple
 
 import pdfplumber
 from appdevcommons.hash_generator import HashGenerator
+
+from balanceai.models import Account, AccountType, Transaction, Bank
+from balanceai.parsers import StatementParser, register_parser
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -16,9 +18,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from balanceai.models import Account, AccountType, Transaction, Bank
-from balanceai.parsers import StatementParser, register_parser
-
 
 class StatementPeriod(NamedTuple):
     start_date: date
@@ -26,9 +25,18 @@ class StatementPeriod(NamedTuple):
 
 
 MONTH_NAMES = {
-    "january": 1, "february": 2, "march": 3, "april": 4,
-    "may": 5, "june": 6, "july": 7, "august": 8,
-    "september": 9, "october": 10, "november": 11, "december": 12,
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
 }
 
 
@@ -61,9 +69,7 @@ class ChaseParser(StatementParser):
 
     def _parse_account_info(self, text: str) -> Account:
         # Extract account number (may be on next line after "Account Number:")
-        account_match = re.search(
-            r"Account\s*Number[:\s]*(\d+)", text, re.IGNORECASE
-        )
+        account_match = re.search(r"Account\s*Number[:\s]*(\d+)", text, re.IGNORECASE)
         if not account_match:
             raise ValueError("Could not parse account number from statement")
         account_id = account_match.group(1)
@@ -151,9 +157,7 @@ class ChaseParser(StatementParser):
             f"{period.start_date} to {period.end_date}"
         )
 
-    def _parse_transactions_from_text(
-        self, text: str, period: StatementPeriod
-    ) -> list[dict]:
+    def _parse_transactions_from_text(self, text: str, period: StatementPeriod) -> list[dict]:
         """Parse transactions from extracted text."""
         transactions = []
 
@@ -179,13 +183,15 @@ class ChaseParser(StatementParser):
             new_balance = Decimal(new_balance_str.replace(",", ""))
             previous_balance = new_balance - amount
 
-            transactions.append({
-                "date": txn_date,
-                "description": description.strip(),
-                "amount": amount,
-                "previous_balance": previous_balance,
-                "new_balance": new_balance,
-            })
+            transactions.append(
+                {
+                    "date": txn_date,
+                    "description": description.strip(),
+                    "amount": amount,
+                    "previous_balance": previous_balance,
+                    "new_balance": new_balance,
+                }
+            )
 
         if not transactions:
             raise ValueError("Could not parse any transactions from statement")
@@ -205,16 +211,18 @@ class ChaseParser(StatementParser):
                 account_id, txn_data["date"], txn_data["description"], txn_data["amount"]
             )
 
-            transactions.append(Transaction(
-                id=txn_id,
-                account_id=account_id,
-                date=txn_data["date"],
-                description=txn_data["description"],
-                amount=txn_data["amount"],
-                previous_balance=txn_data["previous_balance"],
-                new_balance=txn_data["new_balance"],
-            ))
-        
+            transactions.append(
+                Transaction(
+                    id=txn_id,
+                    account_id=account_id,
+                    date=txn_data["date"],
+                    description=txn_data["description"],
+                    amount=txn_data["amount"],
+                    previous_balance=txn_data["previous_balance"],
+                    new_balance=txn_data["new_balance"],
+                )
+            )
+
         logger.debug("\nExtracted transactions:\n%s", transactions)
         return transactions
 

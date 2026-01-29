@@ -2,6 +2,8 @@ import logging
 import json
 from pathlib import Path
 
+from balanceai.models import Account, Transaction
+
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -9,8 +11,6 @@ logging.basicConfig(
     filemode="a",
 )
 logger = logging.getLogger(__name__)
-
-from balanceai.models import Account, Transaction
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -59,8 +59,7 @@ def _load_all_transactions() -> dict[str, list[Transaction]]:
         data = json.load(f)
 
     return {
-        account_id: [Transaction.from_dict(t) for t in txns]
-        for account_id, txns in data.items()
+        account_id: [Transaction.from_dict(t) for t in txns] for account_id, txns in data.items()
     }
 
 
@@ -91,7 +90,9 @@ def load_transactions_by_account(account_id: str | None = None) -> list[Transact
     return [t for txns in all_transactions.values() for t in txns]
 
 
-def save_transactions_by_account(account_id: str, transactions: list[Transaction]) -> tuple[list[Transaction], int]:
+def save_transactions_by_account(
+    account_id: str, transactions: list[Transaction]
+) -> tuple[list[Transaction], int]:
     """
     Save transactions for an account, skipping duplicates. Transactions are sorted by date.
 

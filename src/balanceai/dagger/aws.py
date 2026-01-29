@@ -57,7 +57,9 @@ class AWSClients:
             self.kms_client = boto3.client("kms", region_name=self.region_name)
             logger.info("KMS client initialized")
 
-            self.bedrock_runtime_client = boto3.client("bedrock-runtime", region_name=self.region_name)
+            self.bedrock_runtime_client = boto3.client(
+                "bedrock-runtime", region_name=self.region_name
+            )
             logger.info("Bedrock Runtime client initialized")
 
             self._initialized = True
@@ -90,9 +92,7 @@ class AWSClients:
             RuntimeError: If clients have not been initialized
         """
         if not self._initialized:
-            raise RuntimeError(
-                "AWS clients have not been initialized. Call initialize() first."
-            )
+            raise RuntimeError("AWS clients have not been initialized. Call initialize() first.")
         return self.s3_client
 
     def get_kms_client(self) -> BaseClient:
@@ -106,9 +106,7 @@ class AWSClients:
             RuntimeError: If clients have not been initialized
         """
         if not self._initialized:
-            raise RuntimeError(
-                "AWS clients have not been initialized. Call initialize() first."
-            )
+            raise RuntimeError("AWS clients have not been initialized. Call initialize() first.")
         return self.kms_client
 
     def get_bedrock_runtime_client(self) -> BaseClient:
@@ -122,7 +120,5 @@ class AWSClients:
             RuntimeError: If clients have not been initialized
         """
         if not self._initialized:
-            raise RuntimeError(
-                "AWS clients have not been initialized. Call initialize() first."
-            )
+            raise RuntimeError("AWS clients have not been initialized. Call initialize() first.")
         return self.bedrock_runtime_client

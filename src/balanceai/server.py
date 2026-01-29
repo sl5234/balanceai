@@ -12,9 +12,11 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from balanceai.models import Bank, Category
+from balanceai.models import Account, Bank, Category, Transaction
 from balanceai.parsers import get_parser
 import balanceai.parsers.chase  # noqa: F401 - register parser
+from balanceai.constants import DEFAULT_CATEGORIES
+from balanceai.dagger.aws import AWSClients
 from balanceai.prompts.categorizer import build_categorization_prompt
 from balanceai.statements.storage import (
     load_accounts,
@@ -39,16 +41,9 @@ mcp = FastMCP(
     """,
 )
 
-_bedrock_client = None
-
-
-def _get_bedrock_client():
-    global _bedrock_client
-    if _bedrock_client is None:
-        import boto3
-
-        _bedrock_client = boto3.client("bedrock-runtime")
-    return _bedrock_client
+_aws_clients = AWSClients()
+if not _aws_clients.is_initialized():
+    _aws_clients.initialize()
 
 
 @mcp.resource("balanceai://supported-banks")
@@ -168,7 +163,7 @@ def get_transactions(
 
 
 @mcp.tool()
-def list_categories(account_id: str) -> list[dict]:
+def list_categories(account_id: str) -> list[dict] | dict:
     """
     List categories configured for an account.
 
@@ -208,56 +203,61 @@ def update_categories(account_id: str, categories: list[dict]) -> dict:
 
 
 @mcp.tool()
-def categorize_transaction(account_id: str, transaction_id: str, category: str) -> dict:
+def categorize_transaction(
+    account: dict, transaction: dict, category: Optional[str] = None
+) -> dict:
     """
-    Manually set the category for a transaction.
+    Categorize a transaction. If category is omitted, uses AI (Bedrock) to
+    auto-categorize based on the account's configured categories. If category
+    is provided, it must match one of the account's categories.
 
     Args:
-        account_id: The account the transaction belongs to
-        transaction_id: The transaction to update
-        category: The category to assign
+        account: The account object (with id, bank, account_type, balance, categories)
+        transaction: The transaction object (with id, account_id, date, description, amount, etc.)
+        category: Optional category name to assign. Omit to auto-categorize via AI.
 
     Returns:
         dict with success status
     """
-    accounts = load_accounts()
-    account = accounts.get(account_id)
-    if account is None:
-        return {"error": f"Account {account_id} not found"}
+    acct = Account.from_dict(account)
+    txn = Transaction.from_dict(transaction)
+    valid_names = {c.name for c in acct.categories}
 
-    transactions = load_transactions_by_account(account_id)
-    transaction = next((t for t in transactions if t.id == transaction_id), None)
-    if transaction is None:
-        return {"error": f"Transaction {transaction_id} not found"}
+    if category is not None:
+        # Manual category — must be in the account's category list
+        if category not in valid_names:
+            return {
+                "error": f"Category '{category}' not found in account categories",
+                "valid_categories": sorted(valid_names),
+            }
+    else:
+        # AI categorization via Bedrock — fall back to defaults if account has none
+        categories = acct.categories or DEFAULT_CATEGORIES
+        valid_names = {c.name for c in categories}
 
-    # If account has categories configured and no category provided, use Bedrock
-    if account.categories and not category:
-        prompt = build_categorization_prompt(account.categories, transaction.description)
+        prompt = build_categorization_prompt(categories, txn.description)
 
         try:
-            client = _get_bedrock_client()
+            client = _aws_clients.get_bedrock_runtime_client()
             response = client.converse(
                 modelId="anthropic.claude-3-haiku-20240307-v1:0",
                 messages=[{"role": "user", "content": [{"text": prompt}]}],
             )
             response_text = response["output"]["message"]["content"][0]["text"]
             result = json.loads(response_text)
-            ai_category = result.get("category", "")
+            category = result.get("category", "")
 
-            valid_names = {c.name for c in account.categories}
-            if ai_category not in valid_names:
-                return {"error": f"AI returned invalid category '{ai_category}'"}
-
-            category = ai_category
+            if category not in valid_names:
+                return {"error": f"AI returned invalid category '{category}'"}
         except Exception as e:
             logger.error(f"Bedrock categorization failed: {e}")
             return {"error": f"AI categorization failed: {str(e)}"}
 
-    updated = update_transaction(transaction_id, category=category)
+    updated = update_transaction(txn.id, category=category)
     if not updated:
-        return {"error": f"Failed to update transaction {transaction_id}"}
+        return {"error": f"Failed to update transaction {txn.id}"}
 
-    return {"success": True, "transaction_id": transaction_id, "category": category}
+    return {"success": True, "transaction_id": txn.id, "category": category}
 
 
 if __name__ == "__main__":

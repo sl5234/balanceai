@@ -42,6 +42,8 @@ class Transaction:
         return self.date < other.date
 
     @staticmethod
-    def generate_id(account_id: str, txn_date: datetime.date, description: str, amount: Decimal) -> str:
+    def generate_id(
+        account_id: str, txn_date: datetime.date, description: str, amount: Decimal
+    ) -> str:
         raw = f"{account_id}|{txn_date.isoformat()}|{description}|{amount}"
         return sha256(raw.encode()).hexdigest()[:16]

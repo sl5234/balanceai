@@ -16,9 +16,7 @@ class Settings(BaseSettings):
     """
 
     # AWS KMS
-    kms_key_arn: str = (
-        "arn:aws:kms:us-west-2:792341830430:key/f46115bb-774a-4777-ab66-29903da24381"
-    )
+    kms_key_arn: str = "arn:aws:kms:us-west-2:792341830430:key/f46115bb-774a-4777-ab66-29903da24381"
 
     encrypted_plaid_api_token: str = (
         "AQICAHg7rDJp72oZrIfl2vnBxkvlcidlgcJm7juguFV/iuWU+AEppUF7FLTz2DaUQy+zza2kAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMORXUzcZf2KGd03SAAgEQgDueiST/NvgyT7IC3mlwlwxLBMyJPcIze+Yq8pNCtWKF61RG7G3xCdt1q7BgJWBlfzTt4XXVPDU84hU12g=="
@@ -37,9 +35,7 @@ class Settings(BaseSettings):
         self._aws_clients = aws_clients
 
     @staticmethod
-    def decrypt_value(
-        encrypted_value: str, aws_clients: AWSClients, kms_key_arn: str
-    ) -> str:
+    def decrypt_value(encrypted_value: str, aws_clients: AWSClients, kms_key_arn: str) -> str:
         """
         Decrypt a value using AWS KMS via KMSEncryptor from appdevcommons.
 
