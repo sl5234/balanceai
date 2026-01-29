@@ -10,8 +10,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "appdevcommons>=0.1.4",
+    "boto3",
     "mcp",
     "pdfplumber",
+    "pydantic",
 ]
 
 [project.optional-dependencies]
