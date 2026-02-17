@@ -1,8 +1,7 @@
 """
-BalanceAI MCP Server
+BalanceAI Link Bank MCP Server
 
-Provides tools for financial data management, mimicking a Plaid-like interface
-but backed by manual PDF statement uploads.
+Provides tools for managing bank accounts, transactions, and categories.
 """
 
 import json
@@ -12,7 +11,9 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from balanceai.models import Account, Bank, Category, Transaction
+from appdevcommons.hash_generator import HashGenerator
+
+from balanceai.models import Account, AccountType, Bank, Category, Transaction
 from balanceai.parsers import get_parser
 import balanceai.parsers.chase  # noqa: F401 - register parser
 from balanceai.constants import DEFAULT_CATEGORIES
@@ -29,9 +30,9 @@ from balanceai.statements.storage import (
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
-    "balanceai",
+    "balanceai_link_bank",
     instructions="""
-    BalanceAI is a personal finance MCP server for managing bank accounts and transactions.
+    BalanceAI Link Bank is an MCP server for managing bank accounts and transactions.
 
     General behavioral guidelines for the MCP client:
     - When a user asks to categorize a transaction, ALWAYS ask the user for a category object
@@ -63,6 +64,39 @@ def get_supported_banks() -> str:
     - All statements must be in PDF format.
     - Statements are parsed locally and data is stored on-device.
     """
+
+
+@mcp.tool()
+def create_account(
+    bank: Bank,
+    account_type: AccountType,
+    balance: Optional[float] = None,
+    categories: Optional[list[Category]] = None,
+) -> dict:
+    """
+    Create a new bank account.
+
+    Args:
+        bank: The bank for the account
+        account_type: The type of account (debit, credit, saving, investment)
+        balance: Optional starting balance
+        categories: Optional list of category objects, each with 'name' and 'description' keys
+
+    Returns:
+        dict with the created account
+    """
+    from decimal import Decimal
+
+    account_id = HashGenerator.generate_hash(f"{bank.value}:{account_type.value}")
+    account = Account(
+        id=account_id,
+        bank=bank,
+        account_type=account_type,
+        balance=Decimal(str(balance)) if balance is not None else None,
+        categories=categories or [],
+    )
+    save_account(account)
+    return account.to_dict()
 
 
 @mcp.tool()
@@ -154,10 +188,10 @@ def get_transactions(
     transactions = load_transactions_by_account(account_id)
 
     if start_date is not None:
-        transactions = [t for t in transactions if t.date >= start_date]
+        transactions = [t for t in transactions if t.posting_date >= start_date]
 
     if end_date is not None:
-        transactions = [t for t in transactions if t.date <= end_date]
+        transactions = [t for t in transactions if t.posting_date <= end_date]
 
     return [t.to_dict() for t in transactions]
 

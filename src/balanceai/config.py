@@ -22,6 +22,10 @@ class Settings(BaseSettings):
         "AQICAHg7rDJp72oZrIfl2vnBxkvlcidlgcJm7juguFV/iuWU+AEppUF7FLTz2DaUQy+zza2kAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMORXUzcZf2KGd03SAAgEQgDueiST/NvgyT7IC3mlwlwxLBMyJPcIze+Yq8pNCtWKF61RG7G3xCdt1q7BgJWBlfzTt4XXVPDU84hU12g=="
     )
 
+    encrypted_gemini_api_key: str = (
+        "AQICAHg7rDJp72oZrIfl2vnBxkvlcidlgcJm7juguFV/iuWU+AEV3H++a4lvm7YgbGSkh4ZoAAAAhjCBgwYJKoZIhvcNAQcGoHYwdAIBADBvBgkqhkiG9w0BBwEwHgYJYIZIAWUDBAEuMBEEDHFXBeKWFqtCVn6LowIBEIBC+dNo4VUUtu4Txd1SSjSOs/laMm9xuXLALC4WKe88kzuIgmaOEFpYrFCn/YkfSOjHAVEnwhPfW+lXIPKB75xErGqn"
+    )
+
     _aws_clients: Optional[AWSClients] = None
 
     model_config = SettingsConfigDict(
@@ -66,6 +70,14 @@ class Settings(BaseSettings):
         assert self._aws_clients is not None, "AWS clients must be initialized"
         return self.decrypt_value(
             self.encrypted_plaid_api_token, self._aws_clients, self.kms_key_arn
+        )
+
+    @property
+    def gemini_api_key(self) -> str:
+        """Decrypted Gemini API key."""
+        assert self._aws_clients is not None, "AWS clients must be initialized"
+        return self.decrypt_value(
+            self.encrypted_gemini_api_key, self._aws_clients, self.kms_key_arn
         )
 
 

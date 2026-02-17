@@ -183,10 +183,20 @@ class ChaseParser(StatementParser):
             new_balance = Decimal(new_balance_str.replace(",", ""))
             previous_balance = new_balance - amount
 
+            description = description.strip()
+
+            # Extract transaction date from description (e.g., "Card Purchase 11/22 ...")
+            transaction_date = None
+            txn_date_match = re.search(r"(?:Card Purchase With Pin|Card Purchase Return|Card Purchase|Recurring Card Purchase|Card Transaction)\s+(\d{1,2}/\d{1,2})\s", description) or re.match(r"^(\d{1,2}/\d{1,2})\s", description)
+            if txn_date_match:
+                t_month, t_day = map(int, txn_date_match.group(1).split("/"))
+                transaction_date = self._infer_transaction_date(t_month, t_day, period)
+
             transactions.append(
                 {
-                    "date": txn_date,
-                    "description": description.strip(),
+                    "posting_date": txn_date,
+                    "transaction_date": transaction_date,
+                    "description": description,
                     "amount": amount,
                     "previous_balance": previous_balance,
                     "new_balance": new_balance,
@@ -203,23 +213,24 @@ class ChaseParser(StatementParser):
         raw_transactions = self._parse_transactions_from_text(text, period)
 
         # Sort by date
-        raw_transactions.sort(key=lambda t: t["date"])
+        raw_transactions.sort(key=lambda t: t["posting_date"])
 
         transactions = []
         for txn_data in raw_transactions:
             txn_id = Transaction.generate_id(
-                account_id, txn_data["date"], txn_data["description"], txn_data["amount"]
+                account_id, txn_data["posting_date"], txn_data["description"], txn_data["amount"]
             )
 
             transactions.append(
                 Transaction(
                     id=txn_id,
                     account_id=account_id,
-                    date=txn_data["date"],
+                    posting_date=txn_data["posting_date"],
                     description=txn_data["description"],
                     amount=txn_data["amount"],
                     previous_balance=txn_data["previous_balance"],
                     new_balance=txn_data["new_balance"],
+                    transaction_date=txn_data["transaction_date"],
                 )
             )
 
