@@ -11,6 +11,8 @@ requires-python = ">=3.12"
 dependencies = [
     "appdevcommons>=0.1.4",
     "boto3",
+    "google-cloud-aiplatform",
+    "openai",
     "mcp",
     "pdfplumber",
     "pydantic",

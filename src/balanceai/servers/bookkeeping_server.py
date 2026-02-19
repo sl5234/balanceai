@@ -18,7 +18,9 @@ from balanceai.journals.storage import (
     save_journal,
     update_journal as storage_update_journal,
 )
-from balanceai.models.journal import JournalEntry, JournalEntryInputConfig
+from balanceai.models.journal import JournalEntry, JournalEntryData, JournalEntryInputConfig
+from balanceai.utils.general_util import get_mime_type
+from balanceai.utils.ocr_util import OcrUtil
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +127,7 @@ def list_journals(account_id: Optional[str] = None) -> list[dict]:
 @mcp.tool()
 def create_journal_entry(
     journal_id: str,
-    input_config: dict,
+    input_config: JournalEntryInputConfig,
 ) -> dict:
     """
     Create a journal entry from an input configuration.
@@ -140,37 +142,21 @@ def create_journal_entry(
     Returns:
         dict with the updated journal
     """
-    config = JournalEntryInputConfig.from_dict(input_config)
-
     journal = find_journal_by_id(journal_id)
     if journal is None:
         raise ValueError(f"Journal {journal_id} not found")
 
-    # TODO: Perform OCR on image to extract entry details
-    # (date, account, description, debit, credit)
-    ocr_result = _perform_ocr(config.input_local_path)
-
-    entry = JournalEntry(
-        journal_entry_id=ocr_result["journal_entry_id"],
-        date=ocr_result["date"],
-        account=ocr_result["account"],
-        description=ocr_result["description"],
-        debit=ocr_result["debit"],
-        credit=ocr_result["credit"],
+    ocr_result = OcrUtil.executeWithOpenAi(
+        content=input_config.input_local_path.read_bytes(),
+        output_format=JournalEntryData,
+        mime_type=get_mime_type(input_config.input_local_path.suffix),
     )
+    entry = ocr_result.to_journal_entry()
 
     journal.add_entry(entry)
     storage_update_journal(journal)
 
     return journal.to_dict()
-
-
-def _perform_ocr(image_file: str) -> dict:
-    """Perform OCR on an image file to extract journal entry details.
-
-    TODO: Implement actual OCR logic.
-    """
-    raise NotImplementedError("OCR is not yet implemented")
 
 
 # TODO: Add a tool that identifies recurring transactions over months.  And notifies.

@@ -2,8 +2,10 @@ import datetime
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
+from pathlib import Path
 
 from appdevcommons.unique_id import UniqueIdGenerator
+from pydantic import BaseModel
 
 from balanceai.models.account import Account
 
@@ -19,16 +21,28 @@ class JournalAccount(str, Enum):
     LAND = "land"
 
 
-@dataclass
-class JournalEntryInputConfig:
-    input_local_path: str
+class JournalEntryData(BaseModel):
+    """JournalEntry fields without the entry ID. Used as the output format for OCR extraction."""
 
-    def to_dict(self) -> dict:
-        return {"input_local_path": self.input_local_path}
+    date: datetime.date
+    account: JournalAccount
+    description: str
+    debit: Decimal
+    credit: Decimal
 
-    @classmethod
-    def from_dict(cls, d: dict) -> "JournalEntryInputConfig":
-        return cls(input_local_path=d["input_local_path"])
+    def to_journal_entry(self) -> "JournalEntry":
+        return JournalEntry(
+            journal_entry_id=UniqueIdGenerator.generate_id(),
+            date=self.date,
+            account=self.account,
+            description=self.description,
+            debit=self.debit,
+            credit=self.credit,
+        )
+
+
+class JournalEntryInputConfig(BaseModel):
+    input_local_path: Path
 
 
 @dataclass

@@ -1,7 +1,13 @@
+import os
 from typing import Any
 
-from google.cloud import aiplatform  # type: ignore[import-untyped]
+import vertexai  # type: ignore[import-untyped]
 from vertexai.generative_models import GenerativeModel, Part  # type: ignore[import-untyped]
+
+vertexai.init(
+    project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
+    location=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"),
+)
 
 
 def generate_content(

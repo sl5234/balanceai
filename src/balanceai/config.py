@@ -26,6 +26,10 @@ class Settings(BaseSettings):
         "AQICAHg7rDJp72oZrIfl2vnBxkvlcidlgcJm7juguFV/iuWU+AEV3H++a4lvm7YgbGSkh4ZoAAAAhjCBgwYJKoZIhvcNAQcGoHYwdAIBADBvBgkqhkiG9w0BBwEwHgYJYIZIAWUDBAEuMBEEDHFXBeKWFqtCVn6LowIBEIBC+dNo4VUUtu4Txd1SSjSOs/laMm9xuXLALC4WKe88kzuIgmaOEFpYrFCn/YkfSOjHAVEnwhPfW+lXIPKB75xErGqn"
     )
 
+    encrypted_openai_api_key: str = (
+        "AQICAHg7rDJp72oZrIfl2vnBxkvlcidlgcJm7juguFV/iuWU+AEdbatti8JQNFOug7gUoSKpAAABCDCCAQQGCSqGSIb3DQEHBqCB9jCB8wIBADCB7QYJKoZIhvcNAQcBMB4GCWCGSAFlAwQBLjARBAzsgIXyaMSi8csf0K8CARCAgb8rm+S9FMXw5wvKUGcQqbiNuhk9P9CH1btdSqVwSEnUqYDZIMZS6Kk9U4hINowfWZdOZChAb2pm2oHF+3CoQ/535V1EHYy5Uv9YaP2gwrQ3hFklAZZhbPEkjUp5ddmT40nQZShmOypFmA/yfIds2eaheYG7aG9q47KLdhqm6qv6hbTLa+jR7TVylVNjYeInq+FhrHpJJc5cEsjsDmT5OhUXlSk9nOCPMjrs4hMkYWAFVpqJSsd4BF5RaTMwn2dwqg=="
+    )
+
     _aws_clients: Optional[AWSClients] = None
 
     model_config = SettingsConfigDict(
@@ -78,6 +82,14 @@ class Settings(BaseSettings):
         assert self._aws_clients is not None, "AWS clients must be initialized"
         return self.decrypt_value(
             self.encrypted_gemini_api_key, self._aws_clients, self.kms_key_arn
+        )
+
+    @property
+    def openai_api_key(self) -> str:
+        """Decrypted OpenAI API key."""
+        assert self._aws_clients is not None, "AWS clients must be initialized"
+        return self.decrypt_value(
+            self.encrypted_openai_api_key, self._aws_clients, self.kms_key_arn
         )
 
 
