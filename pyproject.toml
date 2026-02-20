@@ -12,6 +12,7 @@ dependencies = [
     "appdevcommons>=0.1.4",
     "boto3",
     "google-cloud-aiplatform",
+    "anthropic",
     "openai",
     "mcp",
     "pdfplumber",

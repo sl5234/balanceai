@@ -6,14 +6,14 @@ from pydantic import BaseModel
 from vertexai.generative_models import Part  # type: ignore[import-untyped]
 
 from balanceai.services.gcp_vertexai import generate_content
-from balanceai.services import openai_service
+from balanceai.services import anthropic_service
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_GCP_MODEL_ID = "gemini-2.0-flash"
-DEFAULT_OPENAI_MODEL_ID = "gpt-4o"
+DEFAULT_ANTHROPIC_MODEL_ID = "claude-sonnet-4-6"
 
 
 class OcrUtil:
@@ -61,20 +61,20 @@ class OcrUtil:
         return output_format.model_validate_json(cleaned)
 
     @staticmethod
-    def executeWithOpenAi(
+    def executeWithAnthropic(
         content: str | bytes,
         output_format: type[T],
         mime_type: str = "image/jpeg",
-        model_id: str = DEFAULT_OPENAI_MODEL_ID,
+        model_id: str = DEFAULT_ANTHROPIC_MODEL_ID,
     ) -> T:
         """
-        Extract structured data from text or image content using OpenAI.
+        Extract structured data from text or image content using Anthropic Claude.
 
         Args:
             content: Text string or raw image bytes.
             output_format: A Pydantic model class defining the expected output schema.
             mime_type: MIME type of the image when content is bytes.
-            model_id: The OpenAI model to use.
+            model_id: The Anthropic model to use.
 
         Returns:
             An instance of the output_format Pydantic model.
@@ -87,7 +87,7 @@ class OcrUtil:
             "Return ONLY valid JSON. No extra text."
         )
 
-        response_text = openai_service.response(
+        response_text = anthropic_service.messages(
             model_id=model_id,
             content=content,
             system_instruction=system_instruction,

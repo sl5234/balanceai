@@ -1,11 +1,11 @@
 import base64
 
-from openai import OpenAI
+import anthropic
 
 from balanceai.config import settings
 
 
-def response(
+def messages(
     model_id: str,
     content: str | bytes,
     system_instruction: str | None = None,
@@ -14,10 +14,10 @@ def response(
     temperature: float = 0.7,
 ) -> str:
     """
-    Send a request to an OpenAI model using the Responses API.
+    Send a messages request to an Anthropic Claude model.
 
     Args:
-        model_id: Model identifier (e.g., 'gpt-4o')
+        model_id: Model identifier (e.g., 'claude-sonnet-4-6')
         content: Text string or raw image bytes
         system_instruction: Optional system-level instructions
         mime_type: MIME type of the image when content is bytes
@@ -27,24 +27,32 @@ def response(
     Returns:
         The model's response text
     """
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
     if isinstance(content, bytes):
         b64 = base64.b64encode(content).decode("utf-8")
         input_content = [
-            {"type": "input_image", "image_url": f"data:{mime_type};base64,{b64}"},
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime_type,
+                    "data": b64,
+                },
+            }
         ]
     else:
-        input_content = [{"type": "input_text", "text": content}]
+        input_content = [{"type": "text", "text": content}]
 
-    user_input = [{"role": "user", "content": input_content}]
-
-    resp = client.responses.create(
+    kwargs = dict(
         model=model_id,
-        instructions=system_instruction,
-        input=user_input,
-        max_output_tokens=max_output_tokens,
+        max_tokens=max_output_tokens,
         temperature=temperature,
+        messages=[{"role": "user", "content": input_content}],
     )
+    if system_instruction is not None:
+        kwargs["system"] = system_instruction
 
-    return resp.output_text
+    resp = client.messages.create(**kwargs)
+
+    return resp.content[0].text

@@ -18,6 +18,7 @@ from balanceai.parsers import get_parser
 import balanceai.parsers.chase  # noqa: F401 - register parser
 from balanceai.constants import DEFAULT_CATEGORIES
 from balanceai.dagger.aws import AWSClients
+from balanceai.config import settings
 from balanceai.prompts.categorizer import build_categorization_prompt
 from balanceai.statements.storage import (
     load_accounts,
@@ -42,10 +43,10 @@ mcp = FastMCP(
     """,
 )
 
-_aws_clients = AWSClients()
+_aws_clients = AWSClients(region_name=settings.aws_region)
 if not _aws_clients.is_initialized():
     _aws_clients.initialize()
-
+settings.set_aws_clients(_aws_clients)
 
 @mcp.resource("balanceai://supported-banks")
 def get_supported_banks() -> str:

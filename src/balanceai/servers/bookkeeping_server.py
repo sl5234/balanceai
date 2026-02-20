@@ -11,6 +11,8 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
+from balanceai.dagger.aws import AWSClients
+from balanceai.config import settings
 from balanceai.models import Account, Journal
 from balanceai.journals.storage import (
     find_journal_by_id,
@@ -23,6 +25,11 @@ from balanceai.utils.general_util import get_mime_type
 from balanceai.utils.ocr_util import OcrUtil
 
 logger = logging.getLogger(__name__)
+
+_aws_clients = AWSClients(region_name=settings.aws_region)
+if not _aws_clients.is_initialized():
+    _aws_clients.initialize()
+settings.set_aws_clients(_aws_clients)
 
 mcp = FastMCP(
     "balanceai_bookkeeping",
@@ -146,7 +153,7 @@ def create_journal_entry(
     if journal is None:
         raise ValueError(f"Journal {journal_id} not found")
 
-    ocr_result = OcrUtil.executeWithOpenAi(
+    ocr_result = OcrUtil.executeWithAnthropic(
         content=input_config.input_local_path.read_bytes(),
         output_format=JournalEntryData,
         mime_type=get_mime_type(input_config.input_local_path.suffix),
