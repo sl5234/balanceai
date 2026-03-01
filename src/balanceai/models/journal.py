@@ -71,8 +71,13 @@ class JournalEntryDataSet(BaseModel):
     )
 
 
-class JournalEntryInputConfig(BaseModel):
+class ReceiptInputConfig(BaseModel):
     input_local_path: Path
+
+
+class PlaidTransactionInputConfig(BaseModel):
+    transactions: dict
+
 
 
 @dataclass

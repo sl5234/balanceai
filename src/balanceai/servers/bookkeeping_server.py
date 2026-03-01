@@ -14,7 +14,6 @@ from mcp.server.fastmcp import FastMCP
 from balanceai.dagger.aws import AWSClients
 from balanceai.config import settings
 from balanceai.models import Account, Journal
-from balanceai.journals.finder import find_journal_entry as finder_find_journal_entry
 from balanceai.journals.storage import (
     find_journal_by_id,
     load_journal_entries,
@@ -22,8 +21,11 @@ from balanceai.journals.storage import (
     save_journal,
     update_journal as storage_update_journal,
 )
-from balanceai.models.journal import JournalEntry, JournalEntryDataSet, JournalEntryInputConfig
-from balanceai.utils.general_util import get_mime_type
+from balanceai.helpers.journal_entry import (
+    handle_create_or_update_journal_entries_for_receipt,
+    handle_create_or_update_journal_entries_for_transactions,
+)
+from balanceai.models.journal import JournalEntry
 
 logger = logging.getLogger(__name__)
 
@@ -133,52 +135,54 @@ def list_journals(account_id: Optional[str] = None) -> list[dict]:
 
 
 @mcp.tool()
-def create_or_update_journal_entries(
+def create_or_update_journal_entries_for_receipt(
     journal_id: str,
-    input_config: JournalEntryInputConfig,
+    input_local_path: str,
 ) -> dict:
     """
-    Create or update a journal entry from an image.
+    Create or update journal entries from a receipt image.
 
-    Performs OCR on the provided image to extract transaction details.
-    If a matching entry already exists (same date, account, and similar
-    description), the existing entry is updated with the latest values
-    for description, debit, credit, and tax — preserving its original ID.
+    Uses an LLM to perform OCR on the image and extract journal entries using
+    double-entry bookkeeping.
+
+    If a matching entry already exists (same date, account, and similar description),
+    the existing entry is updated with the latest values — preserving its original ID.
     Otherwise, a new entry is created.
 
     Args:
-        journal_id: The journal ID to add or update the entry in
-        input_config: Input configuration with input_local_path pointing to an image file
+        journal_id: The journal ID to add or update entries in
+        input_local_path: Local path to the receipt image file
 
     Returns:
         dict with the updated journal
     """
-    journal = find_journal_by_id(journal_id)
-    if journal is None:
-        raise ValueError(f"Journal {journal_id} not found")
+    from pathlib import Path
+    return handle_create_or_update_journal_entries_for_receipt(journal_id, Path(input_local_path))
 
-    from balanceai.utils.ocr_util import OcrUtil
-    ocr_result = OcrUtil.executeWithAnthropic(
-        content=input_config.input_local_path.read_bytes(),
-        output_format=JournalEntryDataSet,
-        mime_type=get_mime_type(input_config.input_local_path.suffix),
-    )
 
-    for entry_data in ocr_result.entries:
-        entry = entry_data.to_journal_entry()
+@mcp.tool()
+def create_or_update_journal_entries_for_transactions(
+    journal_id: str,
+    transactions: dict,
+) -> dict:
+    """
+    Create or update journal entries from Plaid transactions.
 
-        # If a matching entry exists, remove it and re-add with updated values,
-        # preserving the original journal_entry_id.
-        existing = finder_find_journal_entry(journal_id, entry)
-        if existing is not None:
-            entry.journal_entry_id = existing.journal_entry_id
-            journal.remove_entry(existing.journal_entry_id)
+    Uses an LLM to map structured transaction data to journal entries with appropriate
+    debit/credit/account classifications using double-entry bookkeeping.
 
-        journal.add_entry(entry)
+    If a matching entry already exists (same date, account, and similar description),
+    the existing entry is updated with the latest values — preserving its original ID.
+    Otherwise, a new entry is created.
 
-    storage_update_journal(journal)
+    Args:
+        journal_id: The journal ID to add or update entries in
+        transactions: Plaid transactions response object (with added, modified, removed, etc.)
 
-    return journal.to_dict()
+    Returns:
+        dict with the updated journal
+    """
+    return handle_create_or_update_journal_entries_for_transactions(journal_id, transactions)
 
 
 # TODO: Add a tool that identifies recurring transactions over months.  And notifies.

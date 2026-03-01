@@ -20,6 +20,7 @@ from balanceai.constants import DEFAULT_CATEGORIES
 from balanceai.dagger.aws import AWSClients
 from balanceai.config import settings
 from balanceai.prompts.categorizer import build_categorization_prompt
+from balanceai.services.plaid import transactions_sync
 from balanceai.statements.storage import (
     load_accounts,
     load_transactions_by_account,
@@ -293,6 +294,26 @@ def categorize_transaction(
         return {"error": f"Failed to update transaction {txn.id}"}
 
     return {"success": True, "transaction_id": txn.id, "category": category}
+
+
+@mcp.tool()
+def list_transactions(
+    access_token: str,
+    cursor: Optional[str] = None,
+    account_id: Optional[str] = None,
+) -> dict:
+    """
+    List transactions for a Plaid item via /transactions/sync.
+
+    Args:
+        access_token: The Plaid access token for the item
+        cursor: Cursor from a previous sync to fetch only new updates. Omit to fetch full history.
+        account_id: Filter results to a specific account
+
+    Returns:
+        Plaid transactions response with added, modified, removed, has_more, and next_cursor
+    """
+    return transactions_sync(access_token, cursor=cursor, account_id=account_id)
 
 
 if __name__ == "__main__":
