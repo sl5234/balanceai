@@ -1,8 +1,13 @@
 import json
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel, ValidationError
+
+# anthropic is not installed in the test environment — stub it out so that
+# balanceai.services.anthropic_service can be imported and patched.
+sys.modules.setdefault("anthropic", MagicMock())
 
 from balanceai.utils.ocr_util import OcrUtil, _extract_json
 
@@ -34,51 +39,37 @@ class TestExtractJson:
 
 
 # ---------------------------------------------------------------------------
-# executeWithGcpVertexAi
+# executeWithAnthropic
 # ---------------------------------------------------------------------------
 
-class TestOcrUtilGcpText:
-    @patch("balanceai.utils.ocr_util.generate_content")
-    @patch("balanceai.utils.ocr_util.Part")
-    def test_text_content_returns_valid_model(self, mock_part, mock_generate):
-        mock_generate.return_value = '{"name": "Coffee Shop", "amount": 4.50}'
-        mock_part.from_text.return_value = MagicMock()
 
-        result = OcrUtil.executeWithGcpVertexAi(content="some receipt text", output_format=SampleOutput)
+class TestOcrUtilAnthropicText:
+    @patch("balanceai.utils.ocr_util.anthropic_service.messages")
+    def test_text_content_returns_valid_model(self, mock_messages):
+        mock_messages.return_value = '{"name": "Coffee Shop", "amount": 4.50}'
+
+        result = OcrUtil.executeWithAnthropic(content="some receipt text", output_format=SampleOutput)
 
         assert isinstance(result, SampleOutput)
         assert result.name == "Coffee Shop"
         assert result.amount == 4.50
 
-    @patch("balanceai.utils.ocr_util.generate_content")
-    @patch("balanceai.utils.ocr_util.Part")
-    def test_text_content_calls_part_from_text(self, mock_part, mock_generate):
-        mock_generate.return_value = '{"name": "x", "amount": 0}'
+    @patch("balanceai.utils.ocr_util.anthropic_service.messages")
+    def test_fenced_response_parses_correctly(self, mock_messages):
+        mock_messages.return_value = '```json\n{"name": "Tea", "amount": 3.00}\n```'
 
-        OcrUtil.executeWithGcpVertexAi(content="hello", output_format=SampleOutput)
-
-        mock_part.from_text.assert_called_once_with("hello")
-        mock_part.from_data.assert_not_called()
-
-    @patch("balanceai.utils.ocr_util.generate_content")
-    @patch("balanceai.utils.ocr_util.Part")
-    def test_fenced_response_parses_correctly(self, mock_part, mock_generate):
-        mock_generate.return_value = '```json\n{"name": "Tea", "amount": 3.00}\n```'
-
-        result = OcrUtil.executeWithGcpVertexAi(content="receipt text", output_format=SampleOutput)
+        result = OcrUtil.executeWithAnthropic(content="receipt text", output_format=SampleOutput)
 
         assert result.name == "Tea"
         assert result.amount == 3.00
 
 
-class TestOcrUtilGcpImage:
-    @patch("balanceai.utils.ocr_util.generate_content")
-    @patch("balanceai.utils.ocr_util.Part")
-    def test_bytes_content_returns_valid_model(self, mock_part, mock_generate):
-        mock_generate.return_value = '{"name": "Grocery", "amount": 25.00}'
-        mock_part.from_data.return_value = MagicMock()
+class TestOcrUtilAnthropicImage:
+    @patch("balanceai.utils.ocr_util.anthropic_service.messages")
+    def test_bytes_content_returns_valid_model(self, mock_messages):
+        mock_messages.return_value = '{"name": "Grocery", "amount": 25.00}'
 
-        result = OcrUtil.executeWithGcpVertexAi(
+        result = OcrUtil.executeWithAnthropic(
             content=b"\x89PNG\r\n",
             output_format=SampleOutput,
             mime_type="image/png",
@@ -88,155 +79,54 @@ class TestOcrUtilGcpImage:
         assert result.name == "Grocery"
         assert result.amount == 25.00
 
-    @patch("balanceai.utils.ocr_util.generate_content")
-    @patch("balanceai.utils.ocr_util.Part")
-    def test_bytes_content_calls_part_from_data(self, mock_part, mock_generate):
-        mock_generate.return_value = '{"name": "x", "amount": 0}'
-        image_bytes = b"\xff\xd8\xff\xe0"
+    @patch("balanceai.utils.ocr_util.anthropic_service.messages")
+    def test_bytes_passes_mime_type(self, mock_messages):
+        mock_messages.return_value = '{"name": "x", "amount": 0}'
 
-        OcrUtil.executeWithGcpVertexAi(content=image_bytes, output_format=SampleOutput, mime_type="image/jpeg")
+        OcrUtil.executeWithAnthropic(content=b"\xff\xd8", output_format=SampleOutput, mime_type="image/jpeg")
 
-        mock_part.from_data.assert_called_once_with(data=image_bytes, mime_type="image/jpeg")
-        mock_part.from_text.assert_not_called()
+        assert mock_messages.call_args.kwargs["mime_type"] == "image/jpeg"
 
 
-class TestOcrUtilGcpArgumentPassing:
-    @patch("balanceai.utils.ocr_util.generate_content")
-    @patch("balanceai.utils.ocr_util.Part")
-    def test_default_model_id(self, mock_part, mock_generate):
-        mock_generate.return_value = '{"name": "x", "amount": 0}'
+class TestOcrUtilAnthropicArgumentPassing:
+    @patch("balanceai.utils.ocr_util.anthropic_service.messages")
+    def test_default_model_id(self, mock_messages):
+        mock_messages.return_value = '{"name": "x", "amount": 0}'
 
-        OcrUtil.executeWithGcpVertexAi(content="text", output_format=SampleOutput)
+        OcrUtil.executeWithAnthropic(content="text", output_format=SampleOutput)
 
-        assert mock_generate.call_args.kwargs["model_id"] == "gemini-2.0-flash"
+        assert mock_messages.call_args.kwargs["model_id"] == "claude-sonnet-4-6"
 
-    @patch("balanceai.utils.ocr_util.generate_content")
-    @patch("balanceai.utils.ocr_util.Part")
-    def test_custom_model_id(self, mock_part, mock_generate):
-        mock_generate.return_value = '{"name": "x", "amount": 0}'
+    @patch("balanceai.utils.ocr_util.anthropic_service.messages")
+    def test_custom_model_id(self, mock_messages):
+        mock_messages.return_value = '{"name": "x", "amount": 0}'
 
-        OcrUtil.executeWithGcpVertexAi(content="text", output_format=SampleOutput, model_id="gemini-pro")
+        OcrUtil.executeWithAnthropic(content="text", output_format=SampleOutput, model_id="claude-opus-4-6")
 
-        assert mock_generate.call_args.kwargs["model_id"] == "gemini-pro"
+        assert mock_messages.call_args.kwargs["model_id"] == "claude-opus-4-6"
 
-    @patch("balanceai.utils.ocr_util.generate_content")
-    @patch("balanceai.utils.ocr_util.Part")
-    def test_system_instruction_contains_schema(self, mock_part, mock_generate):
-        mock_generate.return_value = '{"name": "x", "amount": 0}'
+    @patch("balanceai.utils.ocr_util.anthropic_service.messages")
+    def test_system_instruction_contains_schema(self, mock_messages):
+        mock_messages.return_value = '{"name": "x", "amount": 0}'
 
-        OcrUtil.executeWithGcpVertexAi(content="text", output_format=SampleOutput)
+        OcrUtil.executeWithAnthropic(content="text", output_format=SampleOutput)
 
-        system_instruction = mock_generate.call_args.kwargs["system_instruction"]
+        system_instruction = mock_messages.call_args.kwargs["system_instruction"]
         expected_schema = json.dumps(SampleOutput.model_json_schema(), indent=2)
         assert expected_schema in system_instruction
 
 
-class TestOcrUtilGcpErrors:
-    @patch("balanceai.utils.ocr_util.generate_content")
-    @patch("balanceai.utils.ocr_util.Part")
-    def test_invalid_json_raises(self, mock_part, mock_generate):
-        mock_generate.return_value = "not valid json at all"
+class TestOcrUtilAnthropicErrors:
+    @patch("balanceai.utils.ocr_util.anthropic_service.messages")
+    def test_invalid_json_raises(self, mock_messages):
+        mock_messages.return_value = "not valid json at all"
 
         with pytest.raises(ValidationError):
-            OcrUtil.executeWithGcpVertexAi(content="text", output_format=SampleOutput)
+            OcrUtil.executeWithAnthropic(content="text", output_format=SampleOutput)
 
-    @patch("balanceai.utils.ocr_util.generate_content")
-    @patch("balanceai.utils.ocr_util.Part")
-    def test_wrong_schema_raises(self, mock_part, mock_generate):
-        mock_generate.return_value = '{"wrong_field": "value"}'
-
-        with pytest.raises(ValidationError):
-            OcrUtil.executeWithGcpVertexAi(content="text", output_format=SampleOutput)
-
-
-# ---------------------------------------------------------------------------
-# executeWithOpenAi
-# ---------------------------------------------------------------------------
-
-class TestOcrUtilOpenAiText:
-    @patch("balanceai.utils.ocr_util.openai_service.response")
-    def test_text_content_returns_valid_model(self, mock_generate):
-        mock_generate.return_value = '{"name": "Coffee Shop", "amount": 4.50}'
-
-        result = OcrUtil.executeWithOpenAi(content="some receipt text", output_format=SampleOutput)
-
-        assert isinstance(result, SampleOutput)
-        assert result.name == "Coffee Shop"
-        assert result.amount == 4.50
-
-    @patch("balanceai.utils.ocr_util.openai_service.response")
-    def test_fenced_response_parses_correctly(self, mock_generate):
-        mock_generate.return_value = '```json\n{"name": "Tea", "amount": 3.00}\n```'
-
-        result = OcrUtil.executeWithOpenAi(content="receipt text", output_format=SampleOutput)
-
-        assert result.name == "Tea"
-        assert result.amount == 3.00
-
-
-class TestOcrUtilOpenAiImage:
-    @patch("balanceai.utils.ocr_util.openai_service.response")
-    def test_bytes_content_returns_valid_model(self, mock_generate):
-        mock_generate.return_value = '{"name": "Grocery", "amount": 25.00}'
-
-        result = OcrUtil.executeWithOpenAi(
-            content=b"\x89PNG\r\n",
-            output_format=SampleOutput,
-            mime_type="image/png",
-        )
-
-        assert isinstance(result, SampleOutput)
-        assert result.name == "Grocery"
-        assert result.amount == 25.00
-
-    @patch("balanceai.utils.ocr_util.openai_service.response")
-    def test_bytes_passes_mime_type(self, mock_generate):
-        mock_generate.return_value = '{"name": "x", "amount": 0}'
-
-        OcrUtil.executeWithOpenAi(content=b"\xff\xd8", output_format=SampleOutput, mime_type="image/jpeg")
-
-        assert mock_generate.call_args.kwargs["mime_type"] == "image/jpeg"
-
-
-class TestOcrUtilOpenAiArgumentPassing:
-    @patch("balanceai.utils.ocr_util.openai_service.response")
-    def test_default_model_id(self, mock_generate):
-        mock_generate.return_value = '{"name": "x", "amount": 0}'
-
-        OcrUtil.executeWithOpenAi(content="text", output_format=SampleOutput)
-
-        assert mock_generate.call_args.kwargs["model_id"] == "gpt-4o"
-
-    @patch("balanceai.utils.ocr_util.openai_service.response")
-    def test_custom_model_id(self, mock_generate):
-        mock_generate.return_value = '{"name": "x", "amount": 0}'
-
-        OcrUtil.executeWithOpenAi(content="text", output_format=SampleOutput, model_id="gpt-4-turbo")
-
-        assert mock_generate.call_args.kwargs["model_id"] == "gpt-4-turbo"
-
-    @patch("balanceai.utils.ocr_util.openai_service.response")
-    def test_system_instruction_contains_schema(self, mock_generate):
-        mock_generate.return_value = '{"name": "x", "amount": 0}'
-
-        OcrUtil.executeWithOpenAi(content="text", output_format=SampleOutput)
-
-        system_instruction = mock_generate.call_args.kwargs["system_instruction"]
-        expected_schema = json.dumps(SampleOutput.model_json_schema(), indent=2)
-        assert expected_schema in system_instruction
-
-
-class TestOcrUtilOpenAiErrors:
-    @patch("balanceai.utils.ocr_util.openai_service.response")
-    def test_invalid_json_raises(self, mock_generate):
-        mock_generate.return_value = "not valid json at all"
+    @patch("balanceai.utils.ocr_util.anthropic_service.messages")
+    def test_wrong_schema_raises(self, mock_messages):
+        mock_messages.return_value = '{"wrong_field": "value"}'
 
         with pytest.raises(ValidationError):
-            OcrUtil.executeWithOpenAi(content="text", output_format=SampleOutput)
-
-    @patch("balanceai.utils.ocr_util.openai_service.response")
-    def test_wrong_schema_raises(self, mock_generate):
-        mock_generate.return_value = '{"wrong_field": "value"}'
-
-        with pytest.raises(ValidationError):
-            OcrUtil.executeWithOpenAi(content="text", output_format=SampleOutput)
+            OcrUtil.executeWithAnthropic(content="text", output_format=SampleOutput)

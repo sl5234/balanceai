@@ -14,15 +14,16 @@ from mcp.server.fastmcp import FastMCP
 from balanceai.dagger.aws import AWSClients
 from balanceai.config import settings
 from balanceai.models import Account, Journal
+from balanceai.journals.finder import find_journal_entry as finder_find_journal_entry
 from balanceai.journals.storage import (
     find_journal_by_id,
+    load_journal_entries,
     load_journals,
     save_journal,
     update_journal as storage_update_journal,
 )
-from balanceai.models.journal import JournalEntry, JournalEntryData, JournalEntryInputConfig
+from balanceai.models.journal import JournalEntry, JournalEntryDataSet, JournalEntryInputConfig
 from balanceai.utils.general_util import get_mime_type
-from balanceai.utils.ocr_util import OcrUtil
 
 logger = logging.getLogger(__name__)
 
@@ -132,18 +133,21 @@ def list_journals(account_id: Optional[str] = None) -> list[dict]:
 
 
 @mcp.tool()
-def create_journal_entry(
+def create_or_update_journal_entries(
     journal_id: str,
     input_config: JournalEntryInputConfig,
 ) -> dict:
     """
-    Create a journal entry from an input configuration.
+    Create or update a journal entry from an image.
 
-    Performs OCR on the provided image to extract transaction details,
-    creates a JournalEntry, and adds it to the specified journal.
+    Performs OCR on the provided image to extract transaction details.
+    If a matching entry already exists (same date, account, and similar
+    description), the existing entry is updated with the latest values
+    for description, debit, credit, and tax — preserving its original ID.
+    Otherwise, a new entry is created.
 
     Args:
-        journal_id: The journal ID to add the entry to
+        journal_id: The journal ID to add or update the entry in
         input_config: Input configuration with input_local_path pointing to an image file
 
     Returns:
@@ -153,14 +157,25 @@ def create_journal_entry(
     if journal is None:
         raise ValueError(f"Journal {journal_id} not found")
 
+    from balanceai.utils.ocr_util import OcrUtil
     ocr_result = OcrUtil.executeWithAnthropic(
         content=input_config.input_local_path.read_bytes(),
-        output_format=JournalEntryData,
+        output_format=JournalEntryDataSet,
         mime_type=get_mime_type(input_config.input_local_path.suffix),
     )
-    entry = ocr_result.to_journal_entry()
 
-    journal.add_entry(entry)
+    for entry_data in ocr_result.entries:
+        entry = entry_data.to_journal_entry()
+
+        # If a matching entry exists, remove it and re-add with updated values,
+        # preserving the original journal_entry_id.
+        existing = finder_find_journal_entry(journal_id, entry)
+        if existing is not None:
+            entry.journal_entry_id = existing.journal_entry_id
+            journal.remove_entry(existing.journal_entry_id)
+
+        journal.add_entry(entry)
+
     storage_update_journal(journal)
 
     return journal.to_dict()
@@ -168,6 +183,21 @@ def create_journal_entry(
 
 # TODO: Add a tool that identifies recurring transactions over months.  And notifies.
 # TODO: Add a tool that identifies a payment that needs to be made.  And proactively check debit account for sufficient funds.  And notifies.
+
+
+@mcp.tool()
+def list_journal_entries(journal_id: str, date: Optional[date] = None) -> list[dict]:
+    """
+    List entries for a given journal, optionally filtered by date.
+
+    Args:
+        journal_id: The journal ID to retrieve entries for
+        date: Optional date to filter entries by
+
+    Returns:
+        List of journal entries
+    """
+    return [e.to_dict() for e in load_journal_entries(journal_id, date=date)]
 
 
 if __name__ == "__main__":

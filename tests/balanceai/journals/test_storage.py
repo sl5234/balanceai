@@ -8,6 +8,7 @@ import pytest
 from balanceai.journals.storage import (
     DATA_DIR,
     _save_all_journals,
+    load_journal_entries,
     load_journals,
     save_journal,
     update_journal,
@@ -35,6 +36,18 @@ def sample_entry():
         account=JournalAccount.EQUIPMENT,
         description="Office supplies",
         debit=Decimal("50.00"),
+        credit=Decimal("0.00"),
+    )
+
+
+@pytest.fixture
+def sample_entry_2():
+    return JournalEntry(
+        journal_entry_id="j2",
+        date=datetime.date(2026, 1, 20),
+        account=JournalAccount.CASH,
+        description="Grocery run",
+        debit=Decimal("32.00"),
         credit=Decimal("0.00"),
     )
 
@@ -239,3 +252,95 @@ class TestUpdateJournal:
         loaded = load_journals()
         assert loaded[0].description == "January journal"
         assert loaded[1].description == "Updated second"
+
+
+# ---------------------------------------------------------------------------
+# load_journal_entries
+# ---------------------------------------------------------------------------
+
+
+class TestLoadJournalEntries:
+    def test_returns_all_entries_for_journal(self, sample_journal, sample_entry):
+        save_journal(sample_journal)
+
+        entries = load_journal_entries(sample_journal.journal_id)
+
+        assert len(entries) == 1
+        assert entries[0].journal_entry_id == sample_entry.journal_entry_id
+
+    def test_returns_empty_list_when_journal_has_no_entries(self, sample_account):
+        journal = Journal(
+            account=sample_account,
+            description="Empty journal",
+            start_date=datetime.date(2026, 1, 1),
+            end_date=datetime.date(2026, 1, 31),
+            entries=[],
+        )
+        save_journal(journal)
+
+        entries = load_journal_entries(journal.journal_id)
+
+        assert entries == []
+
+    def test_raises_when_journal_not_found(self):
+        with pytest.raises(ValueError, match="nonexistent"):
+            load_journal_entries("nonexistent")
+
+    def test_filters_entries_by_date(self, sample_account, sample_entry, sample_entry_2):
+        journal = Journal(
+            account=sample_account,
+            description="January journal",
+            start_date=datetime.date(2026, 1, 1),
+            end_date=datetime.date(2026, 1, 31),
+            entries=[sample_entry, sample_entry_2],
+        )
+        save_journal(journal)
+
+        entries = load_journal_entries(journal.journal_id, date=sample_entry.date)
+
+        assert len(entries) == 1
+        assert entries[0].journal_entry_id == sample_entry.journal_entry_id
+
+    def test_returns_empty_list_when_no_entries_match_date(self, sample_journal):
+        save_journal(sample_journal)
+
+        entries = load_journal_entries(sample_journal.journal_id, date=datetime.date(2020, 6, 1))
+
+        assert entries == []
+
+    def test_returns_all_entries_when_date_not_provided(self, sample_account, sample_entry, sample_entry_2):
+        journal = Journal(
+            account=sample_account,
+            description="January journal",
+            start_date=datetime.date(2026, 1, 1),
+            end_date=datetime.date(2026, 1, 31),
+            entries=[sample_entry, sample_entry_2],
+        )
+        save_journal(journal)
+
+        entries = load_journal_entries(journal.journal_id)
+
+        assert len(entries) == 2
+
+    def test_returns_entries_only_for_requested_journal(self, sample_account, sample_account_2, sample_entry, sample_entry_2):
+        journal_1 = Journal(
+            account=sample_account,
+            description="Journal 1",
+            start_date=datetime.date(2026, 1, 1),
+            end_date=datetime.date(2026, 1, 31),
+            entries=[sample_entry],
+        )
+        journal_2 = Journal(
+            account=sample_account_2,
+            description="Journal 2",
+            start_date=datetime.date(2026, 1, 1),
+            end_date=datetime.date(2026, 1, 31),
+            entries=[sample_entry_2],
+        )
+        save_journal(journal_1)
+        save_journal(journal_2)
+
+        entries = load_journal_entries(journal_1.journal_id)
+
+        assert len(entries) == 1
+        assert entries[0].journal_entry_id == sample_entry.journal_entry_id

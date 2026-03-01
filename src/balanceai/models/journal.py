@@ -5,7 +5,7 @@ from enum import Enum
 from pathlib import Path
 
 from appdevcommons.unique_id import UniqueIdGenerator
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from balanceai.models.account import Account
 
@@ -14,6 +14,7 @@ class JournalAccount(str, Enum):
     CASH = "cash"
     ACCOUNTS_PAYABLE = "accounts_payable"
     ACCOUNTS_RECEIVABLE = "accounts_receivable"
+    EXPENSE = "expense"
     GENERAL = "general"
     SALES = "sales"
     EQUIPMENT = "equipment"
@@ -25,8 +26,27 @@ class JournalEntryData(BaseModel):
     """JournalEntry fields without the entry ID. Used as the output format for OCR extraction."""
 
     date: datetime.date
-    account: JournalAccount
-    description: str
+    account: JournalAccount = Field(
+        description=(
+            "The account type for this entry. Use 'cash' for point-of-sale or cash purchases. "
+            "Use 'expense' for general expenses like groceries or shopping. "
+            "Use 'accounts_payable' for bills owed to vendors. "
+            "Use 'accounts_receivable' for money owed to you. "
+            "Use 'sales' for revenue transactions. "
+            "Use 'equipment' for equipment or asset purchases. "
+            "Use 'wage' for payroll or salary payments. "
+            "Use 'land' for real estate or land transactions. "
+            "Use 'general' only when none of the above apply."
+        )
+    )
+    description: str = Field(
+        description=(
+            "Briefly describe the transaction. Include only enough information to accurately "
+            "remind you where the money came from or why it was spent. "
+            "Examples: 'Loan from Liberty Bank.', 'Tax return from IRS.', "
+            "'Grocery purchase from Trader Joe's.', 'Repairs for car windshield from Chuck's repair shop.'"
+        )
+    )
     debit: Decimal
     credit: Decimal
 
@@ -41,6 +61,16 @@ class JournalEntryData(BaseModel):
         )
 
 
+class JournalEntryDataSet(BaseModel):
+    entries: list[JournalEntryData] = Field(
+        description=(
+            "The journal entries for this transaction. "
+            "Use double-entry bookkeeping: each transaction should have at least two entries "
+            "where debits equal credits."
+        )
+    )
+
+
 class JournalEntryInputConfig(BaseModel):
     input_local_path: Path
 
@@ -53,6 +83,7 @@ class JournalEntry:
     description: str
     debit: Decimal
     credit: Decimal
+    tax: Decimal = Decimal("0")
 
     def to_dict(self) -> dict:
         return {
@@ -62,6 +93,7 @@ class JournalEntry:
             "description": self.description,
             "debit": str(self.debit),
             "credit": str(self.credit),
+            "tax": str(self.tax),
         }
 
     @classmethod
@@ -73,6 +105,7 @@ class JournalEntry:
             description=d["description"],
             debit=Decimal(d["debit"]),
             credit=Decimal(d["credit"]),
+            tax=Decimal(d.get("tax", "0")),
         )
 
 

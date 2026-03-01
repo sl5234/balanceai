@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from balanceai.models import Journal
+from balanceai.models.journal import JournalEntry
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,17 @@ def find_journal_by_id(journal_id: str) -> Journal | None:
         if journal.journal_id == journal_id:
             return journal
     return None
+
+
+def load_journal_entries(journal_id: str, date: Optional[datetime.date] = None) -> list[JournalEntry]:
+    """Load entries for a journal, optionally filtered by date."""
+    journal = find_journal_by_id(journal_id)
+    if journal is None:
+        raise ValueError(f"Journal {journal_id} not found")
+    entries = journal.entries
+    if date is not None:
+        entries = [e for e in entries if e.date == date]
+    return entries
 
 
 def update_journal(updated: Journal) -> None:
