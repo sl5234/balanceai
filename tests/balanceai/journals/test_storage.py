@@ -33,7 +33,7 @@ def sample_entry():
     return JournalEntry(
         journal_entry_id="j1",
         date=datetime.date(2026, 1, 15),
-        account=JournalAccount.EQUIPMENT,
+        account=JournalAccount.ESSENTIALS_EXPENSE,
         description="Office supplies",
         debit=Decimal("50.00"),
         credit=Decimal("0.00"),

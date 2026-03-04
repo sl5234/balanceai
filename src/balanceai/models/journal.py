@@ -14,12 +14,10 @@ class JournalAccount(str, Enum):
     CASH = "cash"
     ACCOUNTS_PAYABLE = "accounts_payable"
     ACCOUNTS_RECEIVABLE = "accounts_receivable"
-    EXPENSE = "expense"
-    GENERAL = "general"
+    RENT = "rent"
+    ESSENTIALS_EXPENSE = "essential_expense"
+    NON_ESSENTIALS_EXPENSE = "non_essential_expense"
     SALES = "sales"
-    EQUIPMENT = "equipment"
-    WAGE = "wage"
-    LAND = "land"
 
 
 class JournalEntryData(BaseModel):
@@ -29,14 +27,12 @@ class JournalEntryData(BaseModel):
     account: JournalAccount = Field(
         description=(
             "The account type for this entry. Use 'cash' for point-of-sale or cash purchases. "
-            "Use 'expense' for general expenses like groceries or shopping. "
             "Use 'accounts_payable' for bills owed to vendors. "
             "Use 'accounts_receivable' for money owed to you. "
-            "Use 'sales' for revenue transactions. "
-            "Use 'equipment' for equipment or asset purchases. "
-            "Use 'wage' for payroll or salary payments. "
-            "Use 'land' for real estate or land transactions. "
-            "Use 'general' only when none of the above apply."
+            "Use 'rent' for rent payments. "
+            "Use 'essential_expense' for necessary expenses like groceries (specifically, meat, vegetables, dog food), car insurance, books, gas, hospital visits, haircuts. "
+            "Use 'essential_expense' for non-essential expenses like groceries (snacks, fruits, dog treats), dining, cigarettes, vet visits, parking, etc. "
+            "Use 'sales' for revenue transactions like income. "
         )
     )
     description: str = Field(

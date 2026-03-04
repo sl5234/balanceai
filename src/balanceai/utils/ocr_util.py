@@ -4,7 +4,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from balanceai.services import anthropic_service
+from balanceai.services import anthropic
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class OcrUtil:
             "Return ONLY valid JSON. No extra text."
         )
 
-        response_text = anthropic_service.messages(
+        response_text = anthropic.messages(
             model_id=model_id,
             content=content,
             system_instruction=system_instruction,

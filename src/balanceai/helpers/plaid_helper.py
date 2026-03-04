@@ -1,4 +1,4 @@
-from balanceai.utils.plaid_util import extract_journal_entries_from_plaid_transaction
+from balanceai.utils.journal_entry_util import extract_journal_entries_from_plaid_transaction
 
 
 def extract_journal_entries_from_transactions(transactions: dict) -> dict:

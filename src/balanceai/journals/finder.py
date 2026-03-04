@@ -35,7 +35,7 @@ def find_journal_entry(journal_id: str, candidate: JournalEntry) -> JournalEntry
         f"Candidate entry:\n{json.dumps(candidate.to_dict(), indent=2)}"
     )
 
-    from balanceai.services.anthropic_service import messages
+    from balanceai.services.anthropic import messages
     response = messages(
         model_id=_MODEL_ID,
         content=prompt,

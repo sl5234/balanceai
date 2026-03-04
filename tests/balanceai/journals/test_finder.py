@@ -57,7 +57,7 @@ class TestFindJournalEntryNoLlm:
         different_account_entry = JournalEntry(
             journal_entry_id="other-1",
             date=candidate.date,
-            account=JournalAccount.EQUIPMENT,
+            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Some equipment",
             debit=Decimal("32.02"),
             credit=Decimal("0.00"),
@@ -68,7 +68,7 @@ class TestFindJournalEntryNoLlm:
 
     def test_does_not_call_llm_when_no_candidates(self, candidate):
         with patch("balanceai.journals.finder.load_journal_entries", return_value=[]):
-            with patch("balanceai.services.anthropic_service.messages") as mock_llm:
+            with patch("balanceai.services.anthropic.messages") as mock_llm:
                 find_journal_entry("journal-1", candidate)
         mock_llm.assert_not_called()
 
@@ -81,28 +81,28 @@ class TestFindJournalEntryNoLlm:
 class TestFindJournalEntryWithLlm:
     def test_returns_matching_entry_when_llm_finds_match(self, candidate, existing):
         with patch("balanceai.journals.finder.load_journal_entries", return_value=[existing]):
-            with patch("balanceai.services.anthropic_service.messages") as mock_llm:
+            with patch("balanceai.services.anthropic.messages") as mock_llm:
                 mock_llm.return_value = _llm_response(True, existing.journal_entry_id)
                 result = find_journal_entry("journal-1", candidate)
         assert result is existing
 
     def test_returns_none_when_llm_finds_no_match(self, candidate, existing):
         with patch("balanceai.journals.finder.load_journal_entries", return_value=[existing]):
-            with patch("balanceai.services.anthropic_service.messages") as mock_llm:
+            with patch("balanceai.services.anthropic.messages") as mock_llm:
                 mock_llm.return_value = _llm_response(False, None)
                 result = find_journal_entry("journal-1", candidate)
         assert result is None
 
     def test_returns_none_when_llm_returns_unknown_id(self, candidate, existing):
         with patch("balanceai.journals.finder.load_journal_entries", return_value=[existing]):
-            with patch("balanceai.services.anthropic_service.messages") as mock_llm:
+            with patch("balanceai.services.anthropic.messages") as mock_llm:
                 mock_llm.return_value = _llm_response(True, "nonexistent-id")
                 result = find_journal_entry("journal-1", candidate)
         assert result is None
 
     def test_llm_called_with_correct_model(self, candidate, existing):
         with patch("balanceai.journals.finder.load_journal_entries", return_value=[existing]):
-            with patch("balanceai.services.anthropic_service.messages") as mock_llm:
+            with patch("balanceai.services.anthropic.messages") as mock_llm:
                 mock_llm.return_value = _llm_response(False, None)
                 find_journal_entry("journal-1", candidate)
         assert mock_llm.call_args.kwargs["model_id"] == "claude-haiku-4-5-20251001"
@@ -111,7 +111,7 @@ class TestFindJournalEntryWithLlm:
     def test_llm_response_with_code_fences_is_handled(self, candidate, existing):
         fenced = f"```json\n{_llm_response(True, existing.journal_entry_id)}\n```"
         with patch("balanceai.journals.finder.load_journal_entries", return_value=[existing]):
-            with patch("balanceai.services.anthropic_service.messages") as mock_llm:
+            with patch("balanceai.services.anthropic.messages") as mock_llm:
                 mock_llm.return_value = fenced
                 result = find_journal_entry("journal-1", candidate)
         assert result is existing

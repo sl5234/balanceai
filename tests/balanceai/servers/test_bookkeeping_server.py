@@ -18,7 +18,7 @@ from balanceai.models.journal import (
     JournalEntryData,
     JournalEntryDataSet,
 )
-from balanceai.servers.bookkeeping_server import create_or_update_journal_entries_for_receipt, list_journal_entries
+from balanceai.servers.bookkeeping_server import sync_journal_entries_from_receipt, list_journal_entries
 
 
 @pytest.fixture
@@ -167,7 +167,7 @@ def receipt_path(tmp_path):
 def ocr_entry_data():
     return JournalEntryData(
         date=datetime.date(2026, 1, 27),
-        account=JournalAccount.GENERAL,
+        account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Grocery purchase at Trader Joe's",
         debit=Decimal("32.02"),
         credit=Decimal("0.00"),
@@ -181,26 +181,26 @@ def ocr_result(ocr_entry_data):
 
 class TestCreateOrUpdateJournalEntriesForReceipt:
     def test_raises_when_journal_not_found(self, receipt_path):
-        with patch("balanceai.helpers.journal_entry.find_journal_by_id", return_value=None):
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=None):
             with pytest.raises(ValueError, match="journal-999"):
-                create_or_update_journal_entries_for_receipt("journal-999", receipt_path)
+                sync_journal_entries_from_receipt("journal-999", receipt_path)
 
     def test_creates_new_entry_when_no_match(self, journal, receipt_path, ocr_result):
-        with patch("balanceai.helpers.journal_entry.find_journal_by_id", return_value=journal):
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
             with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry.storage_update_journal"):
-                        result = create_or_update_journal_entries_for_receipt("journal-1", receipt_path)
+                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                        result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 1
         assert result["entries"][0]["description"] == "Grocery purchase at Trader Joe's"
 
     def test_new_entry_gets_fresh_id(self, journal, receipt_path, ocr_result):
-        with patch("balanceai.helpers.journal_entry.find_journal_by_id", return_value=journal):
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
             with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry.storage_update_journal"):
-                        result = create_or_update_journal_entries_for_receipt("journal-1", receipt_path)
+                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                        result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         entry_id = result["entries"][0]["journal_entry_id"]
         assert entry_id is not None
@@ -210,7 +210,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         existing_entry = JournalEntry(
             journal_entry_id="original-id",
             date=datetime.date(2026, 1, 27),
-            account=JournalAccount.GENERAL,
+            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Old description",
             debit=Decimal("30.00"),
             credit=Decimal("0.00"),
@@ -224,11 +224,11 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
             entries=[existing_entry],
         )
 
-        with patch("balanceai.helpers.journal_entry.find_journal_by_id", return_value=journal):
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
             with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry.finder_find_journal_entry", return_value=existing_entry):
-                    with patch("balanceai.helpers.journal_entry.storage_update_journal"):
-                        result = create_or_update_journal_entries_for_receipt("journal-1", receipt_path)
+                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=existing_entry):
+                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                        result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 1
         assert result["entries"][0]["journal_entry_id"] == "original-id"
@@ -240,7 +240,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         double_entry_result = JournalEntryDataSet(entries=[
             JournalEntryData(
                 date=datetime.date(2026, 1, 27),
-                account=JournalAccount.GENERAL,
+                account=JournalAccount.NON_ESSENTIALS_EXPENSE,
                 description="Grocery purchase at Trader Joe's",
                 debit=Decimal("32.02"),
                 credit=Decimal("0.00"),
@@ -254,39 +254,39 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
             ),
         ])
 
-        with patch("balanceai.helpers.journal_entry.find_journal_by_id", return_value=journal):
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
             with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=double_entry_result):
-                with patch("balanceai.helpers.journal_entry.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry.storage_update_journal"):
-                        result = create_or_update_journal_entries_for_receipt("journal-1", receipt_path)
+                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                        result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 2
 
     def test_no_entries_from_ocr_leaves_journal_unchanged(self, journal, receipt_path):
         empty_ocr_result = JournalEntryDataSet(entries=[])
 
-        with patch("balanceai.helpers.journal_entry.find_journal_by_id", return_value=journal):
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
             with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=empty_ocr_result):
-                with patch("balanceai.helpers.journal_entry.storage_update_journal"):
-                    result = create_or_update_journal_entries_for_receipt("journal-1", receipt_path)
+                with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                    result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert result["entries"] == []
 
     def test_storage_update_called_once(self, journal, receipt_path, ocr_result):
-        with patch("balanceai.helpers.journal_entry.find_journal_by_id", return_value=journal):
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
             with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry.storage_update_journal") as mock_save:
-                        create_or_update_journal_entries_for_receipt("journal-1", receipt_path)
+                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal") as mock_save:
+                        sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         mock_save.assert_called_once_with(journal)
 
     def test_returns_journal_as_dict(self, journal, receipt_path, ocr_result):
-        with patch("balanceai.helpers.journal_entry.find_journal_by_id", return_value=journal):
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
             with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry.storage_update_journal"):
-                        result = create_or_update_journal_entries_for_receipt("journal-1", receipt_path)
+                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                        result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert isinstance(result, dict)
         assert "journal_id" in result
@@ -299,7 +299,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         existing_entry = JournalEntry(
             journal_entry_id="existing-id",
             date=datetime.date(2026, 1, 27),
-            account=JournalAccount.GENERAL,
+            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Old grocery description",
             debit=Decimal("30.00"),
             credit=Decimal("0.00"),
@@ -315,7 +315,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         ocr_result = JournalEntryDataSet(entries=[
             JournalEntryData(
                 date=datetime.date(2026, 1, 27),
-                account=JournalAccount.GENERAL,
+                account=JournalAccount.NON_ESSENTIALS_EXPENSE,
                 description="Grocery purchase at Trader Joe's",
                 debit=Decimal("32.02"),
                 credit=Decimal("0.00"),
@@ -331,13 +331,13 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
 
         def fake_finder(journal_id, entry):
             # Only the GENERAL entry matches the pre-existing journal entry
-            return existing_entry if entry.account == JournalAccount.GENERAL else None
+            return existing_entry if entry.account == JournalAccount.NON_ESSENTIALS_EXPENSE else None
 
-        with patch("balanceai.helpers.journal_entry.find_journal_by_id", return_value=journal):
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
             with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry.finder_find_journal_entry", side_effect=fake_finder):
-                    with patch("balanceai.helpers.journal_entry.storage_update_journal"):
-                        result = create_or_update_journal_entries_for_receipt("journal-1", receipt_path)
+                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", side_effect=fake_finder):
+                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                        result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 2
         ids = {e["journal_entry_id"] for e in result["entries"]}
