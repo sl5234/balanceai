@@ -1,12 +1,50 @@
 import json
+import re
 
+from balanceai.journals.merchant_cache import load_merchant_context_cache, save_merchant_context_cache
 from balanceai.models.journal import JournalEntryDataSet
 from balanceai.models.transaction import Transaction
 from balanceai.prompts.extract_journal_entry_prompt import extract_journal_entries_prompt
 from balanceai.services import anthropic as anthropic_service
+from balanceai.services import tavily as tavily_service
 from balanceai.utils.ocr_util import _extract_json
 
 DEFAULT_MODEL_ID = "claude-sonnet-4-6"
+
+
+def extract_merchant(description: str) -> str:
+    """Strip dates, card purchase prefixes, and trailing amounts from a raw bank description."""
+    # "01/28 Card Purchase With Pin ..." -> "Card Purchase With Pin ..."
+    cleaned = re.sub(r"^\d{1,2}/\d{1,2}\s+", "", description.strip())
+    # "Card Purchase With Pin 01/28 Uber *One ..." -> "Uber *One ..."
+    cleaned = re.sub(
+        r"(?:Card Purchase With Pin|Card Purchase Return|Card Purchase|Recurring Card Purchase|Card Transaction)\s+\d{1,2}/\d{1,2}\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    # "Uber *One Membership San Francisco CA -9.99 6,271.43" -> "Uber *One Membership San Francisco CA"
+    cleaned = re.sub(r"\s+-?[\d,]+\.\d{2}(\s+[\d,]+\.\d{2})*\s*$", "", cleaned)
+    return cleaned.strip()
+
+
+def get_merchant_context(description: str) -> str | None:
+    """
+    Return merchant context via the lookup chain:
+      override map → cache → Tavily (writes to cache)
+    """
+    key = extract_merchant(description).lower()
+
+    cache = load_merchant_context_cache()
+    if key in cache:
+        return cache[key]
+
+    context = tavily_service.search(f"What type of business is: {description}")
+    if context:
+        cache[key] = context
+        save_merchant_context_cache(cache)
+
+    return context
 
 
 def extract_journal_entries_from_bank_statement_transaction(transaction: Transaction) -> list:
@@ -20,10 +58,11 @@ def extract_journal_entries_from_bank_statement_transaction(transaction: Transac
         List of JournalEntryData objects
     """
     schema = json.dumps(JournalEntryDataSet.model_json_schema(), indent=2)
+    merchant_context = get_merchant_context(transaction.description)
     response = anthropic_service.messages(
         model_id=DEFAULT_MODEL_ID,
         content=json.dumps(transaction.to_dict()),
-        system_instruction=extract_journal_entries_prompt(schema),
+        system_instruction=extract_journal_entries_prompt(schema, merchant_context),
     )
     result = JournalEntryDataSet.model_validate_json(_extract_json(response))
     return result.entries

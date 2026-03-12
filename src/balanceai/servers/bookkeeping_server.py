@@ -258,7 +258,7 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
     out = Path(output_dir) / filename
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    fieldnames = ["journal_entry_id", "date", "account", "description", "debit", "credit", "tax"]
+    fieldnames = ["journal_entry_id", "date", "account", "description", "debit", "credit", "tax", "recipient"]
     with out.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()

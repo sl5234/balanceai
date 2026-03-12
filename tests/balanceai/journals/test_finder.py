@@ -10,7 +10,7 @@ sys.modules.setdefault("anthropic", MagicMock())
 
 import pytest
 
-from balanceai.journals.finder import find_journal_entry, _strip_fences
+from balanceai.journals.finder import find_journal_entry
 from balanceai.models.journal import JournalAccount, JournalEntry
 
 
@@ -116,21 +116,10 @@ class TestFindJournalEntryWithLlm:
                 result = find_journal_entry("journal-1", candidate)
         assert result is existing
 
-
-# ---------------------------------------------------------------------------
-# _strip_fences
-# ---------------------------------------------------------------------------
-
-
-class TestStripFences:
-    def test_strips_json_code_fence(self):
-        assert _strip_fences("```json\n{}\n```") == "{}"
-
-    def test_strips_plain_code_fence(self):
-        assert _strip_fences("```\n{}\n```") == "{}"
-
-    def test_leaves_plain_json_unchanged(self):
-        assert _strip_fences('{"match": false}') == '{"match": false}'
-
-    def test_strips_surrounding_whitespace(self):
-        assert _strip_fences("  {}\n  ") == "{}"
+    def test_llm_response_with_trailing_text_is_handled(self, candidate, existing):
+        trailing = f"{_llm_response(True, existing.journal_entry_id)}\nSome explanation from the model."
+        with patch("balanceai.journals.finder.load_journal_entries", return_value=[existing]):
+            with patch("balanceai.services.anthropic.messages") as mock_llm:
+                mock_llm.return_value = trailing
+                result = find_journal_entry("journal-1", candidate)
+        assert result is existing

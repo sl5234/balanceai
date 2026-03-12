@@ -1,3 +1,4 @@
+import bisect
 import datetime
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -18,6 +19,10 @@ class JournalAccount(str, Enum):
     ESSENTIALS_EXPENSE = "essential_expense"
     NON_ESSENTIALS_EXPENSE = "non_essential_expense"
     SALES = "sales"
+    INVESTMENTS = "investments"
+
+
+RECIPIENT_SELF = "Self"
 
 
 class JournalEntryData(BaseModel):
@@ -31,20 +36,43 @@ class JournalEntryData(BaseModel):
             "Use 'accounts_receivable' for money owed to you. "
             "Use 'rent' for rent payments. "
             "Use 'essential_expense' for necessary expenses like groceries (specifically, meat, vegetables, dog food), car insurance, books, gas, hospital visits, haircuts. "
-            "Use 'essential_expense' for non-essential expenses like groceries (snacks, fruits, dog treats), dining, cigarettes, vet visits, parking, etc. "
+            "Use 'non_essential_expense' for non-essential expenses like groceries (snacks, fruits, dog treats), dining, cigarettes, vet visits, parking, etc. "
             "Use 'sales' for revenue transactions like income. "
+            "Use 'investments' for investments. "
+            "If you cannot clearly determine the nature of the business from its name or the provided context, "
+            "default to 'non_essential_expense'."
         )
     )
     description: str = Field(
         description=(
             "Briefly describe the transaction. Include only enough information to accurately "
             "remind you where the money came from or why it was spent. "
-            "Examples: 'Loan from Liberty Bank.', 'Tax return from IRS.', "
-            "'Grocery purchase from Trader Joe's.', 'Repairs for car windshield from Chuck's repair shop.'"
-        )
+            "Only describe what you can clearly infer — if the nature of the transaction is unclear "
+            "(e.g. the merchant name is ambiguous or the purpose cannot be determined), "
+            "use 'Uncategorized transaction from X' where X is the merchant or payee name. "
+            "Never guess or infer the type of business from the name alone. "
+            "For example, 'Rudy's' should be described as 'Uncategorized transaction from Rudy\\'s', "
+            "not 'Dining at Rudy\\'s' or 'Haircut at Rudy\\'s'."
+            "For refunds: if a credit (money in) comes from a known retailer or merchant "
+            "(e.g., Amazon, Walmart, a restaurant), treat it as a refund. For a refund, "
+            "just reverse what the original purchase would have used."            
+        ),
+        examples=[
+            "Loan from Liberty Bank.",
+            "Tax return from IRS.",
+            "Grocery purchase from Trader Joe's.",
+            "Repairs for car windshield from Chuck's repair shop.",
+            "Refund from Amazon.com.",
+            "Uncategorized transaction from Rudy's.",
+            "Uncategorized transaction from District-H.",
+        ],
     )
     debit: Decimal
     credit: Decimal
+    recipient: str = Field(
+        default=RECIPIENT_SELF,
+        description="Who received this transaction. Use 'Self' is the transaction is for yourself.",
+    )
 
     def to_journal_entry(self) -> "JournalEntry":
         return JournalEntry(
@@ -54,6 +82,7 @@ class JournalEntryData(BaseModel):
             description=self.description,
             debit=self.debit,
             credit=self.credit,
+            recipient=self.recipient,
         )
 
 
@@ -85,6 +114,10 @@ class JournalEntry:
     debit: Decimal
     credit: Decimal
     tax: Decimal = Decimal("0")
+    recipient: str = RECIPIENT_SELF
+
+    def __lt__(self, other: "JournalEntry") -> bool:
+        return self.date < other.date
 
     def to_dict(self) -> dict:
         return {
@@ -95,6 +128,7 @@ class JournalEntry:
             "debit": str(self.debit),
             "credit": str(self.credit),
             "tax": str(self.tax),
+            "recipient": self.recipient,
         }
 
     @classmethod
@@ -107,6 +141,7 @@ class JournalEntry:
             debit=Decimal(d["debit"]),
             credit=Decimal(d["credit"]),
             tax=Decimal(d.get("tax", "0")),
+            recipient=d.get("recipient", RECIPIENT_SELF),
         )
 
 
@@ -130,8 +165,8 @@ class Journal:
         }
 
     def add_entry(self, entry: JournalEntry) -> None:
-        """Add a journal entry."""
-        self.entries.append(entry)
+        """Add a journal entry, maintaining sort order by date."""
+        bisect.insort(self.entries, entry)
 
     def remove_entry(self, journal_entry_id: str) -> JournalEntry | None:
         """Remove a journal entry by its journal_entry_id. Returns the removed entry, or None if not found."""

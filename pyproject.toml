@@ -17,6 +17,7 @@ dependencies = [
     "mcp",
     "pdfplumber",
     "pydantic",
+    "tavily-python",
 ]
 
 [project.optional-dependencies]

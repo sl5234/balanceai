@@ -55,12 +55,22 @@ class OcrUtil:
 
 
 def _extract_json(text: str) -> str:
-    """Strip markdown code fences if present."""
+    """Strip markdown code fences if present, then extract the outermost JSON object."""
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
         lines = lines[1:]
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
-        text = "\n".join(lines)
-    return text.strip()
+        text = "\n".join(lines).strip()
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        for i, ch in enumerate(text[start:], start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+    return text

@@ -35,6 +35,10 @@ class Settings(BaseSettings):
         "AQICAHg7rDJp72oZrIfl2vnBxkvlcidlgcJm7juguFV/iuWU+AEoY/yo+IVxS8WR/MEqa0JXAAAAzzCBzAYJKoZIhvcNAQcGoIG+MIG7AgEAMIG1BgkqhkiG9w0BBwEwHgYJYIZIAWUDBAEuMBEEDMku1dKqgb9WnG7GfgIBEICBh1++BKjrDXHoK0O5lRiiMj1VeWPC2Qvb0L5KF3Zaqb3ai+/m4FMbDVV1kOIZc8ELWCJGxb5pjQw93qZnbfYx+x1O+YYpQn02AmQFgVMEIn8z7ahDDuWqxiJ3aaDwg/M6qANoNAICZsS3O03ZjdzITKL/zvosSaVG2dLo+W0t8XyY7ucEWEvcaQ=="
     )
 
+    encrypted_tavily_api_key: str = (
+        "AQICAHg7rDJp72oZrIfl2vnBxkvlcidlgcJm7juguFV/iuWU+AHpeNXM1+xDGzIOkq3hyxr0AAAAiDCBhQYJKoZIhvcNAQcGoHgwdgIBADBxBgkqhkiG9w0BBwEwHgYJYIZIAWUDBAEuMBEEDHVB7aMFakksi489HAIBEIBEEyuVc/n9WUT/u9P2nsnQl/h7jBidNJKmCssSymJIZFlgUTnhUyw4bvsrmUJYRcVfoXIGYdcFZRXWzxqYVZBHPYuJQDU="
+    )
+
     _aws_clients: Optional[AWSClients] = None
 
     model_config = SettingsConfigDict(
@@ -103,6 +107,14 @@ class Settings(BaseSettings):
         assert self._aws_clients is not None, "AWS clients must be initialized"
         return self.decrypt_value(
             self.encrypted_anthropic_api_key, self._aws_clients, self.kms_key_arn
+        )        
+
+    @property
+    def tavily_api_key(self) -> str:
+        """Decrypted Tavily API key."""
+        assert self._aws_clients is not None, "AWS clients must be initialized"
+        return self.decrypt_value(
+            self.encrypted_tavily_api_key, self._aws_clients, self.kms_key_arn
         )
 
 settings = Settings()

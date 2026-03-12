@@ -4,6 +4,7 @@ import logging
 from balanceai.journals.storage import load_journal_entries
 from balanceai.models.journal import JournalEntry
 from balanceai.prompts.journal_entry_finder import SYSTEM_PROMPT
+from balanceai.utils.ocr_util import _extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -44,22 +45,11 @@ def find_journal_entry(journal_id: str, candidate: JournalEntry) -> JournalEntry
         max_output_tokens=256,
     )
 
-    result = json.loads(_strip_fences(response))
+    print(f"[finder] LLM raw response: {response!r}")
+    result = json.loads(_extract_json(response))
 
     if not result.get("match"):
         return None
 
     matched_id = result.get("journal_entry_id")
     return next((e for e in entries if e.journal_entry_id == matched_id), None)
-
-
-def _strip_fences(text: str) -> str:
-    """Strip markdown code fences from LLM response if present."""
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
-    return text.strip()

@@ -1,4 +1,8 @@
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+import anthropic
 
 from balanceai.helpers.plaid_helper import extract_journal_entries_from_transactions
 from balanceai.journals.finder import find_journal_entry as finder_find_journal_entry
@@ -10,6 +14,9 @@ import balanceai.parsers.chase  # noqa: F401 - register parsers
 from balanceai.utils.journal_entry_util import extract_journal_entries_from_bank_statement_transaction
 from balanceai.utils.general_util import get_mime_type
 from balanceai.utils.ocr_util import OcrUtil
+
+_BATCH_SIZE = 10
+_RATE_LIMIT_RETRY_SECONDS = 60
 
 
 def handle_sync_journal_entries_from_receipt(journal_id: str, input_local_path: Path) -> dict:
@@ -68,14 +75,30 @@ def handle_sync_journal_entries_from_bank_statement(journal_id: str, file_path: 
 
     _, transactions = get_parser(journal.account.bank).parse(file_path)
 
-    for txn in transactions:
-        for entry_data in extract_journal_entries_from_bank_statement_transaction(txn):
-            entry = entry_data.to_journal_entry()
-            existing = finder_find_journal_entry(journal_id, entry)
-            if existing is not None:
-                entry.journal_entry_id = existing.journal_entry_id
-                journal.remove_entry(existing.journal_entry_id)
-            journal.add_entry(entry)
+    batches = [transactions[i:i + _BATCH_SIZE] for i in range(0, len(transactions), _BATCH_SIZE)]
 
-    storage_update_journal(journal)
+    for batch in batches:
+        while True:
+            try:
+                with ThreadPoolExecutor(max_workers=len(batch)) as executor:
+                    futures = {executor.submit(extract_journal_entries_from_bank_statement_transaction, txn): txn for txn in batch}
+                    batch_results = []
+                    for future in as_completed(futures):
+                        batch_results.append(future.result())
+            except anthropic.RateLimitError:
+                time.sleep(_RATE_LIMIT_RETRY_SECONDS)
+                continue
+
+            for entries in batch_results:
+                for entry_data in entries:
+                    entry = entry_data.to_journal_entry()
+                    existing = finder_find_journal_entry(journal_id, entry)
+                    if existing is not None:
+                        entry.journal_entry_id = existing.journal_entry_id
+                        journal.remove_entry(existing.journal_entry_id)
+                    journal.add_entry(entry)
+
+            storage_update_journal(journal)
+            break
+
     return journal.to_dict()
