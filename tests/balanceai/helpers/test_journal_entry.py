@@ -18,8 +18,8 @@ from balanceai.models.journal import (
     Journal,
     JournalAccount,
     JournalEntry,
-    JournalEntryData,
-    JournalEntryDataSet,
+    GeneratedJournalEntry,
+    GeneratedJournalEntrySet,
 )
 from balanceai.models.transaction import Transaction
 
@@ -48,7 +48,7 @@ def empty_journal(sample_account):
 
 @pytest.fixture
 def entry_data():
-    return JournalEntryData(
+    return GeneratedJournalEntry(
         date=datetime.date(2026, 1, 27),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Grocery purchase at Trader Joe's",
@@ -83,7 +83,7 @@ def receipt_path(tmp_path):
 
 @pytest.fixture
 def ocr_result(entry_data):
-    return JournalEntryDataSet(entries=[entry_data])
+    return GeneratedJournalEntrySet(entries=[entry_data])
 
 
 class TestHandleCreateOrUpdateJournalEntriesForReceipt:
@@ -135,15 +135,15 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
         assert result["entries"][0]["debit"] == "32.02"
 
     def test_adds_multiple_entries(self, empty_journal, receipt_path):
-        double_entry_result = JournalEntryDataSet(entries=[
-            JournalEntryData(
+        double_entry_result = GeneratedJournalEntrySet(entries=[
+            GeneratedJournalEntry(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.NON_ESSENTIALS_EXPENSE,
                 description="Grocery purchase at Trader Joe's",
                 debit=Decimal("32.02"),
                 credit=Decimal("0.00"),
             ),
-            JournalEntryData(
+            GeneratedJournalEntry(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.CASH,
                 description="Payment via Visa",
@@ -162,7 +162,7 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
 
     def test_no_entries_from_ocr_leaves_journal_unchanged(self, empty_journal, receipt_path):
         with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=JournalEntryDataSet(entries=[])):
+            with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=GeneratedJournalEntrySet(entries=[])):
                 with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
                     result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
@@ -199,7 +199,7 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
         call_kwargs = mock_ocr.call_args.kwargs
         assert call_kwargs["content"] == b"fake-image-data"
         assert call_kwargs["mime_type"] == "image/jpeg"
-        assert call_kwargs["output_format"] == JournalEntryDataSet
+        assert call_kwargs["output_format"] == GeneratedJournalEntrySet
 
 
 # ---------------------------------------------------------------------------
@@ -305,14 +305,14 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
 
     def test_upserts_multiple_entries(self, empty_journal, transactions):
         two_entries = [
-            JournalEntryData(
+            GeneratedJournalEntry(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.NON_ESSENTIALS_EXPENSE,
                 description="Grocery purchase",
                 debit=Decimal("32.02"),
                 credit=Decimal("0.00"),
             ),
-            JournalEntryData(
+            GeneratedJournalEntry(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.CASH,
                 description="Payment via Visa",
@@ -386,23 +386,25 @@ def sample_transaction():
 
 @pytest.fixture
 def expense_entry_data():
-    return JournalEntryData(
+    return GeneratedJournalEntry(
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Lyft ride purchase.",
         debit=Decimal("12.00"),
         credit=Decimal("0.00"),
+        category="rideshare",
     )
 
 
 @pytest.fixture
 def cash_entry_data():
-    return JournalEntryData(
+    return GeneratedJournalEntry(
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.CASH,
         description="Lyft ride purchase.",
         debit=Decimal("0.00"),
         credit=Decimal("12.00"),
+        category="rideshare",
     )
 
 
@@ -499,19 +501,21 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             posting_date=datetime.date(2026, 1, 26), description="Shell Gas",
             amount=Decimal("-21.77"), previous_balance=Decimal("988.00"), new_balance=Decimal("966.23"),
         )
-        gas_expense = JournalEntryData(
+        gas_expense = GeneratedJournalEntry(
             date=datetime.date(2026, 1, 26),
             account=JournalAccount.ESSENTIALS_EXPENSE,
             description="Gas purchase at Shell.",
             debit=Decimal("21.77"),
             credit=Decimal("0.00"),
+            category="gas",
         )
-        gas_cash = JournalEntryData(
+        gas_cash = GeneratedJournalEntry(
             date=datetime.date(2026, 1, 26),
             account=JournalAccount.CASH,
             description="Gas purchase at Shell.",
             debit=Decimal("0.00"),
             credit=Decimal("21.77"),
+            category="gas",
         )
         mock_parser = self._make_parser([txn1, txn2])
 
@@ -607,3 +611,166 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         assert isinstance(result, dict)
         assert "journal_id" in result
         assert "entries" in result
+
+    # ---------------------------------------------------------------------------
+    # Re-categorization step
+    # ---------------------------------------------------------------------------
+
+    def test_recategorizes_null_category_entries(self, empty_journal, sample_transaction):
+        null_entry = GeneratedJournalEntry(
+            date=datetime.date(2026, 1, 25),
+            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+            description="Uncategorized transaction from Rudy's.",
+            debit=Decimal("25.00"),
+            credit=Decimal("0.00"),
+            category=None,
+        )
+        mock_parser = self._make_parser([sample_transaction])
+
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]):
+                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", return_value=null_entry) as mock_recategorize:
+                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                                handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+
+        mock_recategorize.assert_called_once_with(null_entry)
+
+    def test_skips_recategorization_when_all_entries_categorized(self, empty_journal, sample_transaction, expense_entry_data, cash_entry_data):
+        mock_parser = self._make_parser([sample_transaction])
+
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data, cash_entry_data]):
+                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category") as mock_recategorize:
+                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                                handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+
+        mock_recategorize.assert_not_called()
+
+    def test_recategorized_entry_is_used_in_journal(self, empty_journal, sample_transaction):
+        null_entry = GeneratedJournalEntry(
+            date=datetime.date(2026, 1, 25),
+            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+            description="Uncategorized transaction from Rudy's.",
+            debit=Decimal("25.00"),
+            credit=Decimal("0.00"),
+            category=None,
+        )
+        recategorized = null_entry.model_copy(update={
+            "description": "Haircut at Rudy's.",
+            "category": "haircut",
+        })
+        mock_parser = self._make_parser([sample_transaction])
+
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]):
+                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", return_value=recategorized):
+                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                                result = handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+
+        assert result["entries"][0]["description"] == "Haircut at Rudy's."
+        assert result["entries"][0]["category"] == "haircut"
+
+    def test_only_null_category_entries_are_recategorized(self, empty_journal, sample_transaction, expense_entry_data):
+        null_entry = GeneratedJournalEntry(
+            date=datetime.date(2026, 1, 25),
+            account=JournalAccount.CASH,
+            description="Uncategorized transaction from Rudy's.",
+            debit=Decimal("0.00"),
+            credit=Decimal("25.00"),
+            category=None,
+        )
+        mock_parser = self._make_parser([sample_transaction])
+
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data, null_entry]):
+                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", return_value=null_entry) as mock_recategorize:
+                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                                handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+
+        mock_recategorize.assert_called_once_with(null_entry)
+
+    def test_all_null_category_entries_are_recategorized(self, empty_journal, sample_transaction):
+        null_entry_1 = GeneratedJournalEntry(
+            date=datetime.date(2026, 1, 25),
+            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+            description="Uncategorized transaction from Rudy's.",
+            debit=Decimal("25.00"),
+            credit=Decimal("0.00"),
+            category=None,
+        )
+        null_entry_2 = GeneratedJournalEntry(
+            date=datetime.date(2026, 1, 25),
+            account=JournalAccount.CASH,
+            description="Uncategorized transaction from Rudy's.",
+            debit=Decimal("0.00"),
+            credit=Decimal("25.00"),
+            category=None,
+        )
+        mock_parser = self._make_parser([sample_transaction])
+
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry_1, null_entry_2]):
+                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", side_effect=lambda e: e) as mock_recategorize:
+                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                                handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+
+        assert mock_recategorize.call_count == 2
+
+    def test_rate_limit_in_step2_does_not_rerun_step1(self, empty_journal, sample_transaction):
+        null_entry = GeneratedJournalEntry(
+            date=datetime.date(2026, 1, 25),
+            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+            description="Uncategorized transaction from Rudy's.",
+            debit=Decimal("25.00"),
+            credit=Decimal("0.00"),
+            category=None,
+        )
+        recategorized = null_entry.model_copy(update={"category": "dining"})
+        mock_parser = self._make_parser([sample_transaction])
+
+        FakeRateLimitError = type("RateLimitError", (Exception,), {})
+
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]) as mock_extract:
+                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", side_effect=[FakeRateLimitError(), recategorized]) as mock_recategorize:
+                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                                with patch("balanceai.helpers.journal_entry_helper.anthropic") as mock_anthropic:
+                                    mock_anthropic.RateLimitError = FakeRateLimitError
+                                    with patch("balanceai.helpers.journal_entry_helper.time.sleep"):
+                                        handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+
+        assert mock_extract.call_count == 1
+        assert mock_recategorize.call_count == 2
+
+    def test_null_category_entry_still_added_when_recategorization_returns_unchanged(self, empty_journal, sample_transaction):
+        null_entry = GeneratedJournalEntry(
+            date=datetime.date(2026, 1, 25),
+            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+            description="Uncategorized transaction from Rudy's.",
+            debit=Decimal("25.00"),
+            credit=Decimal("0.00"),
+            category=None,
+        )
+        mock_parser = self._make_parser([sample_transaction])
+
+        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]):
+                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", return_value=null_entry):
+                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+                                result = handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+
+        assert len(result["entries"]) == 1

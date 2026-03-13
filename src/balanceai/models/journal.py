@@ -25,7 +25,7 @@ class JournalAccount(str, Enum):
 RECIPIENT_SELF = "Self"
 
 
-class JournalEntryData(BaseModel):
+class GeneratedJournalEntry(BaseModel):
     """JournalEntry fields without the entry ID. Used as the output format for OCR extraction."""
 
     date: datetime.date
@@ -69,6 +69,35 @@ class JournalEntryData(BaseModel):
     )
     debit: Decimal
     credit: Decimal
+    category: str | None = Field(
+        default=None,
+        description=(
+            "A short category label for this transaction. "
+            "Set to null only when the merchant is truly ambiguous and cannot be determined from the description alone."
+        ),
+        examples=[
+            "dining",
+            "groceries",
+            "gas",
+            "rideshare",
+            "subscription",
+            "transfer",
+            "rent",
+            "utilities",
+            "insurance",
+            "entertainment",
+            "travel",
+            "healthcare",
+            "income",
+        ],
+    )
+    tax: Decimal = Field(
+        default=Decimal("0"),
+        description=(
+            "Sales tax or VAT included in this transaction, if any. "
+            "Default to 0 if unknown or not applicable."
+        ),
+    )
     recipient: str = Field(
         default=RECIPIENT_SELF,
         description="Who received this transaction. Use 'Self' is the transaction is for yourself.",
@@ -77,17 +106,12 @@ class JournalEntryData(BaseModel):
     def to_journal_entry(self) -> "JournalEntry":
         return JournalEntry(
             journal_entry_id=UniqueIdGenerator.generate_id(),
-            date=self.date,
-            account=self.account,
-            description=self.description,
-            debit=self.debit,
-            credit=self.credit,
-            recipient=self.recipient,
+            **self.model_dump(),
         )
 
 
-class JournalEntryDataSet(BaseModel):
-    entries: list[JournalEntryData] = Field(
+class GeneratedJournalEntrySet(BaseModel):
+    entries: list[GeneratedJournalEntry] = Field(
         description=(
             "The journal entries for this transaction. "
             "Use double-entry bookkeeping: each transaction should have at least two entries "
@@ -105,16 +129,8 @@ class PlaidTransactionInputConfig(BaseModel):
 
 
 
-@dataclass
-class JournalEntry:
+class JournalEntry(GeneratedJournalEntry):
     journal_entry_id: str
-    date: datetime.date
-    account: JournalAccount
-    description: str
-    debit: Decimal
-    credit: Decimal
-    tax: Decimal = Decimal("0")
-    recipient: str = RECIPIENT_SELF
 
     def __lt__(self, other: "JournalEntry") -> bool:
         return self.date < other.date
@@ -127,6 +143,7 @@ class JournalEntry:
             "description": self.description,
             "debit": str(self.debit),
             "credit": str(self.credit),
+            "category": self.category,
             "tax": str(self.tax),
             "recipient": self.recipient,
         }
@@ -140,6 +157,7 @@ class JournalEntry:
             description=d["description"],
             debit=Decimal(d["debit"]),
             credit=Decimal(d["credit"]),
+            category=d.get("category"),
             tax=Decimal(d.get("tax", "0")),
             recipient=d.get("recipient", RECIPIENT_SELF),
         )

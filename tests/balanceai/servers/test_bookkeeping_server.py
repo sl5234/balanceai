@@ -15,8 +15,8 @@ from balanceai.models.journal import (
     Journal,
     JournalAccount,
     JournalEntry,
-    JournalEntryData,
-    JournalEntryDataSet,
+    GeneratedJournalEntry,
+    GeneratedJournalEntrySet,
 )
 from balanceai.servers.bookkeeping_server import sync_journal_entries_from_receipt, list_journal_entries
 
@@ -165,7 +165,7 @@ def receipt_path(tmp_path):
 
 @pytest.fixture
 def ocr_entry_data():
-    return JournalEntryData(
+    return GeneratedJournalEntry(
         date=datetime.date(2026, 1, 27),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Grocery purchase at Trader Joe's",
@@ -176,7 +176,7 @@ def ocr_entry_data():
 
 @pytest.fixture
 def ocr_result(ocr_entry_data):
-    return JournalEntryDataSet(entries=[ocr_entry_data])
+    return GeneratedJournalEntrySet(entries=[ocr_entry_data])
 
 
 class TestCreateOrUpdateJournalEntriesForReceipt:
@@ -237,15 +237,15 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
 
     def test_adds_multiple_entries_from_ocr(self, journal, receipt_path):
         # Double-entry: one debit line and one credit line from the same receipt
-        double_entry_result = JournalEntryDataSet(entries=[
-            JournalEntryData(
+        double_entry_result = GeneratedJournalEntrySet(entries=[
+            GeneratedJournalEntry(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.NON_ESSENTIALS_EXPENSE,
                 description="Grocery purchase at Trader Joe's",
                 debit=Decimal("32.02"),
                 credit=Decimal("0.00"),
             ),
-            JournalEntryData(
+            GeneratedJournalEntry(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.CASH,
                 description="Payment via Visa",
@@ -263,7 +263,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         assert len(result["entries"]) == 2
 
     def test_no_entries_from_ocr_leaves_journal_unchanged(self, journal, receipt_path):
-        empty_ocr_result = JournalEntryDataSet(entries=[])
+        empty_ocr_result = GeneratedJournalEntrySet(entries=[])
 
         with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
             with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=empty_ocr_result):
@@ -312,15 +312,15 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
             end_date=datetime.date(2026, 1, 31),
             entries=[existing_entry],
         )
-        ocr_result = JournalEntryDataSet(entries=[
-            JournalEntryData(
+        ocr_result = GeneratedJournalEntrySet(entries=[
+            GeneratedJournalEntry(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.NON_ESSENTIALS_EXPENSE,
                 description="Grocery purchase at Trader Joe's",
                 debit=Decimal("32.02"),
                 credit=Decimal("0.00"),
             ),
-            JournalEntryData(
+            GeneratedJournalEntry(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.CASH,
                 description="Payment via Visa",

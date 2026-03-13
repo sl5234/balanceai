@@ -1,10 +1,13 @@
 import json
+import logging
 import re
 
+logger = logging.getLogger(__name__)
+
 from balanceai.journals.merchant_cache import load_merchant_context_cache, save_merchant_context_cache
-from balanceai.models.journal import JournalEntryDataSet
+from balanceai.models.journal import GeneratedJournalEntry, GeneratedJournalEntrySet
 from balanceai.models.transaction import Transaction
-from balanceai.prompts.extract_journal_entry_prompt import extract_journal_entries_prompt
+from balanceai.prompts.extract_journal_entry_prompt import categorize_journal_entry_prompt, extract_journal_entries_prompt
 from balanceai.services import anthropic as anthropic_service
 from balanceai.services import tavily as tavily_service
 from balanceai.utils.ocr_util import _extract_json
@@ -28,23 +31,36 @@ def extract_merchant(description: str) -> str:
     return cleaned.strip()
 
 
-def get_merchant_context(description: str) -> str | None:
+def generate_transaction_category(entry: GeneratedJournalEntry) -> GeneratedJournalEntry:
     """
-    Return merchant context via the lookup chain:
-      override map → cache → Tavily (writes to cache)
+    For a journal entry with null category, look up cached categorization or fall back to
+    Tavily + LLM. Caches recipient → category for future lookups.
+    Returns the entry unchanged if no context can be found.
     """
-    key = extract_merchant(description).lower()
-
+    key = entry.recipient.lower()
     cache = load_merchant_context_cache()
-    if key in cache:
-        return cache[key]
 
-    context = tavily_service.search(f"What type of business is: {description}")
-    if context:
-        cache[key] = context
+    if key in cache:
+        return entry.model_copy(update={"category": cache[key]})
+
+    context = tavily_service.search(f"What type of business is: {entry.recipient}")
+    if not context:
+        logger.warning("Tavily returned no context for recipient: %s", entry.recipient)
+        return entry
+
+    schema = json.dumps(GeneratedJournalEntry.model_json_schema(), indent=2)
+    response = anthropic_service.messages(
+        model_id=DEFAULT_MODEL_ID,
+        content=entry.model_dump_json(),
+        system_instruction=categorize_journal_entry_prompt(schema, context),
+    )
+    result = GeneratedJournalEntry.model_validate_json(_extract_json(response))
+
+    if result.category:
+        cache[key] = result.category
         save_merchant_context_cache(cache)
 
-    return context
+    return result
 
 
 def extract_journal_entries_from_bank_statement_transaction(transaction: Transaction) -> list:
@@ -55,16 +71,16 @@ def extract_journal_entries_from_bank_statement_transaction(transaction: Transac
         transaction: A Transaction parsed from a bank statement
 
     Returns:
-        List of JournalEntryData objects
+        List of GeneratedJournalEntry objects
     """
-    schema = json.dumps(JournalEntryDataSet.model_json_schema(), indent=2)
-    merchant_context = get_merchant_context(transaction.description)
+    schema = json.dumps(GeneratedJournalEntrySet.model_json_schema(), indent=2)
+    merchant_context = load_merchant_context_cache()
     response = anthropic_service.messages(
         model_id=DEFAULT_MODEL_ID,
         content=json.dumps(transaction.to_dict()),
         system_instruction=extract_journal_entries_prompt(schema, merchant_context),
     )
-    result = JournalEntryDataSet.model_validate_json(_extract_json(response))
+    result = GeneratedJournalEntrySet.model_validate_json(_extract_json(response))
     return result.entries
 
 
@@ -79,16 +95,16 @@ def extract_journal_entries_from_plaid_transaction(transaction: dict) -> list:
         transaction: A single Plaid transaction dict
 
     Returns:
-        List of JournalEntryData objects
+        List of GeneratedJournalEntry objects
 
     # TODO: Model the input transaction type.
-    # TODO: Model the return type instead of returning raw JournalEntryData list.
+    # TODO: Model the return type instead of returning raw GeneratedJournalEntry list.
     """
-    schema = json.dumps(JournalEntryDataSet.model_json_schema(), indent=2)
+    schema = json.dumps(GeneratedJournalEntrySet.model_json_schema(), indent=2)
     response = anthropic_service.messages(
         model_id=DEFAULT_MODEL_ID,
         content=json.dumps(transaction),
         system_instruction=extract_journal_entries_prompt(schema),
     )
-    result = JournalEntryDataSet.model_validate_json(_extract_json(response))
+    result = GeneratedJournalEntrySet.model_validate_json(_extract_json(response))
     return result.entries
