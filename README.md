@@ -13,12 +13,12 @@ Add to `~/.claude.json`:
   "mcpServers": {
     "balance-ai-link-bank": {
       "command": "python",
-      "args": ["src/balanceai/servers/link_bank_server.py"],
+      "args": ["src/balanceai_backend/servers/link_bank_server.py"],
       "cwd": "/Users/sl5234/Workspace/BalanceAI"
     },
     "balance-ai-bookkeeping": {
       "command": "python",
-      "args": ["src/balanceai/servers/bookkeeping_server.py"],
+      "args": ["src/balanceai_backend/servers/bookkeeping_server.py"],
       "cwd": "/Users/sl5234/Workspace/BalanceAI"
     }
   }

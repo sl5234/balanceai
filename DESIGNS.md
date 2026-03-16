@@ -7,7 +7,7 @@ This document tracks the current design decisions and project structure for Bala
 ```
 BalanceAI/
 ├── src/
-│   └── balanceai/
+│   └── balanceai_backend/
 │       └── __init__.py
 ├── tests/
 │   └── __init__.py
@@ -24,7 +24,7 @@ BalanceAI/
 ## Current Design Decisions
 
 ### Package Structure
-- **Location**: `src/balanceai/` (src-layout pattern)
+- **Location**: `src/balanceai_backend/` (src-layout pattern)
 - **Rationale**: Keeps package code separate from tests and config files
 - **Installation**: Editable install (`pip install -e .`) for development
 

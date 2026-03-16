@@ -31,7 +31,7 @@ This document outlines best practices and anti-patterns for AI agents working on
 - **DON'T**: Pin exact versions unless necessary (use `>=` for compatibility)
 
 ### Project Structure
-- **DO**: Keep code in `src/balanceai/`
+- **DO**: Keep code in `src/balanceai_backend/`
 - **DO**: Use modules/packages for logical separation
 - **DO**: Keep tests in `tests/` directory
 - **DON'T**: Create unnecessary nested directories
