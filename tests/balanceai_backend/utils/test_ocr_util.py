@@ -44,7 +44,7 @@ class TestExtractJson:
 
 
 class TestOcrUtilAnthropicText:
-    @patch("balanceai.utils.ocr_util.anthropic.messages")
+    @patch("balanceai_backend.utils.ocr_util.anthropic.messages")
     def test_text_content_returns_valid_model(self, mock_messages):
         mock_messages.return_value = '{"name": "Coffee Shop", "amount": 4.50}'
 
@@ -54,7 +54,7 @@ class TestOcrUtilAnthropicText:
         assert result.name == "Coffee Shop"
         assert result.amount == 4.50
 
-    @patch("balanceai.utils.ocr_util.anthropic.messages")
+    @patch("balanceai_backend.utils.ocr_util.anthropic.messages")
     def test_fenced_response_parses_correctly(self, mock_messages):
         mock_messages.return_value = '```json\n{"name": "Tea", "amount": 3.00}\n```'
 
@@ -65,7 +65,7 @@ class TestOcrUtilAnthropicText:
 
 
 class TestOcrUtilAnthropicImage:
-    @patch("balanceai.utils.ocr_util.anthropic.messages")
+    @patch("balanceai_backend.utils.ocr_util.anthropic.messages")
     def test_bytes_content_returns_valid_model(self, mock_messages):
         mock_messages.return_value = '{"name": "Grocery", "amount": 25.00}'
 
@@ -79,7 +79,7 @@ class TestOcrUtilAnthropicImage:
         assert result.name == "Grocery"
         assert result.amount == 25.00
 
-    @patch("balanceai.utils.ocr_util.anthropic.messages")
+    @patch("balanceai_backend.utils.ocr_util.anthropic.messages")
     def test_bytes_passes_mime_type(self, mock_messages):
         mock_messages.return_value = '{"name": "x", "amount": 0}'
 
@@ -89,7 +89,7 @@ class TestOcrUtilAnthropicImage:
 
 
 class TestOcrUtilAnthropicArgumentPassing:
-    @patch("balanceai.utils.ocr_util.anthropic.messages")
+    @patch("balanceai_backend.utils.ocr_util.anthropic.messages")
     def test_default_model_id(self, mock_messages):
         mock_messages.return_value = '{"name": "x", "amount": 0}'
 
@@ -97,7 +97,7 @@ class TestOcrUtilAnthropicArgumentPassing:
 
         assert mock_messages.call_args.kwargs["model_id"] == "claude-sonnet-4-6"
 
-    @patch("balanceai.utils.ocr_util.anthropic.messages")
+    @patch("balanceai_backend.utils.ocr_util.anthropic.messages")
     def test_custom_model_id(self, mock_messages):
         mock_messages.return_value = '{"name": "x", "amount": 0}'
 
@@ -105,7 +105,7 @@ class TestOcrUtilAnthropicArgumentPassing:
 
         assert mock_messages.call_args.kwargs["model_id"] == "claude-opus-4-6"
 
-    @patch("balanceai.utils.ocr_util.anthropic.messages")
+    @patch("balanceai_backend.utils.ocr_util.anthropic.messages")
     def test_system_instruction_contains_schema(self, mock_messages):
         mock_messages.return_value = '{"name": "x", "amount": 0}'
 
@@ -117,14 +117,14 @@ class TestOcrUtilAnthropicArgumentPassing:
 
 
 class TestOcrUtilAnthropicErrors:
-    @patch("balanceai.utils.ocr_util.anthropic.messages")
+    @patch("balanceai_backend.utils.ocr_util.anthropic.messages")
     def test_invalid_json_raises(self, mock_messages):
         mock_messages.return_value = "not valid json at all"
 
         with pytest.raises(ValidationError):
             OcrUtil.executeWithAnthropic(content="text", output_format=SampleOutput)
 
-    @patch("balanceai.utils.ocr_util.anthropic.messages")
+    @patch("balanceai_backend.utils.ocr_util.anthropic.messages")
     def test_wrong_schema_raises(self, mock_messages):
         mock_messages.return_value = '{"wrong_field": "value"}'
 

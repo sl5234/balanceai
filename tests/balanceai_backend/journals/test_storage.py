@@ -76,7 +76,7 @@ def sample_journal_2(sample_account_2):
 
 @pytest.fixture(autouse=True)
 def use_tmp_data_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr("balanceai.journals.storage.DATA_DIR", tmp_path)
+    monkeypatch.setattr("balanceai_backend.journals.storage.DATA_DIR", tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ class TestLoadJournals:
 
     def test_returns_empty_list_when_file_is_empty(self, tmp_path):
         (tmp_path / "journals.jsonl").write_text("")
-        with patch("balanceai.journals.storage.DATA_DIR", tmp_path):
+        with patch("balanceai_backend.journals.storage.DATA_DIR", tmp_path):
             assert load_journals() == []
 
     def test_loads_multiple_journals(self, sample_journal, sample_journal_2):
@@ -106,7 +106,7 @@ class TestLoadJournals:
     def test_skips_blank_lines(self, tmp_path, sample_journal):
         line = json.dumps(sample_journal.to_dict())
         (tmp_path / "journals.jsonl").write_text(f"{line}\n\n\n{line}\n")
-        with patch("balanceai.journals.storage.DATA_DIR", tmp_path):
+        with patch("balanceai_backend.journals.storage.DATA_DIR", tmp_path):
             assert len(load_journals()) == 2
 
     def test_round_trip_preserves_entries(self, sample_journal, sample_entry):

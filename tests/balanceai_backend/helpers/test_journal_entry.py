@@ -97,15 +97,15 @@ def ocr_result(entry_data):
 
 class TestHandleCreateOrUpdateJournalEntriesForReceipt:
     def test_raises_when_journal_not_found(self, receipt_path):
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=None):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=None):
             with pytest.raises(ValueError, match="journal-999"):
                 handle_sync_journal_entries_from_receipt("journal-999", receipt_path)
 
     def test_creates_new_entry_when_no_match(self, empty_journal, receipt_path, ocr_result):
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 2
@@ -113,10 +113,10 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
         assert "Grocery purchase at Trader Joe's" in descriptions
 
     def test_new_entry_gets_fresh_id(self, empty_journal, receipt_path, ocr_result):
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         entry_id = result["entries"][0]["journal_entry_id"]
@@ -133,10 +133,10 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
             entries=[existing_entry],
         )
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
-            with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", side_effect=[existing_entry, None]):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
+            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", side_effect=[existing_entry, None]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 2
@@ -163,36 +163,36 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
             ),
         ])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=double_entry_result):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=double_entry_result):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 2
 
     def test_no_entries_from_ocr_leaves_journal_unchanged(self, empty_journal, receipt_path):
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=GeneratedJournalEntrySet(entries=[])):
-                with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=GeneratedJournalEntrySet(entries=[])):
+                with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                     result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert result["entries"] == []
 
     def test_storage_update_called_once(self, empty_journal, receipt_path, ocr_result):
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal") as mock_save:
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal") as mock_save:
                         handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         mock_save.assert_called_once_with(empty_journal)
 
     def test_returns_journal_as_dict(self, empty_journal, receipt_path, ocr_result):
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert isinstance(result, dict)
@@ -200,10 +200,10 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
         assert "entries" in result
 
     def test_passes_file_bytes_and_mime_type_to_ocr(self, empty_journal, receipt_path, ocr_result):
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result) as mock_ocr:
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result) as mock_ocr:
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         mock_ocr.assert_called_once()
@@ -225,17 +225,17 @@ def transactions():
 
 class TestHandleCreateOrUpdateJournalEntriesForTransactions:
     def test_raises_when_journal_not_found(self, transactions):
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=None):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=None):
             with pytest.raises(ValueError, match="journal-999"):
                 handle_sync_journal_entries_from_transactions("journal-999", transactions)
 
     def test_creates_new_entry_for_added_transaction(self, empty_journal, transactions, entry_data):
         grouped = {"upsert": [entry_data], "remove": []}
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
         assert len(result["entries"]) == 1
@@ -252,10 +252,10 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
         )
         grouped = {"upsert": [entry_data], "remove": []}
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
-            with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=existing_entry):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=existing_entry):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
         assert len(result["entries"]) == 1
@@ -274,10 +274,10 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
         )
         grouped = {"upsert": [], "remove": [entry_data]}
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
-            with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=existing_entry):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=existing_entry):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
         assert result["entries"] == []
@@ -295,10 +295,10 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
         )
         grouped = {"upsert": [], "remove": [entry_data]}
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
-            with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
         assert len(result["entries"]) == 1
@@ -307,9 +307,9 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
     def test_empty_transactions_leaves_journal_unchanged(self, empty_journal):
         grouped = {"upsert": [], "remove": []}
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
-                with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
+                with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                     result = handle_sync_journal_entries_from_transactions("journal-1", {})
 
         assert result["entries"] == []
@@ -333,10 +333,10 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
         ]
         grouped = {"upsert": two_entries, "remove": []}
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
         assert len(result["entries"]) == 2
@@ -344,10 +344,10 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
     def test_storage_update_called_once(self, empty_journal, transactions, entry_data):
         grouped = {"upsert": [entry_data], "remove": []}
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal") as mock_save:
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal") as mock_save:
                         handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
         mock_save.assert_called_once_with(empty_journal)
@@ -355,10 +355,10 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
     def test_returns_journal_as_dict(self, empty_journal, transactions, entry_data):
         grouped = {"upsert": [entry_data], "remove": []}
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
-                with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped):
+                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                         result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
         assert isinstance(result, dict)
@@ -369,9 +369,9 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
         grouped = {"upsert": [], "remove": []}
         txns = {"added": [{"transaction_id": "txn-42"}], "modified": [], "removed": []}
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped) as mock_extract:
-                with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions", return_value=grouped) as mock_extract:
+                with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                     handle_sync_journal_entries_from_transactions("journal-1", txns)
 
         mock_extract.assert_called_once_with(txns)
@@ -438,18 +438,18 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         return mock_parser
 
     def test_raises_when_journal_not_found(self):
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=None):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=None):
             with pytest.raises(ValueError, match="journal-999"):
                 handle_sync_journal_entries_from_bank_statement("journal-999", "/path/to/statement.pdf")
 
     def test_creates_new_entries_for_single_transaction(self, empty_journal, sample_transaction, expense_entry_data, cash_entry_data):
         mock_parser = self._make_parser([sample_transaction])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data, cash_entry_data]):
-                    with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                        with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data, cash_entry_data]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                        with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                             result = handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert len(result["entries"]) == 2
@@ -465,11 +465,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         )
         mock_parser = self._make_parser([sample_transaction])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data]):
-                    with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=bank_statement_existing_entry):
-                        with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=bank_statement_existing_entry):
+                        with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                             result = handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert len(result["entries"]) == 1
@@ -480,9 +480,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
     def test_no_transactions_leaves_journal_unchanged(self, empty_journal):
         mock_parser = self._make_parser([])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                     result = handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert result["entries"] == []
@@ -490,11 +490,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
     def test_multiple_entries_per_transaction(self, empty_journal, sample_transaction, expense_entry_data, cash_entry_data):
         mock_parser = self._make_parser([sample_transaction])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data, cash_entry_data]):
-                    with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                        with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data, cash_entry_data]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                        with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                             result = handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert len(result["entries"]) == 2
@@ -533,11 +533,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         def extract_side_effect(txn):
             return [expense_entry_data, cash_entry_data] if txn.id == "txn-1" else [gas_expense, gas_cash]
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", side_effect=extract_side_effect):
-                    with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                        with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", side_effect=extract_side_effect):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                        with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                             result = handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert len(result["entries"]) == 4
@@ -546,9 +546,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         mock_parser = MagicMock()
         mock_parser.parse.side_effect = ValueError("Balance mismatch")
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.storage_update_journal") as mock_save:
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal") as mock_save:
                     with pytest.raises(ValueError, match="Balance mismatch"):
                         handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
@@ -557,9 +557,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
     def test_uses_bank_from_journal_account(self, empty_journal):
         mock_parser = self._make_parser([])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser) as mock_get_parser:
-                with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser) as mock_get_parser:
+                with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                     handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         mock_get_parser.assert_called_once_with(Bank.CHASE)
@@ -568,9 +568,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         mock_parser = self._make_parser([])
         file_path = "/path/to/statement.pdf"
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                     handle_sync_journal_entries_from_bank_statement("journal-1", file_path)
 
         mock_parser.parse.assert_called_once_with(file_path)
@@ -588,11 +588,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         )
         mock_parser = self._make_parser([txn1, txn2])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data]) as mock_extract:
-                    with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                        with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data]) as mock_extract:
+                    with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                        with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                             handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert mock_extract.call_count == 2
@@ -602,11 +602,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
     def test_storage_update_called_once(self, empty_journal, sample_transaction, expense_entry_data):
         mock_parser = self._make_parser([sample_transaction])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data]):
-                    with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                        with patch("balanceai.helpers.journal_entry_helper.storage_update_journal") as mock_save:
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                        with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal") as mock_save:
                             handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         mock_save.assert_called_once_with(empty_journal)
@@ -614,9 +614,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
     def test_returns_journal_as_dict(self, empty_journal):
         mock_parser = self._make_parser([])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                     result = handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert isinstance(result, dict)
@@ -638,12 +638,12 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         )
         mock_parser = self._make_parser([sample_transaction])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]):
-                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", return_value=null_entry) as mock_recategorize:
-                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.generate_transaction_category", return_value=null_entry) as mock_recategorize:
+                        with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                                 handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         mock_recategorize.assert_called_once_with(null_entry)
@@ -651,12 +651,12 @@ class TestHandleSyncJournalEntriesFromBankStatement:
     def test_skips_recategorization_when_all_entries_categorized(self, empty_journal, sample_transaction, expense_entry_data, cash_entry_data):
         mock_parser = self._make_parser([sample_transaction])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data, cash_entry_data]):
-                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category") as mock_recategorize:
-                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data, cash_entry_data]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.generate_transaction_category") as mock_recategorize:
+                        with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                                 handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         mock_recategorize.assert_not_called()
@@ -676,12 +676,12 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         })
         mock_parser = self._make_parser([sample_transaction])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]):
-                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", return_value=recategorized):
-                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.generate_transaction_category", return_value=recategorized):
+                        with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                                 result = handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert result["entries"][0]["description"] == "Haircut at Rudy's."
@@ -698,12 +698,12 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         )
         mock_parser = self._make_parser([sample_transaction])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data, null_entry]):
-                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", return_value=null_entry) as mock_recategorize:
-                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[expense_entry_data, null_entry]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.generate_transaction_category", return_value=null_entry) as mock_recategorize:
+                        with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                                 handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         mock_recategorize.assert_called_once_with(null_entry)
@@ -727,12 +727,12 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         )
         mock_parser = self._make_parser([sample_transaction])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry_1, null_entry_2]):
-                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", side_effect=lambda e: e) as mock_recategorize:
-                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry_1, null_entry_2]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.generate_transaction_category", side_effect=lambda e: e) as mock_recategorize:
+                        with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                                 handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert mock_recategorize.call_count == 2
@@ -751,15 +751,15 @@ class TestHandleSyncJournalEntriesFromBankStatement:
 
         FakeRateLimitError = type("RateLimitError", (Exception,), {})
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]) as mock_extract:
-                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", side_effect=[FakeRateLimitError(), recategorized]) as mock_recategorize:
-                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
-                                with patch("balanceai.helpers.journal_entry_helper.anthropic") as mock_anthropic:
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]) as mock_extract:
+                    with patch("balanceai_backend.helpers.journal_entry_helper.generate_transaction_category", side_effect=[FakeRateLimitError(), recategorized]) as mock_recategorize:
+                        with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
+                                with patch("balanceai_backend.helpers.journal_entry_helper.anthropic") as mock_anthropic:
                                     mock_anthropic.RateLimitError = FakeRateLimitError
-                                    with patch("balanceai.helpers.journal_entry_helper.time.sleep"):
+                                    with patch("balanceai_backend.helpers.journal_entry_helper.time.sleep"):
                                         handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert mock_extract.call_count == 1
@@ -776,12 +776,66 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         )
         mock_parser = self._make_parser([sample_transaction])
 
-        with patch("balanceai.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
-            with patch("balanceai.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
-                with patch("balanceai.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]):
-                    with patch("balanceai.helpers.journal_entry_helper.generate_transaction_category", return_value=null_entry):
-                        with patch("balanceai.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                            with patch("balanceai.helpers.journal_entry_helper.storage_update_journal"):
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", return_value=[null_entry]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.generate_transaction_category", return_value=null_entry):
+                        with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                            with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
                                 result = handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         assert len(result["entries"]) == 1
+
+    # ---------------------------------------------------------------------------
+    # Response redaction
+    # ---------------------------------------------------------------------------
+
+    def _make_entry_data(self, i):
+        return GeneratedJournalEntry(
+            date=datetime.date(2026, 1, i + 1),
+            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+            description=f"Transaction {i}",
+            debit=Decimal("10.00"),
+            credit=Decimal("0.00"),
+            category="misc",
+        )
+
+    def _sync_with_n_entries(self, empty_journal, n):
+        entries = [self._make_entry_data(i) for i in range(n)]
+        transactions = [MagicMock() for _ in range(n)]
+        mock_parser = self._make_parser(transactions)
+
+        with patch("balanceai_backend.helpers.journal_entry_helper.find_journal_by_id", return_value=empty_journal):
+            with patch("balanceai_backend.helpers.journal_entry_helper.get_parser", return_value=mock_parser):
+                with patch("balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction", side_effect=lambda txn: [entries[transactions.index(txn)]]):
+                    with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+                        with patch("balanceai_backend.helpers.journal_entry_helper.storage_update_journal"):
+                            return handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+
+    def test_redaction_returns_all_entries_when_empty(self, empty_journal):
+        result = self._sync_with_n_entries(empty_journal, 0)
+        assert result["entries"] == []
+        assert "entries_redacted" not in result
+
+    def test_redaction_returns_all_entries_when_below_threshold(self, empty_journal):
+        result = self._sync_with_n_entries(empty_journal, 4)
+        assert len(result["entries"]) == 4
+        assert "entries_redacted" not in result
+
+    def test_redaction_returns_all_entries_when_exactly_5(self, empty_journal):
+        result = self._sync_with_n_entries(empty_journal, 5)
+        assert len(result["entries"]) == 5
+        assert "entries_redacted" not in result
+
+    def test_redaction_returns_first_5_entries_when_above_threshold(self, empty_journal):
+        result = self._sync_with_n_entries(empty_journal, 6)
+        assert len(result["entries"]) == 5
+
+    def test_redaction_entries_redacted_count_is_correct(self, empty_journal):
+        result = self._sync_with_n_entries(empty_journal, 8)
+        assert result["entries_redacted"] == 3
+
+    def test_redaction_entries_are_in_original_order(self, empty_journal):
+        result = self._sync_with_n_entries(empty_journal, 7)
+        descriptions = [e["description"] for e in result["entries"]]
+        assert descriptions == [f"Transaction {i}" for i in range(5)]

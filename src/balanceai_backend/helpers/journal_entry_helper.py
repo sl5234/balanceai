@@ -117,5 +117,9 @@ def handle_sync_journal_entries_from_bank_statement(journal_id: str, file_path: 
 
         storage_update_journal(journal)
 
-
-    return journal.to_dict()
+    result = journal.to_dict()
+    entries = result.get("entries", [])
+    if len(entries) > 5:
+        result["entries"] = entries[:5]
+        result["entries_redacted"] = len(entries) - 5
+    return result

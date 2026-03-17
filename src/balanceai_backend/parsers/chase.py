@@ -133,12 +133,18 @@ class ChaseParser(StatementParser):
 
         return period
 
-    def _infer_transaction_date(self, month: int, day: int, period: StatementPeriod) -> date:
+    def _infer_transaction_date(
+        self, month: int, day: int, period: StatementPeriod, allow_days_before: int = 0
+    ) -> date:
         """Infer the correct year for a transaction based on the statement period."""
+        from datetime import timedelta
+
+        window_start = period.start_date - timedelta(days=allow_days_before)
+
         # Try the start year first
         try:
             candidate = date(period.start_date.year, month, day)
-            if period.start_date <= candidate <= period.end_date:
+            if window_start <= candidate <= period.end_date:
                 return candidate
         except ValueError:
             pass
@@ -147,7 +153,7 @@ class ChaseParser(StatementParser):
         if period.end_date.year != period.start_date.year:
             try:
                 candidate = date(period.end_date.year, month, day)
-                if period.start_date <= candidate <= period.end_date:
+                if window_start <= candidate <= period.end_date:
                     return candidate
             except ValueError:
                 pass
@@ -190,7 +196,7 @@ class ChaseParser(StatementParser):
             txn_date_match = re.search(r"(?:Card Purchase With Pin|Card Purchase Return|Card Purchase|Recurring Card Purchase|Card Transaction)\s+(\d{1,2}/\d{1,2})\s", description) or re.match(r"^(\d{1,2}/\d{1,2})\s", description)
             if txn_date_match:
                 t_month, t_day = map(int, txn_date_match.group(1).split("/"))
-                transaction_date = self._infer_transaction_date(t_month, t_day, period)
+                transaction_date = self._infer_transaction_date(t_month, t_day, period, allow_days_before=7)
 
             transactions.append(
                 {
