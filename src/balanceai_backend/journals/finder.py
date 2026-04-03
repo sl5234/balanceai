@@ -1,7 +1,8 @@
 import json
 import logging
 
-from balanceai_backend.journals.storage import load_journal_entries
+from balanceai_backend.journals.journal_db import find_journal_entries
+from balanceai_backend.db import conn
 from balanceai_backend.models.journal import JournalEntry
 from balanceai_backend.prompts.journal_entry_finder import SYSTEM_PROMPT
 from balanceai_backend.utils.ocr_util import _extract_json
@@ -25,7 +26,7 @@ def find_journal_entry(journal_id: str, candidate: JournalEntry) -> JournalEntry
     Returns:
         The matching JournalEntry if found, otherwise None.
     """
-    entries = load_journal_entries(journal_id, date=candidate.date)
+    entries = find_journal_entries(journal_id, date=candidate.date, conn=conn)
     entries = [e for e in entries if e.account == candidate.account]
 
     if not entries:

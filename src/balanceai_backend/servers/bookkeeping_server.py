@@ -16,13 +16,8 @@ from mcp.server.fastmcp import FastMCP
 from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.config import settings
 from balanceai_backend.models import Account, Journal
-from balanceai_backend.journals.storage import (
-    find_journal_by_id,
-    load_journal_entries,
-    load_journals,
-    save_journal,
-    update_journal as storage_update_journal,
-)
+from balanceai_backend.db import conn
+from balanceai_backend.journals.journal_db import save_journal, update_journal as db_update_journal, find_journals as db_find_journals, find_journal_entries as db_find_journal_entries
 from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_receipt,
     handle_sync_journal_entries_from_transactions,
@@ -77,7 +72,7 @@ def create_journal(
         end_date = date(today.year, today.month, last_day)
 
     journal = Journal(account=acct, description=description, start_date=start_date, end_date=end_date)
-    save_journal(journal)
+    save_journal(journal, conn)
     return journal.to_dict()
 
 
@@ -102,9 +97,10 @@ def update_journal(
     Returns:
         dict with the updated journal
     """
-    journal = find_journal_by_id(journal_id)
-    if journal is None:
+    results = db_find_journals(journal_id=journal_id, conn=conn)
+    if not results:
         raise ValueError(f"Journal {journal_id} not found")
+    journal = results[0]
 
     if description is not None:
         journal.description = description
@@ -115,7 +111,7 @@ def update_journal(
     if entries is not None:
         journal.entries = [JournalEntry.from_dict(e) for e in entries]
 
-    storage_update_journal(journal)
+    db_update_journal(journal, conn)
 
     return journal.to_dict()
 
@@ -131,9 +127,7 @@ def list_journals(account_id: Optional[str] = None) -> list[dict]:
     Returns:
         List of journals with account, description, start_date, end_date, and entries.
     """
-    journals = load_journals()
-    if account_id is not None:
-        journals = [j for j in journals if j.account.id == account_id]
+    journals = db_find_journals(account_id=account_id, conn=conn)
     return [j.to_dict(redact_entries=True) for j in journals]
 
 
@@ -230,7 +224,7 @@ def list_journal_entries(journal_id: str, date: Optional[date] = None) -> list[d
     Returns:
         List of journal entries
     """
-    return [e.to_dict(redact=True) for e in load_journal_entries(journal_id, date=date)]
+    return [e.to_dict(redact=True) for e in db_find_journal_entries(journal_id, date=date, conn=conn)]
 
 
 @mcp.tool()
@@ -250,9 +244,10 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
     """
     import csv
 
-    journal = find_journal_by_id(journal_id)
-    if journal is None:
+    results = db_find_journals(journal_id=journal_id, conn=conn)
+    if not results:
         raise ValueError(f"Journal {journal_id} not found")
+    journal = results[0]
 
     filename = f"{journal.account.bank.value}_{journal.account.account_type.value}_{journal.start_date}_{journal.end_date}_{journal_id}.csv"
     out = Path(output_dir) / filename

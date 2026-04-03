@@ -6,8 +6,8 @@ import anthropic
 
 from balanceai_backend.helpers.plaid_helper import extract_journal_entries_from_transactions
 from balanceai_backend.journals.finder import find_journal_entry as finder_find_journal_entry
-from balanceai_backend.journals.storage import find_journal_by_id
-from balanceai_backend.journals.storage import update_journal as storage_update_journal
+from balanceai_backend.journals.journal_db import find_journals, update_journal as db_update_journal
+from balanceai_backend.db import conn
 from balanceai_backend.models.journal import GeneratedJournalEntrySet
 from balanceai_backend.parsers import get_parser
 import balanceai_backend.parsers.chase  # noqa: F401 - register parsers
@@ -20,9 +20,10 @@ _RATE_LIMIT_RETRY_SECONDS = 60
 
 
 def handle_sync_journal_entries_from_receipt(journal_id: str, input_local_path: Path) -> dict:
-    journal = find_journal_by_id(journal_id)
-    if journal is None:
+    results = find_journals(journal_id=journal_id, conn=conn)
+    if not results:
         raise ValueError(f"Journal {journal_id} not found")
+    journal = results[0]
 
     ocr_result = OcrUtil.executeWithAnthropic(
         content=input_local_path.read_bytes(),
@@ -38,14 +39,15 @@ def handle_sync_journal_entries_from_receipt(journal_id: str, input_local_path: 
             journal.remove_entry(existing.journal_entry_id)
         journal.add_entry(entry)
 
-    storage_update_journal(journal)
+    db_update_journal(journal, conn)
     return journal.to_dict()
 
 
 def handle_sync_journal_entries_from_transactions(journal_id: str, transactions: dict) -> dict:
-    journal = find_journal_by_id(journal_id)
-    if journal is None:
+    results = find_journals(journal_id=journal_id, conn=conn)
+    if not results:
         raise ValueError(f"Journal {journal_id} not found")
+    journal = results[0]
 
     grouped = extract_journal_entries_from_transactions(transactions)
     upsert_entries = grouped["upsert"]
@@ -64,14 +66,15 @@ def handle_sync_journal_entries_from_transactions(journal_id: str, transactions:
         if existing is not None:
             journal.remove_entry(existing.journal_entry_id)
 
-    storage_update_journal(journal)
+    db_update_journal(journal, conn)
     return journal.to_dict()
 
 
 def handle_sync_journal_entries_from_bank_statement(journal_id: str, file_path: str) -> dict:
-    journal = find_journal_by_id(journal_id)
-    if journal is None:
+    results = find_journals(journal_id=journal_id, conn=conn)
+    if not results:
         raise ValueError(f"Journal {journal_id} not found")
+    journal = results[0]
 
     _, transactions = get_parser(journal.account.bank).parse(file_path)
 
@@ -115,7 +118,7 @@ def handle_sync_journal_entries_from_bank_statement(journal_id: str, file_path: 
                 journal.remove_entry(existing.journal_entry_id)
             journal.add_entry(entry)
 
-        storage_update_journal(journal)
+        db_update_journal(journal, conn)
 
     result = journal.to_dict()
     entries = result.get("entries", [])
