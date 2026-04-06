@@ -3,10 +3,10 @@
 ## Questions Customers Might Ask
 
 ### Spending & Income
-- How much did I spend in the last X days/weeks/months?
-- How much did I spend on [category]?
-- How much did I spend at [merchant]?
-- What are my biggest expenses this month?
+- How much did I spend in the last X days/weeks/months? ✅
+- How much did I spend on [category]? ✅
+- How much did I spend at [merchant]? ✅
+- What are my biggest expenses this month? ✅
 - How has my spending changed over time?
 - How much income did I receive in the last X period?
 - What are my recurring expenses?

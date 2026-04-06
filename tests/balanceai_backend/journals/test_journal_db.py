@@ -4,43 +4,18 @@ from decimal import Decimal
 
 import pytest
 
+from balanceai_backend.db import create_schema
 from balanceai_backend.journals.journal_db import find_journal_entries, find_journals, save_journal, update_journal
 from balanceai_backend.models.account import Account, AccountType
 from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import Journal, JournalAccount, JournalEntry
-
-DDL = """
-    CREATE TABLE journals (
-        journal_id    TEXT PRIMARY KEY,
-        account_id    TEXT NOT NULL,
-        bank          TEXT NOT NULL,
-        account_type  TEXT NOT NULL,
-        description   TEXT NOT NULL DEFAULT '',
-        start_date    TEXT NOT NULL,
-        end_date      TEXT NOT NULL
-    );
-
-    CREATE TABLE journal_entries (
-        journal_entry_id  TEXT PRIMARY KEY,
-        journal_id        TEXT NOT NULL REFERENCES journals(journal_id) ON DELETE CASCADE,
-        date              TEXT NOT NULL,
-        account           TEXT NOT NULL,
-        description       TEXT,
-        debit             REAL NOT NULL,
-        credit            REAL NOT NULL,
-        category          TEXT,
-        tax               REAL NOT NULL DEFAULT 0,
-        recipient         TEXT
-    );
-"""
 
 
 @pytest.fixture
 def db():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(DDL)
+    create_schema(conn)
     yield conn
     conn.close()
 
