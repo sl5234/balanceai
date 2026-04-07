@@ -5,13 +5,13 @@ from google.genai.types import GenerateContentResponse
 
 from balanceai_backend.config import settings
 
-DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
-
+# DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
+DEFAULT_MODEL_ID = "gemini-2.5-flash"
 
 class GeminiClient:
     """Client for interacting with Google's Gemini API."""
 
-    def __init__(self, api_key: Optional[str] = None, model_id: str = DEFAULT_MODEL_ID):
+    def __init__(self, api_key: Optional[str] = None, model_id: Optional[str] = None):
         """Initialize the Gemini client.
 
         Args:
@@ -19,7 +19,7 @@ class GeminiClient:
             model_id: The Gemini model to use.
         """
         self.client = genai.Client(api_key=api_key or settings.gemini_api_key)
-        self.model_id = model_id
+        self.model_id = model_id if model_id is not None else DEFAULT_MODEL_ID
 
     def converse(
         self,

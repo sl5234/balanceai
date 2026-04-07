@@ -113,6 +113,14 @@ def save_journal(journal: Journal, conn: sqlite3.Connection = _default_conn) -> 
         )
 
 
+def delete_journal(journal_id: str, conn: sqlite3.Connection = _default_conn) -> None:
+    """Delete a journal and all its entries. Raises ValueError if journal not found."""
+    if not find_journals(journal_id=journal_id, conn=conn):
+        raise ValueError(f"Journal {journal_id} not found")
+    with conn:
+        conn.execute("DELETE FROM journals WHERE journal_id = ?", (journal_id,))
+
+
 def update_journal(updated: Journal, conn: sqlite3.Connection = _default_conn) -> None:
     """Replace a journal's data in storage by matching journal_id."""
     if not find_journals(journal_id=updated.journal_id, conn=conn):

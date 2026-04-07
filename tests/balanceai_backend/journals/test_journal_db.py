@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from balanceai_backend.db import create_schema
-from balanceai_backend.journals.journal_db import find_journal_entries, find_journals, save_journal, update_journal
+from balanceai_backend.journals.journal_db import delete_journal, find_journal_entries, find_journals, save_journal, update_journal
 from balanceai_backend.models.account import Account, AccountType
 from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import Journal, JournalAccount, JournalEntry
@@ -428,6 +428,50 @@ class TestFindJournalEntries:
 
         assert len(results) == 1
         assert results[0].journal_entry_id == "entry-j1"
+
+
+class TestDeleteJournal:
+    def test_deletes_journal(self, db, sample_journal):
+        save_journal(sample_journal, db)
+
+        delete_journal(sample_journal.journal_id, db)
+
+        assert find_journals(journal_id=sample_journal.journal_id, conn=db) == []
+
+    def test_cascades_to_entries(self, db, sample_journal):
+        save_journal(sample_journal, db)
+        _insert_entry(db, _make_entry("entry-1", datetime.date(2026, 1, 10), Decimal("10.00")), sample_journal.journal_id)
+
+        delete_journal(sample_journal.journal_id, db)
+
+        rows = db.execute("SELECT * FROM journal_entries WHERE journal_id = ?", (sample_journal.journal_id,)).fetchall()
+        assert rows == []
+
+    def test_raises_when_journal_not_found(self, db):
+        with pytest.raises(ValueError, match="nonexistent"):
+            delete_journal("nonexistent", db)
+
+    def test_does_not_delete_other_journals(self, db, sample_account):
+        j1 = Journal(
+            account=sample_account,
+            description="January",
+            start_date=datetime.date(2026, 1, 1),
+            end_date=datetime.date(2026, 1, 31),
+        )
+        j2 = Journal(
+            account=sample_account,
+            description="February",
+            start_date=datetime.date(2026, 2, 1),
+            end_date=datetime.date(2026, 2, 28),
+        )
+        save_journal(j1, db)
+        save_journal(j2, db)
+
+        delete_journal(j1.journal_id, db)
+
+        remaining = find_journals(conn=db)
+        assert len(remaining) == 1
+        assert remaining[0].journal_id == j2.journal_id
 
 
 class TestUpdateJournal:

@@ -6,12 +6,17 @@ _DOUBLE_ENTRY_SEMANTICS = """\
 Double-entry bookkeeping semantics — critical rules for correct queries:
 - Every transaction creates exactly TWO journal_entries (a debit leg and a credit leg).
 - SPENDING: debit leg has recipient='Self'; credit leg has recipient=<merchant name>.
-    To find spending at a merchant: WHERE recipient = '<merchant>' AND credit > 0
-    To find all spending: WHERE recipient != 'Self' AND credit > 0
+    To find spending at a merchant: WHERE je.account = 'cash' AND je.credit > 0 AND je.recipient = '<merchant>'
+    To find all spending: WHERE je.account = 'cash' AND je.credit > 0 AND je.recipient != 'Self'
 - INCOME: debit leg has recipient='Self' (cash received); credit leg has recipient=<payer>.
-    To find income: WHERE recipient = 'Self' AND debit > 0
+    To find income: WHERE je.account = 'income' AND je.debit > 0 AND je.recipient = 'Self'
 - NEVER filter by description to identify a merchant — both legs share the same description.
 - Always filter to ONE leg to avoid double-counting.
+- Column 'account' (bookkeeping type: 'cash', 'income', etc.) lives in journal_entries ONLY.
+  The journals table has 'account_id' (bank account UUID) and 'account_type' — NOT 'account'.
+- When filtering by Account ID, JOIN journals j ON j.journal_id = je.journal_id and filter j.account_id = '<id>'.
+  Example: SELECT SUM(je.credit) FROM journal_entries je JOIN journals j ON je.journal_id = j.journal_id
+           WHERE j.account_id = '<id>' AND je.account = 'cash' AND je.credit > 0 AND je.recipient != 'Self'
 Dates are ISO 8601 strings (e.g. '2025-10-22'). Monetary amounts (debit, credit) are in USD.
 """
 

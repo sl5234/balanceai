@@ -62,8 +62,14 @@ pytest --cov=src/balanceai --cov-report=html
 # Run tests verbosely
 pytest -v
 
+# Run unit test
+pytest tests/ -v
+
 # Run specific test file
 pytest tests/test_specific.py
+
+# Run integ test
+pytest integ_tests/ -v
 ```
 
 ## Pre-Commit Checklist

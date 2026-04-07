@@ -19,7 +19,7 @@ from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.config import settings
 from balanceai_backend.models import Account, Journal
 from balanceai_backend.db import conn
-from balanceai_backend.journals.journal_db import save_journal, update_journal as db_update_journal, find_journals as db_find_journals, find_journal_entries as db_find_journal_entries
+from balanceai_backend.journals.journal_db import save_journal, update_journal as db_update_journal, delete_journal as db_delete_journal, find_journals as db_find_journals, find_journal_entries as db_find_journal_entries
 from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_receipt,
     handle_sync_journal_entries_from_transactions,
@@ -141,6 +141,21 @@ def update_journal(
     db_update_journal(journal, conn)
 
     return journal.to_dict()
+
+
+@mcp.tool()
+def delete_journal(journal_id: str) -> dict:
+    """
+    Delete a journal and all its entries.
+
+    Args:
+        journal_id: The journal ID to delete
+
+    Returns:
+        dict with the deleted journal_id
+    """
+    db_delete_journal(journal_id, conn)
+    return {"journal_id": journal_id}
 
 
 @mcp.tool()
