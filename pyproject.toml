@@ -18,6 +18,7 @@ dependencies = [
     "pdfplumber",
     "pydantic",
     "tavily-python",
+    "gspread>=6.0",
 ]
 
 [project.optional-dependencies]

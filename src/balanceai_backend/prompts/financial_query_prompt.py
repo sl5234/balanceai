@@ -1,6 +1,11 @@
 from datetime import date
 
-from balanceai_backend.db import conn, get_distinct_accounts, get_distinct_categories, get_schema_summary
+from balanceai_backend.db import (
+    conn,
+    get_distinct_accounts,
+    get_distinct_categories,
+    get_schema_summary,
+)
 
 _DOUBLE_ENTRY_SEMANTICS = """\
 Double-entry bookkeeping semantics — critical rules for correct queries:

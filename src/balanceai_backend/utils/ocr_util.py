@@ -72,5 +72,5 @@ def _extract_json(text: str) -> str:
             elif ch == "}":
                 depth -= 1
                 if depth == 0:
-                    return text[start:i + 1]
+                    return text[start : i + 1]
     return text

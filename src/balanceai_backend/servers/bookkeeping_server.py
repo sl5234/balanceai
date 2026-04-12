@@ -19,14 +19,30 @@ from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.config import settings
 from balanceai_backend.models import Account, Journal
 from balanceai_backend.db import conn
-from balanceai_backend.journals.journal_db import save_journal, update_journal as db_update_journal, delete_journal as db_delete_journal, find_journals as db_find_journals, find_journal_entries as db_find_journal_entries
+from balanceai_backend.journals.journal_db import (
+    save_journal,
+    update_journal as db_update_journal,
+    delete_journal as db_delete_journal,
+    find_journals as db_find_journals,
+    find_journal_entries as db_find_journal_entries,
+)
 from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_receipt,
     handle_sync_journal_entries_from_transactions,
     handle_sync_journal_entries_from_bank_statement,
 )
 from balanceai_backend.models.journal import JournalEntry
+from balanceai_backend.models.report import ReportDefinition
 from balanceai_backend.prompts.financial_query_prompt import financial_query_system_prompt
+from balanceai_backend.prompts.report_definition_prompt import (
+    report_definition_system_prompt,
+    report_definition_user_message,
+)
+from balanceai_backend.reports.report_definition_db import (
+    save_report_definition as _save_report_definition,
+    find_report_definitions as _find_report_definitions,
+    delete_report_definition as _delete_report_definition,
+)
 from balanceai_backend.services.gemini import GeminiClient, converse as gemini_converse
 
 logger = logging.getLogger(__name__)
@@ -66,6 +82,17 @@ mcp = FastMCP(
         call 2: sum spend across those recipients
     - Pass prior call results in the `context` argument when a follow-up query
       depends on previous results (e.g. for comparison or anomaly detection).
+    - `create_report_definition` requires an `unparameterized_sql` from a prior
+      `analyze_financial_question` call. Never call it without first running the
+      relevant queries. Specifically:
+        step 1: find DISTINCT recipients matching the subject over the past 6 months
+                (use the same two-step fuzzy lookup described above)
+        step 2: run a sample query for the most recent 1-month period using those recipients
+        step 3: call `create_report_definition` with the SQL from step 2 as `unparameterized_sql`
+                and pass the user's original request as `prompt`
+    - `generate_report` accepts an optional `parameters` dict for any named parameters
+      beyond :start_date/:end_date (e.g. {"category": "dining"}). Check the "parameters"
+      field on the report definition to see what params it expects.
     """,
 )
 
@@ -98,7 +125,9 @@ def create_journal(
         last_day = calendar.monthrange(today.year, today.month)[1]
         end_date = date(today.year, today.month, last_day)
 
-    journal = Journal(account=acct, description=description, start_date=start_date, end_date=end_date)
+    journal = Journal(
+        account=acct, description=description, start_date=start_date, end_date=end_date
+    )
     save_journal(journal, conn)
     return journal.to_dict()
 
@@ -196,6 +225,7 @@ def sync_journal_entries_from_receipt(
         dict with the updated journal
     """
     from pathlib import Path
+
     return handle_sync_journal_entries_from_receipt(journal_id, Path(input_local_path))
 
 
@@ -266,7 +296,9 @@ def list_journal_entries(journal_id: str, date: Optional[date] = None) -> list[d
     Returns:
         List of journal entries
     """
-    return [e.to_dict(redact=True) for e in db_find_journal_entries(journal_id, date=date, conn=conn)]
+    return [
+        e.to_dict(redact=True) for e in db_find_journal_entries(journal_id, date=date, conn=conn)
+    ]
 
 
 @mcp.tool()
@@ -284,7 +316,6 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
     Returns:
         dict with output_path and number of rows written
     """
-    import csv
 
     results = db_find_journals(journal_id=journal_id, conn=conn)
     if not results:
@@ -295,7 +326,17 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
     out = Path(output_dir) / filename
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    fieldnames = ["journal_entry_id", "date", "account", "description", "debit", "credit", "category", "tax", "recipient"]
+    fieldnames = [
+        "journal_entry_id",
+        "date",
+        "account",
+        "description",
+        "debit",
+        "credit",
+        "category",
+        "tax",
+        "recipient",
+    ]
     with out.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -389,6 +430,233 @@ def analyze_financial_question(
         "sql": sql,
         "rows": rows,
         "row_count": len(rows),
+    }
+
+
+@mcp.tool()
+def create_report_definition(
+    name: str,
+    prompt: str,
+    unparameterized_sql: str,
+    description: Optional[str] = None,
+) -> dict:
+    """
+    Save a reusable report definition from a verified SQL query.
+
+    The unparameterized_sql must come from a prior analyze_financial_question call.
+    An LLM pass uses the user's prompt to decide which hardcoded literals to promote
+    to named parameters (always dates; other scalars based on stated intent).
+    Only parameterization changes are made — the SQL structure is preserved as-is.
+
+    Args:
+        name: Short human-readable name for the report.
+        prompt: The user's stated intent for this report (e.g. "track whether I'm
+            cutting back on clothing month over month"). Used by the LLM to decide
+            which values to parameterize.
+        unparameterized_sql: SQL from analyze_financial_question to use as the template.
+        description: Optional human-readable description of what the report shows.
+            Defaults to the prompt if not provided.
+
+    Returns:
+        The saved ReportDefinition as a dict, including the parameterized sql_template
+        and a list of named parameters.
+    """
+    desc = description or prompt
+    system_prompt = report_definition_system_prompt()
+    user_message = report_definition_user_message(
+        sample_sql=unparameterized_sql,
+        name=name,
+        prompt=prompt,
+        description=desc,
+    )
+    logger.debug("create_report_definition | user_message: %s", user_message)
+
+    try:
+        raw = gemini_converse(
+            client=GeminiClient(),
+            user_message=user_message,
+            system_prompt=system_prompt,
+            max_tokens=1024,
+        )
+    except Exception as e:
+        logger.error("create_report_definition | gemini call failed: %s", e, exc_info=True)
+        raise
+    logger.debug("create_report_definition | raw_response:\n%s", raw)
+
+    try:
+        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+        json_str = json_match.group(1).strip() if json_match else raw.strip()
+        parsed = json.loads(json_str)
+        sql_template = parsed["sql"]
+        parameters = parsed.get("parameters", [])
+    except Exception as e:
+        logger.error("create_report_definition | response parsing failed: %s", e, exc_info=True)
+        raise
+
+    defn = ReportDefinition(
+        name=name,
+        prompt=prompt,
+        sql_template=sql_template,
+        description=desc,
+        unparameterized_sql=unparameterized_sql,
+        parameters=parameters,
+    )
+    _save_report_definition(defn)
+    logger.info("Created report definition %s: %s", defn.report_definition_id, defn.name)
+    return defn.to_dict()
+
+
+@mcp.tool()
+def list_report_definitions() -> list[dict]:
+    """
+    List all saved report definitions.
+
+    Returns:
+        List of ReportDefinition dicts ordered by creation date (newest first).
+    """
+    return [d.to_dict() for d in _find_report_definitions()]
+
+
+@mcp.tool()
+def delete_report_definition(report_definition_id: str) -> dict:
+    """
+    Delete a saved report definition.
+
+    Args:
+        report_definition_id: ID of the report definition to delete.
+
+    Returns:
+        dict with report_definition_id of the deleted definition.
+    """
+    _delete_report_definition(report_definition_id)
+    return {"report_definition_id": report_definition_id}
+
+
+@mcp.tool()
+def generate_report(
+    report_definition_id: str,
+    start_date: date,
+    end_date: date,
+    parameters: Optional[dict] = None,
+) -> dict:
+    """
+    Execute a saved report definition for a given date range.
+
+    Loads the SQL template from the report definition, substitutes :start_date,
+    :end_date, and any additional named parameters, then returns the result rows.
+
+    To see which parameters a report accepts, check the "parameters" field returned
+    by list_report_definitions or create_report_definition.
+
+    Args:
+        report_definition_id: ID of the report definition to run.
+        start_date: Start of the report period (inclusive).
+        end_date: End of the report period (inclusive).
+        parameters: Optional dict of additional named parameters beyond dates,
+            e.g. {"category": "dining"} for a report with a :category placeholder.
+
+    Returns:
+        dict with report_definition_id, name, description, start_date, end_date,
+        and rows (one dict per result row).
+    """
+    matches = _find_report_definitions(report_definition_id=report_definition_id)
+    if not matches:
+        raise ValueError(f"ReportDefinition '{report_definition_id}' not found")
+    defn = matches[0]
+
+    params: dict = {"start_date": str(start_date), "end_date": str(end_date)}
+    if parameters:
+        params.update(parameters)
+
+    rows = [dict(r) for r in conn.execute(defn.sql_template, params).fetchall()]
+
+    return {
+        "report_definition_id": report_definition_id,
+        "name": defn.name,
+        "description": defn.description,
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+        "rows": rows,
+    }
+
+
+@mcp.tool()
+def publish_report(
+    report_definition_id: str,
+    start_date: date,
+    end_date: date,
+    spreadsheet_id: str,
+    worksheet_name: Optional[str] = None,
+) -> dict:
+    """
+    Execute a report definition and publish the results to a Google Sheet.
+
+    Column headers are derived from the SQL result columns. A TOTAL row is
+    appended for any numeric columns.
+
+    Requires GOOGLE_SERVICE_ACCOUNT_PATH to be set in settings.
+
+    Args:
+        report_definition_id: ID of the report definition to run.
+        start_date: Start of the report period (inclusive).
+        end_date: End of the report period (inclusive).
+        spreadsheet_id: Google Sheet ID (from the sheet URL).
+        worksheet_name: Tab name to write to. Defaults to "<start_date>_<end_date>".
+
+    Returns:
+        dict with spreadsheet_id, worksheet_name, and rows_written.
+    """
+    import gspread
+
+    if not settings.google_service_account_path:
+        raise ValueError("GOOGLE_SERVICE_ACCOUNT_PATH is not configured in settings")
+
+    report = generate_report(
+        report_definition_id=report_definition_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    if worksheet_name is None:
+        worksheet_name = f"{start_date}_{end_date}"
+
+    rows = report["rows"]
+    if not rows:
+        headers = []
+        all_rows: list = []
+    else:
+        headers = list(rows[0].keys())
+        data_rows = [[r[h] for h in headers] for r in rows]
+        total_row = [
+            (
+                sum(r[h] for r in rows)
+                if isinstance(rows[0][h], (int, float))
+                else ("TOTAL" if i == 0 else "")
+            )
+            for i, h in enumerate(headers)
+        ]
+        all_rows = [headers] + data_rows + [[]] + [total_row]
+
+    gc = gspread.service_account(filename=settings.google_service_account_path)
+    spreadsheet = gc.open_by_key(spreadsheet_id)
+
+    try:
+        ws = spreadsheet.worksheet(worksheet_name)
+        ws.clear()
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(
+            title=worksheet_name,
+            rows=len(all_rows) + 10,
+            cols=max(len(headers), 1),
+        )
+
+    if all_rows:
+        ws.update(all_rows, value_input_option="USER_ENTERED")
+
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "worksheet_name": worksheet_name,
+        "rows_written": len(all_rows),
     }
 
 

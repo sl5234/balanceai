@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     - AWS credentials file (~/.aws/credentials)
     """
 
+    # Google
+    google_service_account_path: str = "/Users/sl5234/Downloads/onyx-park-332005-ace00613a6b8.json"
+
     # AWS
     aws_region: str = "us-west-2"
     kms_key_arn: str = "arn:aws:kms:us-west-2:792341830430:key/f46115bb-774a-4777-ab66-29903da24381"
@@ -107,7 +110,7 @@ class Settings(BaseSettings):
         assert self._aws_clients is not None, "AWS clients must be initialized"
         return self.decrypt_value(
             self.encrypted_anthropic_api_key, self._aws_clients, self.kms_key_arn
-        )        
+        )
 
     @property
     def tavily_api_key(self) -> str:
@@ -116,5 +119,6 @@ class Settings(BaseSettings):
         return self.decrypt_value(
             self.encrypted_tavily_api_key, self._aws_clients, self.kms_key_arn
         )
+
 
 settings = Settings()

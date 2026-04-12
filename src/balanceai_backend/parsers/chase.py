@@ -193,10 +193,15 @@ class ChaseParser(StatementParser):
 
             # Extract transaction date from description (e.g., "Card Purchase 11/22 ...")
             transaction_date = None
-            txn_date_match = re.search(r"(?:Card Purchase With Pin|Card Purchase Return|Card Purchase|Recurring Card Purchase|Card Transaction)\s+(\d{1,2}/\d{1,2})\s", description) or re.match(r"^(\d{1,2}/\d{1,2})\s", description)
+            txn_date_match = re.search(
+                r"(?:Card Purchase With Pin|Card Purchase Return|Card Purchase|Recurring Card Purchase|Card Transaction)\s+(\d{1,2}/\d{1,2})\s",
+                description,
+            ) or re.match(r"^(\d{1,2}/\d{1,2})\s", description)
             if txn_date_match:
                 t_month, t_day = map(int, txn_date_match.group(1).split("/"))
-                transaction_date = self._infer_transaction_date(t_month, t_day, period, allow_days_before=7)
+                transaction_date = self._infer_transaction_date(
+                    t_month, t_day, period, allow_days_before=7
+                )
 
             transactions.append(
                 {

@@ -5,7 +5,13 @@ from decimal import Decimal
 import pytest
 
 from balanceai_backend.db import create_schema
-from balanceai_backend.journals.journal_db import delete_journal, find_journal_entries, find_journals, save_journal, update_journal
+from balanceai_backend.journals.journal_db import (
+    delete_journal,
+    find_journal_entries,
+    find_journals,
+    save_journal,
+    update_journal,
+)
 from balanceai_backend.models.account import Account, AccountType
 from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import Journal, JournalAccount, JournalEntry
@@ -39,13 +45,17 @@ class TestSaveJournal:
     def test_inserts_journal(self, db, sample_journal):
         save_journal(sample_journal, db)
 
-        row = db.execute("SELECT * FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)).fetchone()
+        row = db.execute(
+            "SELECT * FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)
+        ).fetchone()
         assert row is not None
 
     def test_all_fields_persisted(self, db, sample_account, sample_journal):
         save_journal(sample_journal, db)
 
-        row = db.execute("SELECT * FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)).fetchone()
+        row = db.execute(
+            "SELECT * FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)
+        ).fetchone()
         assert row["journal_id"] == sample_journal.journal_id
         assert row["account_id"] == sample_account.id
         assert row["bank"] == Bank.CHASE.value
@@ -272,8 +282,12 @@ class TestFindJournals:
         )
         save_journal(j1, db)
         save_journal(j2, db)
-        _insert_entry(db, _make_entry("entry-j1", datetime.date(2026, 1, 10), Decimal("10.00")), j1.journal_id)
-        _insert_entry(db, _make_entry("entry-j2", datetime.date(2026, 2, 10), Decimal("20.00")), j2.journal_id)
+        _insert_entry(
+            db, _make_entry("entry-j1", datetime.date(2026, 1, 10), Decimal("10.00")), j1.journal_id
+        )
+        _insert_entry(
+            db, _make_entry("entry-j2", datetime.date(2026, 2, 10), Decimal("20.00")), j2.journal_id
+        )
 
         results = find_journals(journal_id=j1.journal_id, conn=db)
 
@@ -330,16 +344,24 @@ class TestFindJournalEntries:
         _insert_entry(db, e1, sample_journal.journal_id)
         _insert_entry(db, e2, sample_journal.journal_id)
 
-        results = find_journal_entries(sample_journal.journal_id, date=datetime.date(2026, 1, 10), conn=db)
+        results = find_journal_entries(
+            sample_journal.journal_id, date=datetime.date(2026, 1, 10), conn=db
+        )
 
         assert len(results) == 1
         assert results[0].journal_entry_id == "entry-1"
 
     def test_filter_by_date_returns_empty_when_no_match(self, db, sample_journal):
         save_journal(sample_journal, db)
-        _insert_entry(db, _make_entry("entry-1", datetime.date(2026, 1, 10), Decimal("10.00")), sample_journal.journal_id)
+        _insert_entry(
+            db,
+            _make_entry("entry-1", datetime.date(2026, 1, 10), Decimal("10.00")),
+            sample_journal.journal_id,
+        )
 
-        results = find_journal_entries(sample_journal.journal_id, date=datetime.date(2026, 1, 15), conn=db)
+        results = find_journal_entries(
+            sample_journal.journal_id, date=datetime.date(2026, 1, 15), conn=db
+        )
 
         assert results == []
 
@@ -350,7 +372,9 @@ class TestFindJournalEntries:
         _insert_entry(db, e1, sample_journal.journal_id)
         _insert_entry(db, e2, sample_journal.journal_id)
 
-        results = find_journal_entries(sample_journal.journal_id, date=datetime.date(2026, 1, 10), conn=db)
+        results = find_journal_entries(
+            sample_journal.journal_id, date=datetime.date(2026, 1, 10), conn=db
+        )
 
         assert {e.journal_entry_id for e in results} == {"entry-1", "entry-2"}
 
@@ -385,10 +409,22 @@ class TestFindJournalEntries:
 
     def test_null_recipient_defaults_to_self(self, db, sample_journal):
         from balanceai_backend.models.journal import RECIPIENT_SELF
+
         save_journal(sample_journal, db)
         db.execute(
             "INSERT INTO journal_entries VALUES (?,?,?,?,?,?,?,?,?,?)",
-            ("entry-null-recip", sample_journal.journal_id, "2026-01-10", "cash", "test", "5.00", "0", None, "0", None),
+            (
+                "entry-null-recip",
+                sample_journal.journal_id,
+                "2026-01-10",
+                "cash",
+                "test",
+                "5.00",
+                "0",
+                None,
+                "0",
+                None,
+            ),
         )
         db.commit()
 
@@ -398,9 +434,21 @@ class TestFindJournalEntries:
 
     def test_entries_ordered_by_date(self, db, sample_journal):
         save_journal(sample_journal, db)
-        _insert_entry(db, _make_entry("entry-3", datetime.date(2026, 1, 30), Decimal("30.00")), sample_journal.journal_id)
-        _insert_entry(db, _make_entry("entry-1", datetime.date(2026, 1, 10), Decimal("10.00")), sample_journal.journal_id)
-        _insert_entry(db, _make_entry("entry-2", datetime.date(2026, 1, 20), Decimal("20.00")), sample_journal.journal_id)
+        _insert_entry(
+            db,
+            _make_entry("entry-3", datetime.date(2026, 1, 30), Decimal("30.00")),
+            sample_journal.journal_id,
+        )
+        _insert_entry(
+            db,
+            _make_entry("entry-1", datetime.date(2026, 1, 10), Decimal("10.00")),
+            sample_journal.journal_id,
+        )
+        _insert_entry(
+            db,
+            _make_entry("entry-2", datetime.date(2026, 1, 20), Decimal("20.00")),
+            sample_journal.journal_id,
+        )
 
         results = find_journal_entries(sample_journal.journal_id, conn=db)
 
@@ -421,8 +469,12 @@ class TestFindJournalEntries:
         )
         save_journal(j1, db)
         save_journal(j2, db)
-        _insert_entry(db, _make_entry("entry-j1", datetime.date(2026, 1, 10), Decimal("10.00")), j1.journal_id)
-        _insert_entry(db, _make_entry("entry-j2", datetime.date(2026, 2, 10), Decimal("20.00")), j2.journal_id)
+        _insert_entry(
+            db, _make_entry("entry-j1", datetime.date(2026, 1, 10), Decimal("10.00")), j1.journal_id
+        )
+        _insert_entry(
+            db, _make_entry("entry-j2", datetime.date(2026, 2, 10), Decimal("20.00")), j2.journal_id
+        )
 
         results = find_journal_entries(j1.journal_id, conn=db)
 
@@ -440,11 +492,17 @@ class TestDeleteJournal:
 
     def test_cascades_to_entries(self, db, sample_journal):
         save_journal(sample_journal, db)
-        _insert_entry(db, _make_entry("entry-1", datetime.date(2026, 1, 10), Decimal("10.00")), sample_journal.journal_id)
+        _insert_entry(
+            db,
+            _make_entry("entry-1", datetime.date(2026, 1, 10), Decimal("10.00")),
+            sample_journal.journal_id,
+        )
 
         delete_journal(sample_journal.journal_id, db)
 
-        rows = db.execute("SELECT * FROM journal_entries WHERE journal_id = ?", (sample_journal.journal_id,)).fetchall()
+        rows = db.execute(
+            "SELECT * FROM journal_entries WHERE journal_id = ?", (sample_journal.journal_id,)
+        ).fetchall()
         assert rows == []
 
     def test_raises_when_journal_not_found(self, db):
@@ -482,7 +540,9 @@ class TestUpdateJournal:
 
         update_journal(sample_journal, db)
 
-        row = db.execute("SELECT * FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)).fetchone()
+        row = db.execute(
+            "SELECT * FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)
+        ).fetchone()
         assert row["description"] == "Updated description"
         assert row["end_date"] == "2026-01-30"
 
@@ -491,14 +551,27 @@ class TestUpdateJournal:
         save_journal(sample_journal, db)
         db.execute(
             "INSERT INTO journal_entries VALUES (?,?,?,?,?,?,?,?,?,?)",
-            ("entry-1", sample_journal.journal_id, "2026-01-10", "cash", "old", "10.00", "0", None, "0", "Self"),
+            (
+                "entry-1",
+                sample_journal.journal_id,
+                "2026-01-10",
+                "cash",
+                "old",
+                "10.00",
+                "0",
+                None,
+                "0",
+                "Self",
+            ),
         )
 
         entry2 = _make_entry("entry-2", datetime.date(2026, 1, 20), Decimal("99.00"))
         sample_journal.entries = [entry2]
         update_journal(sample_journal, db)
 
-        rows = db.execute("SELECT * FROM journal_entries WHERE journal_id = ?", (sample_journal.journal_id,)).fetchall()
+        rows = db.execute(
+            "SELECT * FROM journal_entries WHERE journal_id = ?", (sample_journal.journal_id,)
+        ).fetchall()
         assert len(rows) == 1
         assert rows[0]["journal_entry_id"] == "entry-2"
 
@@ -518,18 +591,33 @@ class TestUpdateJournal:
         save_journal(other, db)
         db.execute(
             "INSERT INTO journal_entries VALUES (?,?,?,?,?,?,?,?,?,?)",
-            ("entry-collision", other.journal_id, "2026-02-01", "cash", "other", "5.00", "0", None, "0", "Self"),
+            (
+                "entry-collision",
+                other.journal_id,
+                "2026-02-01",
+                "cash",
+                "other",
+                "5.00",
+                "0",
+                None,
+                "0",
+                "Self",
+            ),
         )
         db.commit()
 
         # update sample_journal with a new description and an entry whose ID collides
         sample_journal.description = "Should not persist"
-        collision_entry = _make_entry("entry-collision", datetime.date(2026, 1, 5), Decimal("20.00"))
+        collision_entry = _make_entry(
+            "entry-collision", datetime.date(2026, 1, 5), Decimal("20.00")
+        )
         sample_journal.entries = [collision_entry]
 
         with pytest.raises(Exception):
             update_journal(sample_journal, db)
 
         # journal description must be unchanged
-        row = db.execute("SELECT description FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)).fetchone()
+        row = db.execute(
+            "SELECT description FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)
+        ).fetchone()
         assert row["description"] == "January journal"

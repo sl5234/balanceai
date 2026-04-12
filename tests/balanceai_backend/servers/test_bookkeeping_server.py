@@ -19,7 +19,10 @@ from balanceai_backend.models.journal import (
     GeneratedJournalEntrySet,
 )
 from balanceai_backend.db import conn
-from balanceai_backend.servers.bookkeeping_server import sync_journal_entries_from_receipt, list_journal_entries
+from balanceai_backend.servers.bookkeeping_server import (
+    sync_journal_entries_from_receipt,
+    list_journal_entries,
+)
 
 
 @pytest.fixture
@@ -77,29 +80,43 @@ def journal_with_entries(sample_account, sample_entry, sample_entry_2):
 
 class TestListJournalEntries:
     def test_returns_empty_list_when_journal_has_no_entries(self):
-        with patch("balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[]):
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[]
+        ):
             result = list_journal_entries("journal-1")
         assert result == []
 
     def test_returns_all_entries(self, sample_entry, sample_entry_2):
-        with patch("balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[sample_entry, sample_entry_2]):
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_entries",
+            return_value=[sample_entry, sample_entry_2],
+        ):
             result = list_journal_entries("journal-1")
         assert len(result) == 2
 
     def test_returns_entries_in_order(self, sample_entry, sample_entry_2):
-        with patch("balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[sample_entry, sample_entry_2]):
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_entries",
+            return_value=[sample_entry, sample_entry_2],
+        ):
             result = list_journal_entries("journal-1")
         assert result[0]["journal_entry_id"] == sample_entry.journal_entry_id
         assert result[1]["journal_entry_id"] == sample_entry_2.journal_entry_id
 
     def test_entries_are_returned_as_dicts(self, sample_entry, sample_entry_2):
-        with patch("balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[sample_entry, sample_entry_2]):
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_entries",
+            return_value=[sample_entry, sample_entry_2],
+        ):
             result = list_journal_entries("journal-1")
         for entry in result:
             assert isinstance(entry, dict)
 
     def test_entry_dict_contains_expected_fields(self, sample_entry):
-        with patch("balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[sample_entry]):
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_entries",
+            return_value=[sample_entry],
+        ):
             result = list_journal_entries("journal-1")
         entry = result[0]
         assert entry["journal_entry_id"] == sample_entry.journal_entry_id
@@ -109,31 +126,45 @@ class TestListJournalEntries:
         assert entry["credit"] == str(sample_entry.credit)
 
     def test_entry_dict_includes_tax_field(self, sample_entry):
-        with patch("balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[sample_entry]):
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_entries",
+            return_value=[sample_entry],
+        ):
             result = list_journal_entries("journal-1")
         for entry in result:
             assert "tax" in entry
             assert entry["tax"] == "0"
 
     def test_raises_value_error_when_journal_not_found(self):
-        with patch("balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", side_effect=ValueError("journal-999")):
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_entries",
+            side_effect=ValueError("journal-999"),
+        ):
             with pytest.raises(ValueError, match="journal-999"):
                 list_journal_entries("journal-999")
 
     def test_filters_entries_by_date(self, sample_entry):
-        with patch("balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[sample_entry]) as mock:
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_entries",
+            return_value=[sample_entry],
+        ) as mock:
             result = list_journal_entries("journal-1", date=sample_entry.date)
         mock.assert_called_once_with("journal-1", date=sample_entry.date, conn=conn)
         assert len(result) == 1
         assert result[0]["journal_entry_id"] == sample_entry.journal_entry_id
 
     def test_returns_empty_list_when_no_entries_match_date(self):
-        with patch("balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[]):
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[]
+        ):
             result = list_journal_entries("journal-1", date=datetime.date(2020, 1, 1))
         assert result == []
 
     def test_returns_all_entries_when_date_not_provided(self, sample_entry, sample_entry_2):
-        with patch("balanceai_backend.servers.bookkeeping_server.db_find_journal_entries", return_value=[sample_entry, sample_entry_2]):
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_entries",
+            return_value=[sample_entry, sample_entry_2],
+        ):
             result = list_journal_entries("journal-1")
         assert len(result) == 2
 
@@ -177,16 +208,18 @@ def ocr_entry_data():
 
 @pytest.fixture
 def ocr_result(ocr_entry_data):
-    return GeneratedJournalEntrySet(entries=[
-        ocr_entry_data,
-        GeneratedJournalEntry(
-            date=datetime.date(2026, 1, 27),
-            account=JournalAccount.CASH,
-            description="Grocery purchase at Trader Joe's",
-            debit=Decimal("0.00"),
-            credit=Decimal("32.02"),
-        ),
-    ])
+    return GeneratedJournalEntrySet(
+        entries=[
+            ocr_entry_data,
+            GeneratedJournalEntry(
+                date=datetime.date(2026, 1, 27),
+                account=JournalAccount.CASH,
+                description="Grocery purchase at Trader Joe's",
+                debit=Decimal("0.00"),
+                credit=Decimal("32.02"),
+            ),
+        ]
+    )
 
 
 class TestCreateOrUpdateJournalEntriesForReceipt:
@@ -196,9 +229,17 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
                 sync_journal_entries_from_receipt("journal-999", receipt_path)
 
     def test_creates_new_entry_when_no_match(self, journal, receipt_path, ocr_result):
-        with patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]):
-            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+        with patch(
+            "balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]
+        ):
+            with patch(
+                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
+                return_value=ocr_result,
+            ):
+                with patch(
+                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                    return_value=None,
+                ):
                     with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
                         result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
@@ -207,9 +248,17 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         assert "Grocery purchase at Trader Joe's" in descriptions
 
     def test_new_entry_gets_fresh_id(self, journal, receipt_path, ocr_result):
-        with patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]):
-            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+        with patch(
+            "balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]
+        ):
+            with patch(
+                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
+                return_value=ocr_result,
+            ):
+                with patch(
+                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                    return_value=None,
+                ):
                     with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
                         result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
@@ -235,40 +284,62 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
             entries=[existing_entry],
         )
 
-        with patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]):
-            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", side_effect=[existing_entry, None]):
+        with patch(
+            "balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]
+        ):
+            with patch(
+                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
+                return_value=ocr_result,
+            ):
+                with patch(
+                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                    side_effect=[existing_entry, None],
+                ):
                     with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
                         result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 2
-        expense = next(e for e in result["entries"] if e["account"] == JournalAccount.NON_ESSENTIALS_EXPENSE.value)
+        expense = next(
+            e
+            for e in result["entries"]
+            if e["account"] == JournalAccount.NON_ESSENTIALS_EXPENSE.value
+        )
         assert expense["journal_entry_id"] == "original-id"
         assert expense["description"] == "Grocery purchase at Trader Joe's"
         assert expense["debit"] == "32.02"
 
     def test_adds_multiple_entries_from_ocr(self, journal, receipt_path):
         # Double-entry: one debit line and one credit line from the same receipt
-        double_entry_result = GeneratedJournalEntrySet(entries=[
-            GeneratedJournalEntry(
-                date=datetime.date(2026, 1, 27),
-                account=JournalAccount.NON_ESSENTIALS_EXPENSE,
-                description="Grocery purchase at Trader Joe's",
-                debit=Decimal("32.02"),
-                credit=Decimal("0.00"),
-            ),
-            GeneratedJournalEntry(
-                date=datetime.date(2026, 1, 27),
-                account=JournalAccount.CASH,
-                description="Payment via Visa",
-                debit=Decimal("0.00"),
-                credit=Decimal("32.02"),
-            ),
-        ])
+        double_entry_result = GeneratedJournalEntrySet(
+            entries=[
+                GeneratedJournalEntry(
+                    date=datetime.date(2026, 1, 27),
+                    account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+                    description="Grocery purchase at Trader Joe's",
+                    debit=Decimal("32.02"),
+                    credit=Decimal("0.00"),
+                ),
+                GeneratedJournalEntry(
+                    date=datetime.date(2026, 1, 27),
+                    account=JournalAccount.CASH,
+                    description="Payment via Visa",
+                    debit=Decimal("0.00"),
+                    credit=Decimal("32.02"),
+                ),
+            ]
+        )
 
-        with patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]):
-            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=double_entry_result):
-                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+        with patch(
+            "balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]
+        ):
+            with patch(
+                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
+                return_value=double_entry_result,
+            ):
+                with patch(
+                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                    return_value=None,
+                ):
                     with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
                         result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
@@ -277,26 +348,49 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
     def test_no_entries_from_ocr_leaves_journal_unchanged(self, journal, receipt_path):
         empty_ocr_result = GeneratedJournalEntrySet(entries=[])
 
-        with patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]):
-            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=empty_ocr_result):
+        with patch(
+            "balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]
+        ):
+            with patch(
+                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
+                return_value=empty_ocr_result,
+            ):
                 with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
                     result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert result["entries"] == []
 
     def test_storage_update_called_once(self, journal, receipt_path, ocr_result):
-        with patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]):
-            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
-                    with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal") as mock_save:
+        with patch(
+            "balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]
+        ):
+            with patch(
+                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
+                return_value=ocr_result,
+            ):
+                with patch(
+                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                    return_value=None,
+                ):
+                    with patch(
+                        "balanceai_backend.helpers.journal_entry_helper.db_update_journal"
+                    ) as mock_save:
                         sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         mock_save.assert_called_once_with(journal, conn)
 
     def test_returns_journal_as_dict(self, journal, receipt_path, ocr_result):
-        with patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]):
-            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", return_value=None):
+        with patch(
+            "balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]
+        ):
+            with patch(
+                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
+                return_value=ocr_result,
+            ):
+                with patch(
+                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                    return_value=None,
+                ):
                     with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
                         result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
@@ -324,30 +418,42 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
             end_date=datetime.date(2026, 1, 31),
             entries=[existing_entry],
         )
-        ocr_result = GeneratedJournalEntrySet(entries=[
-            GeneratedJournalEntry(
-                date=datetime.date(2026, 1, 27),
-                account=JournalAccount.NON_ESSENTIALS_EXPENSE,
-                description="Grocery purchase at Trader Joe's",
-                debit=Decimal("32.02"),
-                credit=Decimal("0.00"),
-            ),
-            GeneratedJournalEntry(
-                date=datetime.date(2026, 1, 27),
-                account=JournalAccount.CASH,
-                description="Payment via Visa",
-                debit=Decimal("0.00"),
-                credit=Decimal("32.02"),
-            ),
-        ])
+        ocr_result = GeneratedJournalEntrySet(
+            entries=[
+                GeneratedJournalEntry(
+                    date=datetime.date(2026, 1, 27),
+                    account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+                    description="Grocery purchase at Trader Joe's",
+                    debit=Decimal("32.02"),
+                    credit=Decimal("0.00"),
+                ),
+                GeneratedJournalEntry(
+                    date=datetime.date(2026, 1, 27),
+                    account=JournalAccount.CASH,
+                    description="Payment via Visa",
+                    debit=Decimal("0.00"),
+                    credit=Decimal("32.02"),
+                ),
+            ]
+        )
 
         def fake_finder(journal_id, entry):
             # Only the GENERAL entry matches the pre-existing journal entry
-            return existing_entry if entry.account == JournalAccount.NON_ESSENTIALS_EXPENSE else None
+            return (
+                existing_entry if entry.account == JournalAccount.NON_ESSENTIALS_EXPENSE else None
+            )
 
-        with patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]):
-            with patch("balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic", return_value=ocr_result):
-                with patch("balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry", side_effect=fake_finder):
+        with patch(
+            "balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]
+        ):
+            with patch(
+                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
+                return_value=ocr_result,
+            ):
+                with patch(
+                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                    side_effect=fake_finder,
+                ):
                     with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
                         result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 

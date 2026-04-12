@@ -16,7 +16,7 @@ class TestGeminiClient:
         with patch("balanceai_backend.services.gemini.genai") as mock_genai:
             client = GeminiClient(api_key="test-key")
             mock_genai.Client.assert_called_once_with(api_key="test-key")
-            assert client.model_id == "gemini-2.5-flash-lite"
+            assert client.model_id == "gemini-2.5-flash"
 
     def test_init_defaults_to_settings(self):
         """Test client initialization falls back to settings.gemini_api_key."""
@@ -52,7 +52,7 @@ class TestGeminiClient:
 
             assert result == "Test response"
             mock_genai_instance.models.generate_content.assert_called_once_with(
-                model="gemini-2.5-flash-lite",
+                model="gemini-2.5-flash",
                 contents="Hello",
                 config={
                     "system_instruction": "Be helpful",
@@ -119,7 +119,7 @@ class TestGeminiIntegration:
     Run with: pytest -m integration
     Requires GEMINI_API_KEY environment variable to be set.
 
-    Rate limits (gemini-2.5-flash-lite): 20 requests per minute.
+    Rate limits (gemini-2.5-flash): 20 requests per minute.
     """
 
     RATE_LIMIT_DELAY = 4  # seconds between calls
@@ -192,6 +192,8 @@ class TestGeminiIntegration:
         assert "description" in parsed, "Response must contain a 'description' key"
         assert parsed["sql"].strip().upper().startswith("SELECT"), "sql must be a SELECT statement"
         # Should filter by recipient, not description
-        assert "recipient" in parsed["sql"].lower(), "sql should filter by recipient for merchant queries"
+        assert (
+            "recipient" in parsed["sql"].lower()
+        ), "sql should filter by recipient for merchant queries"
 
         time.sleep(self.RATE_LIMIT_DELAY)

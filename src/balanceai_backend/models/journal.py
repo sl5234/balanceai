@@ -144,7 +144,6 @@ class PlaidTransactionInputConfig(BaseModel):
     transactions: dict
 
 
-
 class JournalEntry(GeneratedJournalEntry):
     journal_entry_id: str
 

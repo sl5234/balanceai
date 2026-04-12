@@ -16,7 +16,6 @@ def db():
 
 
 class TestGetSchemaSummary:
-
     def test_empty_database_returns_empty_string(self, db):
         assert get_schema_summary(db) == ""
 
@@ -66,6 +65,7 @@ class TestGetSchemaSummary:
     def test_real_schema_tables_present(self):
         """Smoke test against the real DB — journals and journal_entries must appear."""
         from balanceai_backend.db import conn
+
         result = get_schema_summary(conn)
         assert "journals(" in result
         assert "journal_entries(" in result
@@ -73,6 +73,7 @@ class TestGetSchemaSummary:
     def test_real_schema_key_columns_present(self):
         """Key columns used in queries must be present in the summary."""
         from balanceai_backend.db import conn
+
         result = get_schema_summary(conn)
         for col in ("recipient", "credit", "debit", "category", "date"):
             assert col in result, f"Expected column '{col}' in schema summary"
@@ -107,7 +108,6 @@ def db_with_entries():
 
 
 class TestGetDistinctCategories:
-
     def test_returns_distinct_values(self, db_with_entries):
         result = get_distinct_categories(db_with_entries)
         assert sorted(c for c in result if c is not None) == ["dining", "groceries"]
@@ -126,7 +126,6 @@ class TestGetDistinctCategories:
 
 
 class TestGetDistinctAccounts:
-
     def test_returns_distinct_values(self, db_with_entries):
         result = get_distinct_accounts(db_with_entries)
         assert sorted(result) == ["checking", "savings"]

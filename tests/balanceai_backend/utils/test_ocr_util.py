@@ -48,7 +48,9 @@ class TestOcrUtilAnthropicText:
     def test_text_content_returns_valid_model(self, mock_messages):
         mock_messages.return_value = '{"name": "Coffee Shop", "amount": 4.50}'
 
-        result = OcrUtil.executeWithAnthropic(content="some receipt text", output_format=SampleOutput)
+        result = OcrUtil.executeWithAnthropic(
+            content="some receipt text", output_format=SampleOutput
+        )
 
         assert isinstance(result, SampleOutput)
         assert result.name == "Coffee Shop"
@@ -83,7 +85,9 @@ class TestOcrUtilAnthropicImage:
     def test_bytes_passes_mime_type(self, mock_messages):
         mock_messages.return_value = '{"name": "x", "amount": 0}'
 
-        OcrUtil.executeWithAnthropic(content=b"\xff\xd8", output_format=SampleOutput, mime_type="image/jpeg")
+        OcrUtil.executeWithAnthropic(
+            content=b"\xff\xd8", output_format=SampleOutput, mime_type="image/jpeg"
+        )
 
         assert mock_messages.call_args.kwargs["mime_type"] == "image/jpeg"
 
@@ -101,7 +105,9 @@ class TestOcrUtilAnthropicArgumentPassing:
     def test_custom_model_id(self, mock_messages):
         mock_messages.return_value = '{"name": "x", "amount": 0}'
 
-        OcrUtil.executeWithAnthropic(content="text", output_format=SampleOutput, model_id="claude-opus-4-6")
+        OcrUtil.executeWithAnthropic(
+            content="text", output_format=SampleOutput, model_id="claude-opus-4-6"
+        )
 
         assert mock_messages.call_args.kwargs["model_id"] == "claude-opus-4-6"
 

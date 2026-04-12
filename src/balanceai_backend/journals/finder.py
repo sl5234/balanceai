@@ -38,6 +38,7 @@ def find_journal_entry(journal_id: str, candidate: JournalEntry) -> JournalEntry
     )
 
     from balanceai_backend.services.anthropic import messages
+
     response = messages(
         model_id=_MODEL_ID,
         content=prompt,

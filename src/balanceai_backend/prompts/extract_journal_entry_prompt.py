@@ -51,6 +51,7 @@ Journal entries:
   - debit: 0.00, credit: 15.00, account: non_essential_expense, description: "Purchase from Amazon.com."     
 """
 
+
 def extract_journal_entries_prompt(schema: str, merchant_context: str | None = None) -> str:
     context_section = (
         f"\nMerchant context from web search: {merchant_context}\n\n" if merchant_context else ""

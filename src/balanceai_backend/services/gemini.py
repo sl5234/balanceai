@@ -8,6 +8,7 @@ from balanceai_backend.config import settings
 # DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
 DEFAULT_MODEL_ID = "gemini-2.5-flash"
 
+
 class GeminiClient:
     """Client for interacting with Google's Gemini API."""
 

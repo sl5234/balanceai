@@ -11,7 +11,6 @@ from balanceai_backend.models.journal import (
     RECIPIENT_SELF,
 )
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -132,7 +131,13 @@ def entry_dict():
 
 class TestGeneratedJournalEntrySet:
     def test_accepts_balanced_entries(self, base_entry):
-        cash = base_entry.model_copy(update={"account": JournalAccount.CASH, "debit": Decimal("0"), "credit": Decimal("25.00")})
+        cash = base_entry.model_copy(
+            update={
+                "account": JournalAccount.CASH,
+                "debit": Decimal("0"),
+                "credit": Decimal("25.00"),
+            }
+        )
         result = GeneratedJournalEntrySet(entries=[base_entry, cash])
         assert len(result.entries) == 2
 

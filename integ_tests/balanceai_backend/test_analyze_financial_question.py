@@ -44,38 +44,173 @@ from balanceai_backend.servers.bookkeeping_server import analyze_financial_quest
 
 _JOURNAL_ENTRIES = [
     # (journal_entry_id, journal_id, date, account, description, debit, credit, category, tax, recipient)
-
     # Salary income $5,000 — Oct 01
-    ("e01", "j1", "2025-10-01", "cash", "Salary from Acme Corp", 5000.0, 0.0, "income", 0.0, "Self"),
-    ("e02", "j1", "2025-10-01", "sale", "Salary from Acme Corp", 0.0, 5000.0, "income", 0.0, "Acme Corp"),
-
+    (
+        "e01",
+        "j1",
+        "2025-10-01",
+        "cash",
+        "Salary from Acme Corp",
+        5000.0,
+        0.0,
+        "income",
+        0.0,
+        "Self",
+    ),
+    (
+        "e02",
+        "j1",
+        "2025-10-01",
+        "sale",
+        "Salary from Acme Corp",
+        0.0,
+        5000.0,
+        "income",
+        0.0,
+        "Acme Corp",
+    ),
     # Whole Foods $120 — Oct 05
-    ("e03", "j1", "2025-10-05", "essential_expense", "Whole Foods grocery run", 120.0, 0.0, "groceries", 0.0, "Self"),
-    ("e04", "j1", "2025-10-05", "cash", "Whole Foods grocery run", 0.0, 120.0, "groceries", 0.0, "Whole Foods"),
-
+    (
+        "e03",
+        "j1",
+        "2025-10-05",
+        "essential_expense",
+        "Whole Foods grocery run",
+        120.0,
+        0.0,
+        "groceries",
+        0.0,
+        "Self",
+    ),
+    (
+        "e04",
+        "j1",
+        "2025-10-05",
+        "cash",
+        "Whole Foods grocery run",
+        0.0,
+        120.0,
+        "groceries",
+        0.0,
+        "Whole Foods",
+    ),
     # Shell $50 — Oct 10
     ("e05", "j1", "2025-10-10", "essential_expense", "Gas at Shell", 50.0, 0.0, "gas", 0.0, "Self"),
     ("e06", "j1", "2025-10-10", "cash", "Gas at Shell", 0.0, 50.0, "gas", 0.0, "Shell"),
-
     # Netflix $15 — Oct 12
-    ("e07", "j1", "2025-10-12", "non_essential_expense", "Netflix subscription", 15.0, 0.0, "entertainment", 0.0, "Self"),
-    ("e08", "j1", "2025-10-12", "cash", "Netflix subscription", 0.0, 15.0, "entertainment", 0.0, "Netflix"),
-
+    (
+        "e07",
+        "j1",
+        "2025-10-12",
+        "non_essential_expense",
+        "Netflix subscription",
+        15.0,
+        0.0,
+        "entertainment",
+        0.0,
+        "Self",
+    ),
+    (
+        "e08",
+        "j1",
+        "2025-10-12",
+        "cash",
+        "Netflix subscription",
+        0.0,
+        15.0,
+        "entertainment",
+        0.0,
+        "Netflix",
+    ),
     # Whole Foods $80 — Oct 20
-    ("e09", "j1", "2025-10-20", "essential_expense", "Whole Foods grocery run", 80.0, 0.0, "groceries", 0.0, "Self"),
-    ("e10", "j1", "2025-10-20", "cash", "Whole Foods grocery run", 0.0, 80.0, "groceries", 0.0, "Whole Foods"),
-
+    (
+        "e09",
+        "j1",
+        "2025-10-20",
+        "essential_expense",
+        "Whole Foods grocery run",
+        80.0,
+        0.0,
+        "groceries",
+        0.0,
+        "Self",
+    ),
+    (
+        "e10",
+        "j1",
+        "2025-10-20",
+        "cash",
+        "Whole Foods grocery run",
+        0.0,
+        80.0,
+        "groceries",
+        0.0,
+        "Whole Foods",
+    ),
     # Amazon $95 — Oct 25
-    ("e11", "j1", "2025-10-25", "essential_expense", "Amazon purchase", 95.0, 0.0, "shopping", 0.0, "Self"),
+    (
+        "e11",
+        "j1",
+        "2025-10-25",
+        "essential_expense",
+        "Amazon purchase",
+        95.0,
+        0.0,
+        "shopping",
+        0.0,
+        "Self",
+    ),
     ("e12", "j1", "2025-10-25", "cash", "Amazon purchase", 0.0, 95.0, "shopping", 0.0, "Amazon"),
-
     # Transfer to Bank of America 9999 $500 — Oct 08
-    ("e13", "j1", "2025-10-08", "cash", "Transfer to Bank of America 9999", 500.0, 0.0, "transfer", 0.0, "Self"),
-    ("e14", "j1", "2025-10-08", "transfer", "Transfer to Bank of America 9999", 0.0, 500.0, "transfer", 0.0, "Bank of America 9999"),
-
+    (
+        "e13",
+        "j1",
+        "2025-10-08",
+        "cash",
+        "Transfer to Bank of America 9999",
+        500.0,
+        0.0,
+        "transfer",
+        0.0,
+        "Self",
+    ),
+    (
+        "e14",
+        "j1",
+        "2025-10-08",
+        "transfer",
+        "Transfer to Bank of America 9999",
+        0.0,
+        500.0,
+        "transfer",
+        0.0,
+        "Bank of America 9999",
+    ),
     # Transfer to Bank of America 9999 $1,000 — Oct 22
-    ("e15", "j1", "2025-10-22", "cash", "Transfer to Bank of America 9999", 1000.0, 0.0, "transfer", 0.0, "Self"),
-    ("e16", "j1", "2025-10-22", "transfer", "Transfer to Bank of America 9999", 0.0, 1000.0, "transfer", 0.0, "Bank of America 9999"),
+    (
+        "e15",
+        "j1",
+        "2025-10-22",
+        "cash",
+        "Transfer to Bank of America 9999",
+        1000.0,
+        0.0,
+        "transfer",
+        0.0,
+        "Self",
+    ),
+    (
+        "e16",
+        "j1",
+        "2025-10-22",
+        "transfer",
+        "Transfer to Bank of America 9999",
+        0.0,
+        1000.0,
+        "transfer",
+        0.0,
+        "Bank of America 9999",
+    ),
 ]
 
 
@@ -104,12 +239,7 @@ RATE_LIMIT_DELAY = 13  # seconds between Gemini calls (free tier: 5 req/min)
 
 def _numeric_values(rows: list[dict]) -> list[float]:
     """Flatten all numeric values out of a list of row dicts."""
-    return [
-        float(v)
-        for row in rows
-        for v in row.values()
-        if isinstance(v, (int, float))
-    ]
+    return [float(v) for row in rows for v in row.values() if isinstance(v, (int, float))]
 
 
 def _contains_approx(values: list[float], expected: float, rel: float = 0.01) -> bool:
@@ -120,8 +250,8 @@ def _contains_approx(values: list[float], expected: float, rel: float = 0.01) ->
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestAnalyzeFinancialQuestion:
 
+class TestAnalyzeFinancialQuestion:
     @pytest.fixture(autouse=True)
     def synthetic_db(self):
         db = _make_synthetic_db()
@@ -250,9 +380,7 @@ class TestAnalyzeFinancialQuestion:
             start_date=date(2025, 10, 1),
             end_date=date(2025, 10, 31),
         )
-        assert result["row_count"] > 1, (
-            "Expected multiple rows for biggest expenses breakdown"
-        )
+        assert result["row_count"] > 1, "Expected multiple rows for biggest expenses breakdown"
         time.sleep(RATE_LIMIT_DELAY)
 
     def test_biggest_expenses_top_is_whole_foods(self):

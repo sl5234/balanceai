@@ -11,7 +11,10 @@ from balanceai_backend.db import conn
 from balanceai_backend.models.journal import GeneratedJournalEntrySet
 from balanceai_backend.parsers import get_parser
 import balanceai_backend.parsers.chase  # noqa: F401 - register parsers
-from balanceai_backend.utils.journal_entry_util import extract_journal_entries_from_bank_statement_transaction, generate_transaction_category
+from balanceai_backend.utils.journal_entry_util import (
+    extract_journal_entries_from_bank_statement_transaction,
+    generate_transaction_category,
+)
 from balanceai_backend.utils.general_util import get_mime_type
 from balanceai_backend.utils.ocr_util import OcrUtil
 
@@ -78,14 +81,19 @@ def handle_sync_journal_entries_from_bank_statement(journal_id: str, file_path: 
 
     _, transactions = get_parser(journal.account.bank).parse(file_path)
 
-    batches = [transactions[i:i + _BATCH_SIZE] for i in range(0, len(transactions), _BATCH_SIZE)]
+    batches = [transactions[i : i + _BATCH_SIZE] for i in range(0, len(transactions), _BATCH_SIZE)]
 
     for batch in batches:
         # Step 1: parallel journal entry generation
         while True:
             try:
                 with ThreadPoolExecutor(max_workers=len(batch)) as executor:
-                    futures = {executor.submit(extract_journal_entries_from_bank_statement_transaction, txn): txn for txn in batch}
+                    futures = {
+                        executor.submit(
+                            extract_journal_entries_from_bank_statement_transaction, txn
+                        ): txn
+                        for txn in batch
+                    }
                     all_entries = []
                     for future in as_completed(futures):
                         all_entries.extend(future.result())
@@ -101,7 +109,9 @@ def handle_sync_journal_entries_from_bank_statement(journal_id: str, file_path: 
                 try:
                     null_entries = [all_entries[i] for i in null_indices]
                     with ThreadPoolExecutor(max_workers=len(null_entries)) as executor:
-                        recategorized = list(executor.map(generate_transaction_category, null_entries))
+                        recategorized = list(
+                            executor.map(generate_transaction_category, null_entries)
+                        )
                     for i, entry in zip(null_indices, recategorized):
                         all_entries[i] = entry
                 except anthropic.RateLimitError:

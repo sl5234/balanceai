@@ -49,6 +49,7 @@ if not _aws_clients.is_initialized():
     _aws_clients.initialize()
 settings.set_aws_clients(_aws_clients)
 
+
 @mcp.resource("balanceai://supported-banks")
 def get_supported_banks() -> str:
     """

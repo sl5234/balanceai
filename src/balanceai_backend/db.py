@@ -37,22 +37,29 @@ def create_schema(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_entries_category   ON journal_entries(category);
         CREATE INDEX IF NOT EXISTS idx_entries_account    ON journal_entries(account);
         CREATE INDEX IF NOT EXISTS idx_entries_recipient  ON journal_entries(recipient);
+
+        CREATE TABLE IF NOT EXISTS report_definitions (
+            report_definition_id  TEXT PRIMARY KEY,
+            name                  TEXT NOT NULL,
+            prompt                TEXT NOT NULL,
+            sql_template          TEXT NOT NULL,
+            description           TEXT NOT NULL DEFAULT '',
+            unparameterized_sql   TEXT,
+            parameters            TEXT,
+            created_at            TEXT NOT NULL
+        );
     """)
 
 
 def get_distinct_categories(connection: sqlite3.Connection) -> list[str | None]:
     """Return all distinct category values from journal_entries, including NULL."""
-    rows = connection.execute(
-        "SELECT DISTINCT category FROM journal_entries"
-    ).fetchall()
+    rows = connection.execute("SELECT DISTINCT category FROM journal_entries").fetchall()
     return [row[0] for row in rows]
 
 
 def get_distinct_accounts(connection: sqlite3.Connection) -> list[str | None]:
     """Return all distinct account values from journal_entries, including NULL."""
-    rows = connection.execute(
-        "SELECT DISTINCT account FROM journal_entries"
-    ).fetchall()
+    rows = connection.execute("SELECT DISTINCT account FROM journal_entries").fetchall()
     return [row[0] for row in rows]
 
 
@@ -80,9 +87,26 @@ def get_schema_summary(connection: sqlite3.Connection) -> str:
     return "\n".join(lines)
 
 
+def _apply_migrations(connection: sqlite3.Connection) -> None:
+    """Apply incremental schema migrations for columns added after initial creation."""
+    migrations = [
+        # Rename sample_sql -> unparameterized_sql (SQLite 3.25+)
+        "ALTER TABLE report_definitions RENAME COLUMN sample_sql TO unparameterized_sql",
+        # Add parameters column for LLM-identified named params
+        "ALTER TABLE report_definitions ADD COLUMN parameters TEXT",
+    ]
+    for sql in migrations:
+        try:
+            connection.execute(sql)
+            connection.commit()
+        except sqlite3.OperationalError:
+            pass  # Already applied or column doesn't exist yet on a fresh schema
+
+
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 conn = sqlite3.connect(DATA_DIR / "balanceai.db", check_same_thread=False)
 conn.row_factory = sqlite3.Row
 create_schema(conn)
+_apply_migrations(conn)
