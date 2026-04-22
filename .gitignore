@@ -37,6 +37,12 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# Expo / React Native
+node_modules/
+.expo/
+dist/
+web-build/
+
 # Project specific
 *.db
 *.sqlite

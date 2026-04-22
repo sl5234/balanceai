@@ -27,6 +27,15 @@ Add to `~/.claude.json`:
 
 Then restart Claude Code.
 
+### Frontend
+
+```bash
+npx expo start        # start dev server (then press i, a, or w)
+npx expo start --ios
+npx expo start --android
+npx expo start --web
+```
+
 ## Available Tools
 
 ### balance-ai (Journals)

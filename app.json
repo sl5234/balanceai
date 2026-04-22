@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "BalanceAI",
+    "slug": "balanceai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/balanceai_frontend/assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./src/balanceai_frontend/assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./src/balanceai_frontend/assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./src/balanceai_frontend/assets/favicon.png"
+    }
+  }
+}
