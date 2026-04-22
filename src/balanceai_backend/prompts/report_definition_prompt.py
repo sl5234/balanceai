@@ -22,6 +22,12 @@ Rules:
   literals represent user-varying criteria worth parameterizing (e.g. :category,
   :recipient, :min_amount). Only parameterize scalars — do NOT attempt to parameterize
   IN-clause lists (SQLite named parameters cannot expand lists).
+- Consistency rule: if a scalar literal is semantically coupled to a hardcoded
+  IN-clause list (e.g. category = 'shopping' is coupled to an IN (...) list of
+  shopping-specific merchants), treat them as a unit — either parameterize all or
+  none. Because IN-clause lists cannot be parameterized, any scalar coupled to a
+  hardcoded IN-list MUST remain hardcoded too. Never parameterize a scalar while
+  leaving its coupled IN-list hardcoded.
 - Leave structural literals hardcoded (e.g. account = 'cash' if it is not the
   subject of the report).
 - Return ONLY valid JSON with no extra text.

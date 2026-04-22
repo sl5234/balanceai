@@ -5,8 +5,8 @@ from google.genai.types import GenerateContentResponse
 
 from balanceai_backend.config import settings
 
-# DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
-DEFAULT_MODEL_ID = "gemini-2.5-flash"
+DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
+# DEFAULT_MODEL_ID = "gemini-2.5-flash"
 
 
 class GeminiClient:

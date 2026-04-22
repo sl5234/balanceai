@@ -16,7 +16,7 @@ class TestGeminiClient:
         with patch("balanceai_backend.services.gemini.genai") as mock_genai:
             client = GeminiClient(api_key="test-key")
             mock_genai.Client.assert_called_once_with(api_key="test-key")
-            assert client.model_id == "gemini-2.5-flash"
+            assert client.model_id == "gemini-2.5-flash-lite"
 
     def test_init_defaults_to_settings(self):
         """Test client initialization falls back to settings.gemini_api_key."""
@@ -52,7 +52,7 @@ class TestGeminiClient:
 
             assert result == "Test response"
             mock_genai_instance.models.generate_content.assert_called_once_with(
-                model="gemini-2.5-flash",
+                model="gemini-2.5-flash-lite",
                 contents="Hello",
                 config={
                     "system_instruction": "Be helpful",

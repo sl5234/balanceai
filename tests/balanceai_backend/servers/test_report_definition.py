@@ -1,4 +1,3 @@
-import datetime
 import json
 import sqlite3
 import sys
@@ -159,13 +158,69 @@ class TestCreateReportDefinition:
 
 
 class TestGenerateReport:
-    def test_reproduces_standard_bucketing_output(self, seeded_conn):
+    def test_reproduces_standard_bucketing_output(self, seeded_conn, tmp_path):
         """
-        Verifies that generate_report, when given the standard bucketing SQL template,
-        returns the same column structure as the old hardcoded generate_report tool.
+        Verifies that generate_report returns the correct row_count and writes
+        expected columns and values to the CSV when local_path is provided.
         """
         defn = ReportDefinition(
             name="Standard Budget Report",
+            prompt="",
+            sql_template=_STANDARD_BUCKETING_SQL,
+            description="",
+        )
+        out_csv = str(tmp_path / "report.csv")
+
+        with (
+            patch(
+                "balanceai_backend.servers.bookkeeping_server._find_report_definitions",
+                return_value=[defn],
+            ),
+            patch("balanceai_backend.servers.bookkeeping_server.conn", seeded_conn),
+        ):
+            result = generate_report(
+                report_definition_id=defn.report_definition_id,
+                parameters={"start_date": "2025-10-01", "end_date": "2025-10-31"},
+                local_path=out_csv,
+            )
+
+        assert result["parameters"]["start_date"] == "2025-10-01"
+        assert result["parameters"]["end_date"] == "2025-10-31"
+        assert result["row_count"] == 4
+        assert result["sql"] == _STANDARD_BUCKETING_SQL
+        assert result["local_path"] == out_csv
+        assert "rows" not in result
+
+        import csv as _csv
+
+        with open(out_csv, newline="") as f:
+            reader = _csv.DictReader(f)
+            rows = list(reader)
+
+        expected_columns = {
+            "date",
+            "income",
+            "essential_expenses",
+            "non_essential_expenses",
+            "transfers",
+        }
+        assert expected_columns.issubset(set(rows[0].keys()))
+
+        income_row = next(r for r in rows if float(r["income"]) > 0)
+        assert float(income_row["income"]) == pytest.approx(5000.0)
+
+        essential_row = next(r for r in rows if float(r["essential_expenses"]) > 0)
+        assert float(essential_row["essential_expenses"]) == pytest.approx(120.0)
+
+        non_essential_row = next(r for r in rows if float(r["non_essential_expenses"]) > 0)
+        assert float(non_essential_row["non_essential_expenses"]) == pytest.approx(15.0)
+
+        transfer_row = next(r for r in rows if float(r["transfers"]) > 0)
+        assert float(transfer_row["transfers"]) == pytest.approx(500.0)
+
+    def test_no_local_path_omits_local_path_key(self, seeded_conn):
+        defn = ReportDefinition(
+            name="Test",
             prompt="",
             sql_template=_STANDARD_BUCKETING_SQL,
             description="",
@@ -180,49 +235,19 @@ class TestGenerateReport:
         ):
             result = generate_report(
                 report_definition_id=defn.report_definition_id,
-                start_date=datetime.date(2025, 10, 1),
-                end_date=datetime.date(2025, 10, 31),
+                parameters={"start_date": "2025-10-01", "end_date": "2025-10-31"},
             )
 
-        assert result["start_date"] == "2025-10-01"
-        assert result["end_date"] == "2025-10-31"
-
-        rows = result["rows"]
-        assert len(rows) == 4  # one row per active date
-
-        # Verify column names match the old generate_report output (minus net, which is now SQL's job)
-        expected_columns = {
-            "date",
-            "income",
-            "essential_expenses",
-            "non_essential_expenses",
-            "transfers",
-        }
-        assert expected_columns.issubset(set(rows[0].keys()))
-
-        # Spot-check values against seeded data
-        income_row = next(r for r in rows if r["income"] > 0)
-        assert income_row["income"] == pytest.approx(5000.0)
-
-        essential_row = next(r for r in rows if r["essential_expenses"] > 0)
-        assert essential_row["essential_expenses"] == pytest.approx(120.0)
-
-        non_essential_row = next(r for r in rows if r["non_essential_expenses"] > 0)
-        assert non_essential_row["non_essential_expenses"] == pytest.approx(15.0)
-
-        transfer_row = next(r for r in rows if r["transfers"] > 0)
-        assert transfer_row["transfers"] == pytest.approx(500.0)
+        assert result["row_count"] == 4
+        assert "local_path" not in result
+        assert "rows" not in result
 
     def test_raises_when_definition_not_found(self):
         with patch(
             "balanceai_backend.servers.bookkeeping_server._find_report_definitions", return_value=[]
         ):
             with pytest.raises(ValueError, match="not found"):
-                generate_report(
-                    report_definition_id="nonexistent",
-                    start_date=datetime.date(2025, 10, 1),
-                    end_date=datetime.date(2025, 10, 31),
-                )
+                generate_report(report_definition_id="nonexistent")
 
     def test_date_range_filters_rows(self, seeded_conn):
         defn = ReportDefinition(
@@ -242,12 +267,10 @@ class TestGenerateReport:
             # Only Oct 1 falls in this range (income entry)
             result = generate_report(
                 report_definition_id=defn.report_definition_id,
-                start_date=datetime.date(2025, 10, 1),
-                end_date=datetime.date(2025, 10, 3),
+                parameters={"start_date": "2025-10-01", "end_date": "2025-10-03"},
             )
 
-        assert len(result["rows"]) == 1
-        assert result["rows"][0]["income"] == pytest.approx(5000.0)
+        assert result["row_count"] == 1
 
 
 class TestListAndDeleteReportDefinitions:

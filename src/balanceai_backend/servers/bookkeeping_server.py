@@ -535,129 +535,59 @@ def delete_report_definition(report_definition_id: str) -> dict:
 @mcp.tool()
 def generate_report(
     report_definition_id: str,
-    start_date: date,
-    end_date: date,
     parameters: Optional[dict] = None,
+    local_path: Optional[str] = None,
 ) -> dict:
     """
-    Execute a saved report definition for a given date range.
+    Execute a saved report definition with the given parameters.
 
-    Loads the SQL template from the report definition, substitutes :start_date,
-    :end_date, and any additional named parameters, then returns the result rows.
+    Loads the SQL template from the report definition, substitutes all named
+    parameters, and returns metadata about the run. If local_path is provided,
+    the result rows are written to that path as a CSV file.
 
     To see which parameters a report accepts, check the "parameters" field returned
     by list_report_definitions or create_report_definition.
 
     Args:
         report_definition_id: ID of the report definition to run.
-        start_date: Start of the report period (inclusive).
-        end_date: End of the report period (inclusive).
-        parameters: Optional dict of additional named parameters beyond dates,
-            e.g. {"category": "dining"} for a report with a :category placeholder.
+        parameters: Dict of named parameters matching the report definition's
+            "parameters" field, e.g. {"start_date": "2025-10-01", "end_date": "2025-10-31"}.
+        local_path: Optional local file path to write the result rows as CSV.
 
     Returns:
-        dict with report_definition_id, name, description, start_date, end_date,
-        and rows (one dict per result row).
+        dict with report_definition_id, name, description, parameters, sql, row_count,
+        and local_path (only present when local_path argument is provided).
     """
     matches = _find_report_definitions(report_definition_id=report_definition_id)
     if not matches:
         raise ValueError(f"ReportDefinition '{report_definition_id}' not found")
     defn = matches[0]
 
-    params: dict = {"start_date": str(start_date), "end_date": str(end_date)}
-    if parameters:
-        params.update(parameters)
+    params: dict = parameters or {}
+    logger.debug(
+        "generate_report | id: %s | name: %s | params: %s", report_definition_id, defn.name, params
+    )
+    logger.debug("generate_report | sql_template: %s", defn.sql_template)
 
     rows = [dict(r) for r in conn.execute(defn.sql_template, params).fetchall()]
+    logger.debug("generate_report | row_count: %d", len(rows))
 
-    return {
+    result: dict = {
         "report_definition_id": report_definition_id,
         "name": defn.name,
         "description": defn.description,
-        "start_date": str(start_date),
-        "end_date": str(end_date),
-        "rows": rows,
+        "parameters": params,
+        "sql": defn.sql_template,
+        "row_count": len(rows),
     }
 
+    if local_path is not None:
+        from balanceai_backend.utils.general_util import publish_data
 
-@mcp.tool()
-def publish_report(
-    report_definition_id: str,
-    start_date: date,
-    end_date: date,
-    spreadsheet_id: str,
-    worksheet_name: Optional[str] = None,
-) -> dict:
-    """
-    Execute a report definition and publish the results to a Google Sheet.
+        publish_data(rows, local_path)
+        result["local_path"] = local_path
 
-    Column headers are derived from the SQL result columns. A TOTAL row is
-    appended for any numeric columns.
-
-    Requires GOOGLE_SERVICE_ACCOUNT_PATH to be set in settings.
-
-    Args:
-        report_definition_id: ID of the report definition to run.
-        start_date: Start of the report period (inclusive).
-        end_date: End of the report period (inclusive).
-        spreadsheet_id: Google Sheet ID (from the sheet URL).
-        worksheet_name: Tab name to write to. Defaults to "<start_date>_<end_date>".
-
-    Returns:
-        dict with spreadsheet_id, worksheet_name, and rows_written.
-    """
-    import gspread
-
-    if not settings.google_service_account_path:
-        raise ValueError("GOOGLE_SERVICE_ACCOUNT_PATH is not configured in settings")
-
-    report = generate_report(
-        report_definition_id=report_definition_id,
-        start_date=start_date,
-        end_date=end_date,
-    )
-
-    if worksheet_name is None:
-        worksheet_name = f"{start_date}_{end_date}"
-
-    rows = report["rows"]
-    if not rows:
-        headers = []
-        all_rows: list = []
-    else:
-        headers = list(rows[0].keys())
-        data_rows = [[r[h] for h in headers] for r in rows]
-        total_row = [
-            (
-                sum(r[h] for r in rows)
-                if isinstance(rows[0][h], (int, float))
-                else ("TOTAL" if i == 0 else "")
-            )
-            for i, h in enumerate(headers)
-        ]
-        all_rows = [headers] + data_rows + [[]] + [total_row]
-
-    gc = gspread.service_account(filename=settings.google_service_account_path)
-    spreadsheet = gc.open_by_key(spreadsheet_id)
-
-    try:
-        ws = spreadsheet.worksheet(worksheet_name)
-        ws.clear()
-    except gspread.exceptions.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(
-            title=worksheet_name,
-            rows=len(all_rows) + 10,
-            cols=max(len(headers), 1),
-        )
-
-    if all_rows:
-        ws.update(all_rows, value_input_option="USER_ENTERED")
-
-    return {
-        "spreadsheet_id": spreadsheet_id,
-        "worksheet_name": worksheet_name,
-        "rows_written": len(all_rows),
-    }
+    return result
 
 
 if __name__ == "__main__":
