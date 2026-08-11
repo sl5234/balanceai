@@ -3,6 +3,7 @@
     "name": "BalanceAI",
     "slug": "balanceai",
     "version": "1.0.0",
+    "scheme": "balanceai",
     "orientation": "portrait",
     "icon": "./src/balanceai_frontend/assets/icon.png",
     "userInterfaceStyle": "light",
@@ -10,21 +11,29 @@
     "splash": {
       "image": "./src/balanceai_frontend/assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#f3f2f2"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.balanceai.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./src/balanceai_frontend/assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#f3f2f2"
       },
+      "package": "com.balanceai.app",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
+      "bundler": "metro",
+      "output": "single",
       "favicon": "./src/balanceai_frontend/assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ]
   }
 }
