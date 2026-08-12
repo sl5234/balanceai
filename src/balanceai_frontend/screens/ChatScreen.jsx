@@ -1,173 +1,199 @@
 import { useRef, useState } from 'react';
-import { View, Text, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, TextInput, Pressable, KeyboardAvoidingView, Platform, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
 import { useTheme } from '../theme';
-import { useLedger } from '../state/ledgerStore';
-import { Avatar } from '../components';
-import { AssistantMessage } from '../components/chat/AssistantMessage';
+import { Avatar, Icon } from '../components';
 import { UserMessage } from '../components/chat/UserMessage';
-import { PhotoMessage } from '../components/chat/PhotoMessage';
-import { AnswerCard } from '../components/chat/AnswerCard';
-import { DraftJournalCard } from '../components/chat/DraftJournalCard';
-import { ChipList } from '../components/chat/ChipList';
-import { Composer } from '../components/chat/Composer';
-import { CameraOverlay } from '../components/chat/CameraOverlay';
+import { AssistantMessage } from '../components/chat/AssistantMessage';
 
-const ANSWERS = {
-  dining: {
-    label: 'Dining · this week', value: '$182.40',
-    note: '$41 more than your usual week — six visits instead of four.', link: '6 transactions',
-    bars: [{ h: 44, tone: 200 }, { h: 61, tone: 200 }, { h: 38, tone: 200 }, { h: 72, tone: 200 }, { h: 100, tone: 500 }],
-  },
-  biggest: {
-    label: 'Largest expense · August', value: '$2,150.00',
-    note: 'Rent, posted 1 Aug. Next largest is $486 of software.', link: 'Open entry',
-    bars: [{ h: 100, tone: 500 }, { h: 23, tone: 200 }, { h: 19, tone: 200 }, { h: 14, tone: 200 }, { h: 9, tone: 200 }],
-  },
-  usual: {
-    label: 'Total spend · August to date', value: '$4,318.90',
-    note: 'Running 8% under the same ten days last month. Dining is the only line up.', link: '38 transactions',
-    bars: [{ h: 70, tone: 200 }, { h: 88, tone: 200 }, { h: 64, tone: 200 }, { h: 92, tone: 200 }, { h: 76, tone: 500 }],
-  },
-};
-
-const CHIPS = [
-  ['How much did I spend on dining this week?', 'dining'],
-  ["What's my biggest expense this month?", 'biggest'],
-  ['Am I spending more than usual?', 'usual'],
+const ATTACH_DRAWER_OPTIONS = [
+  { key: 'camera', icon: 'camera', label: 'Camera' },
+  { key: 'photos', icon: 'photos', label: 'Photos' },
+  { key: 'files', icon: 'files', label: 'Files' },
 ];
 
-let msgId = 1;
+let turnId = 1;
 
 export default function ChatScreen() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const { addEntry } = useLedger();
   const scrollRef = useRef(null);
+  const turnOffsets = useRef({});
 
-  const [msgs, setMsgs] = useState([
-    { id: msgId, role: 'a', text: "Morning, Sangmin. Ask me anything about your books — or snap a receipt and I'll post it." },
-  ]);
-  const [text, setText] = useState('');
-  const [camera, setCamera] = useState(false);
-  const [attach, setAttach] = useState(false);
-  const [staged, setStaged] = useState(false);
-  const [draft, setDraft] = useState(null);
-
-  const push = (m) => {
-    msgId += 1;
-    setMsgs((prev) => [...prev, { id: msgId, ...m }]);
-  };
-
-  const ask = (key, questionText) => {
-    push({ role: 'u', text: questionText });
-    setTimeout(() => push({ role: 'answer', ...ANSWERS[key] }), 320);
-  };
+  const [composerText, setComposerText] = useState('');
+  const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [conversationTurns, setConversationTurns] = useState([]);
+  const [scrollViewportHeight, setScrollViewportHeight] = useState(0);
+  const [isAttachDrawerOpen, setIsAttachDrawerOpen] = useState(false);
 
   const send = () => {
-    if (staged) {
-      setStaged(false);
-      setText('');
-      setAttach(false);
-      push({ role: 'photo' });
-      setTimeout(() => {
-        setDraft({ date: '10 Aug 2026', merchant: 'Blue Bottle', amount: '$18.40', category: 'Dining', memo: 'Coffee + pastry' });
-      }, 500);
-      return;
+    if (!composerText.trim()) return;
+    const id = turnId++;
+    setConversationTurns((prev) => [...prev, { id, question: composerText.trim(), answer: null }]);
+    setComposerText('');
+    setTimeout(() => {
+      setConversationTurns((prev) => prev.map((tn) => (
+        tn.id === id ? { ...tn, answer: 'Not wired up to real data yet — placeholder response.' } : tn
+      )));
+    }, 600);
+  };
+
+  const handleTurnLayout = (id, y) => {
+    turnOffsets.current[id] = y;
+    const latest = conversationTurns[conversationTurns.length - 1];
+    if (latest && latest.id === id) {
+      scrollRef.current?.scrollTo({ y, animated: true });
     }
-    if (!text.trim()) return;
-    const hit = CHIPS.find(([c]) => c.toLowerCase().slice(0, 14) === text.toLowerCase().slice(0, 14));
-    const sent = text;
-    setText('');
-    if (hit) { ask(hit[1], sent); return; }
-    push({ role: 'u', text: sent });
-    setTimeout(() => push({ role: 'answer', ...ANSWERS.usual }), 320);
   };
-
-  const confirmDraft = () => {
-    addEntry({
-      merchant: draft.merchant,
-      amount: draft.amount,
-      category: draft.category,
-      date: draft.date.replace(' 2026', ''),
-      memo: draft.memo,
-    });
-    const { amount, category, date } = draft;
-    setDraft(null);
-    setTimeout(() => push({ role: 'a', text: `Posted to the ledger — ${category}, ${amount}, ${date.replace(' 2026', '')}. Double-entry lines are recorded underneath.` }), 200);
-  };
-
-  const showChips = msgs.length === 1 && !draft;
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 10, paddingTop: insets.top + 12, paddingHorizontal: 20, paddingBottom: 10 }}>
-        <Text style={{ fontFamily: t.fontHeading, fontWeight: '600', fontSize: 19, letterSpacing: -0.4, color: t.text, marginRight: 'auto' }}>
-          BalanceAI
-        </Text>
+      <View style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingTop: insets.top + 12,
+        paddingHorizontal: 20,
+        paddingBottom: 10,
+      }}>
+        <View style={{
+          width: 28, height: 28, borderRadius: 14,
+          borderWidth: 1, borderColor: t.divider,
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Text style={{ fontFamily: t.fontHeading, fontWeight: '600', fontSize: 11 }}>
+            <Text style={{ color: t.accent }}>B</Text>
+            <Text style={{ color: t.accent2 }}>A</Text>
+          </Text>
+        </View>
+
         <Avatar initials="SL" />
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          ref={scrollRef}
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 12, gap: 22 }}
-          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
-        >
-          {msgs.map((m) => {
-            if (m.role === 'a') return <AssistantMessage key={m.id} text={m.text} />;
-            if (m.role === 'u') return <UserMessage key={m.id} text={m.text} />;
-            if (m.role === 'photo') return <PhotoMessage key={m.id} />;
-            if (m.role === 'answer') {
-              return (
-                <AnswerCard
-                  key={m.id}
-                  label={m.label}
-                  value={m.value}
-                  note={m.note}
-                  bars={m.bars}
-                  link={m.link}
-                  onPressLink={() => router.navigate('/(tabs)/journal')}
-                />
-              );
-            }
-            return null;
-          })}
+        <View style={{ flex: 1 }}>
+          <ScrollView
+            ref={scrollRef}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 4, paddingBottom: 20, gap: 24 }}
+            onLayout={(e) => setScrollViewportHeight(e.nativeEvent.layout.height)}
+          >
+            {conversationTurns.map((turn) => (
+              <View
+                key={turn.id}
+                onLayout={(e) => handleTurnLayout(turn.id, e.nativeEvent.layout.y)}
+                style={{ gap: 10 }}
+              >
+                <UserMessage text={turn.question} />
+                <AssistantMessage text={turn.answer ?? '…'} />
+              </View>
+            ))}
+            {/* Reserves scroll room so the latest turn can always be pushed to the
+                very top of the viewport, even when there isn't enough real content
+                below it yet — without this, ScrollView clamps to its natural end
+                and the latest turn lands at the bottom instead. */}
+            <View style={{ height: scrollViewportHeight }} />
+          </ScrollView>
 
-          {showChips && (
-            <ChipList chips={CHIPS.map(([chipText, key]) => ({ text: chipText, onPress: () => ask(key, chipText) }))} />
-          )}
+          <View style={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Pressable
+                onPress={() => setIsAttachDrawerOpen(true)}
+                style={{
+                  width: 36, height: 36, borderRadius: t.radius.md,
+                  borderWidth: 1, borderColor: t.divider,
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Text style={{ fontSize: 20, color: t.accent }}>+</Text>
+              </Pressable>
 
-          {draft && (
-            <DraftJournalCard
-              intro={`Read it as ${draft.merchant}, ${draft.amount}. Check the details and I'll post it.`}
-              fields={draft}
-              onChangeField={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
-              onConfirm={confirmDraft}
-              onDiscard={() => setDraft(null)}
-            />
-          )}
-        </ScrollView>
+              <TextInput
+                value={composerText}
+                onChangeText={setComposerText}
+                onFocus={() => setIsComposerFocused(true)}
+                onBlur={() => setIsComposerFocused(false)}
+                autoFocus
+                placeholder="How much did I spend on my groceries this week?"
+                placeholderTextColor="rgba(32,30,29,0.65)"
+                cursorColor={t.accent}
+                selectionColor={t.accent}
+                style={{
+                  flex: 1,
+                  minHeight: 38,
+                  borderRadius: 19,
+                  paddingVertical: 8,
+                  paddingHorizontal: 14,
+                  fontFamily: t.fontBody,
+                  fontSize: 15,
+                  color: t.text,
+                  backgroundColor: t.surface,
+                  borderWidth: 1,
+                  borderColor: isComposerFocused ? t.accent : t.divider,
+                }}
+              />
 
-        <Composer
-          text={text}
-          onChangeText={setText}
-          onSend={send}
-          attachOpen={attach}
-          onToggleAttach={() => setAttach((v) => !v)}
-          onOpenCamera={() => { setCamera(true); setAttach(false); }}
-          staged={staged}
-          onUnstage={() => setStaged(false)}
-        />
+              {composerText.length > 0 && (
+                <Pressable
+                  onPress={send}
+                  style={{
+                    width: 38, height: 38, borderRadius: 19,
+                    backgroundColor: t.accent,
+                    alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <Text style={{ fontSize: 17, color: t.bg }}>↑</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </View>
       </KeyboardAvoidingView>
 
-      <CameraOverlay
-        visible={camera}
-        onClose={() => setCamera(false)}
-        onShoot={() => { setCamera(false); setStaged(true); }}
-      />
+      <Modal
+        visible={isAttachDrawerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsAttachDrawerOpen(false)}
+      >
+        <View style={{ flex: 1 }}>
+          <Pressable
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+            onPress={() => setIsAttachDrawerOpen(false)}
+          />
+          <View style={{
+            position: 'absolute',
+            left: 20,
+            bottom: insets.bottom + 70,
+            minWidth: 170,
+            backgroundColor: t.bg,
+            borderRadius: t.radius.lg,
+            borderWidth: 1,
+            borderColor: t.divider,
+            paddingVertical: 4,
+            ...t.shadowMd,
+          }}>
+            {ATTACH_DRAWER_OPTIONS.map((opt, i) => (
+              <Pressable
+                key={opt.key}
+                onPress={() => setIsAttachDrawerOpen(false)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 14,
+                  borderBottomWidth: i < ATTACH_DRAWER_OPTIONS.length - 1 ? 1 : 0,
+                  borderBottomColor: t.rowHairline,
+                }}
+              >
+                <Icon name={opt.icon} size={20} color={t.accent} />
+                <Text style={{ fontFamily: t.fontBody, fontSize: 15, color: t.text }}>{opt.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
