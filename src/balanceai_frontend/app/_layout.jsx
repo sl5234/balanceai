@@ -8,8 +8,8 @@ import {
   SourceSerif4_600SemiBold,
   SourceSerif4_400Regular_Italic,
 } from '@expo-google-fonts/source-serif-4';
-import { ThemeContext, BROADSHEET } from '../src/balanceai_frontend/theme';
-import { LedgerProvider } from '../src/balanceai_frontend/state/ledgerStore';
+import { ThemeContext, BROADSHEET } from '../theme';
+import { LedgerProvider } from '../state/ledgerStore';
 
 SplashScreen.preventAutoHideAsync();
 

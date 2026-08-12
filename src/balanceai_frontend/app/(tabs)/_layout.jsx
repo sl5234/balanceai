@@ -1,5 +1,5 @@
 import { Tabs, usePathname, router } from 'expo-router';
-import { TabBar } from '../../src/balanceai_frontend/components';
+import { TabBar } from '../../components';
 
 const ROUTE_TO_TAB = {
   '/':              'chat',

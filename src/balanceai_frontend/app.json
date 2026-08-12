@@ -2,14 +2,15 @@
   "expo": {
     "name": "BalanceAI",
     "slug": "balanceai",
+    "owner": "slee5234",
     "version": "1.0.0",
     "scheme": "balanceai",
     "orientation": "portrait",
-    "icon": "./src/balanceai_frontend/assets/icon.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./src/balanceai_frontend/assets/splash-icon.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#f3f2f2"
     },
@@ -19,7 +20,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./src/balanceai_frontend/assets/adaptive-icon.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#f3f2f2"
       },
       "package": "com.balanceai.app",
@@ -29,11 +30,17 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./src/balanceai_frontend/assets/favicon.png"
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "506cfbe7-95d1-4694-ada0-b7516deef766"
+      }
+    }
   }
 }
