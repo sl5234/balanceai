@@ -11,9 +11,9 @@ from balanceai_backend.db import create_schema
 from balanceai_backend.models.report import ReportDefinition
 from balanceai_backend.servers.bookkeeping_server import (
     create_report_definition,
+    delete_report_definition,
     generate_report,
     list_report_definitions,
-    delete_report_definition,
 )
 
 # SQL template equivalent to the old hardcoded generate_report bucketing logic,
@@ -243,11 +243,14 @@ class TestGenerateReport:
         assert "rows" not in result
 
     def test_raises_when_definition_not_found(self):
-        with patch(
-            "balanceai_backend.servers.bookkeeping_server._find_report_definitions", return_value=[]
+        with (
+            patch(
+                "balanceai_backend.servers.bookkeeping_server._find_report_definitions",
+                return_value=[],
+            ),
+            pytest.raises(ValueError, match="not found"),
         ):
-            with pytest.raises(ValueError, match="not found"):
-                generate_report(report_definition_id="nonexistent")
+            generate_report(report_definition_id="nonexistent")
 
     def test_date_range_filters_rows(self, seeded_conn):
         defn = ReportDefinition(

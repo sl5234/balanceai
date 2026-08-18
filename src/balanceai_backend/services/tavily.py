@@ -1,6 +1,5 @@
-from tavily import TavilyClient
-
 from balanceai_backend.config import settings
+from tavily import TavilyClient
 
 
 def search(query: str) -> str | None:

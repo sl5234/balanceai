@@ -33,7 +33,7 @@ This document outlines best practices and anti-patterns for AI agents working on
 ### Project Structure
 - **DO**: Keep code in `src/balanceai_backend/`
 - **DO**: Use modules/packages for logical separation
-- **DO**: Keep tests in `tests/` directory
+- **DO**: Keep tests in `src/balanceai_backend/tests/` directory
 - **DON'T**: Create unnecessary nested directories
 - **DON'T**: Mix test code with production code
 

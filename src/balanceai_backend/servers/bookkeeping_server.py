@@ -11,26 +11,33 @@ import logging
 import re
 from datetime import date
 from pathlib import Path
-from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.config import settings
-from balanceai_backend.models import Account, Journal
+from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.db import conn
-from balanceai_backend.journals.journal_db import (
-    save_journal,
-    update_journal as db_update_journal,
-    delete_journal as db_delete_journal,
-    find_journals as db_find_journals,
-    find_journal_entries as db_find_journal_entries,
-)
 from balanceai_backend.helpers.journal_entry_helper import (
+    handle_sync_journal_entries_from_bank_statement,
     handle_sync_journal_entries_from_receipt,
     handle_sync_journal_entries_from_transactions,
-    handle_sync_journal_entries_from_bank_statement,
 )
+from balanceai_backend.journals.journal_db import (
+    delete_journal as db_delete_journal,
+)
+from balanceai_backend.journals.journal_db import (
+    find_journal_entries as db_find_journal_entries,
+)
+from balanceai_backend.journals.journal_db import (
+    find_journals as db_find_journals,
+)
+from balanceai_backend.journals.journal_db import (
+    save_journal,
+)
+from balanceai_backend.journals.journal_db import (
+    update_journal as db_update_journal,
+)
+from balanceai_backend.models import Account, Journal
 from balanceai_backend.models.journal import JournalEntry
 from balanceai_backend.models.report import ReportDefinition
 from balanceai_backend.prompts.financial_query_prompt import financial_query_system_prompt
@@ -39,11 +46,16 @@ from balanceai_backend.prompts.report_definition_prompt import (
     report_definition_user_message,
 )
 from balanceai_backend.reports.report_definition_db import (
-    save_report_definition as _save_report_definition,
-    find_report_definitions as _find_report_definitions,
     delete_report_definition as _delete_report_definition,
 )
-from balanceai_backend.services.gemini import GeminiClient, converse as gemini_converse
+from balanceai_backend.reports.report_definition_db import (
+    find_report_definitions as _find_report_definitions,
+)
+from balanceai_backend.reports.report_definition_db import (
+    save_report_definition as _save_report_definition,
+)
+from balanceai_backend.services.gemini import GeminiClient
+from balanceai_backend.services.gemini import converse as gemini_converse
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -101,8 +113,8 @@ mcp = FastMCP(
 def create_journal(
     account: dict,
     description: str,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict:
     """
     Create a new journal for a bank account.
@@ -135,10 +147,10 @@ def create_journal(
 @mcp.tool()
 def update_journal(
     journal_id: str,
-    description: Optional[str] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    entries: Optional[list[dict]] = None,
+    description: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    entries: list[dict] | None = None,
 ) -> dict:
     """
     Update a journal's properties by journal ID. Only provided fields are updated.
@@ -188,7 +200,7 @@ def delete_journal(journal_id: str) -> dict:
 
 
 @mcp.tool()
-def list_journals(account_id: Optional[str] = None) -> list[dict]:
+def list_journals(account_id: str | None = None) -> list[dict]:
     """
     List all journals.
 
@@ -285,7 +297,7 @@ def sync_journal_entries_from_bank_statement(
 
 
 @mcp.tool()
-def list_journal_entries(journal_id: str, date: Optional[date] = None) -> list[dict]:
+def list_journal_entries(journal_id: str, date: date | None = None) -> list[dict]:
     """
     List entries for a given journal, optionally filtered by date.
 
@@ -349,10 +361,10 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
 @mcp.tool()
 def analyze_financial_question(
     question: str,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    account_id: Optional[str] = None,
-    context: Optional[dict] = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    account_id: str | None = None,
+    context: dict | None = None,
 ) -> dict:
     """
     Answer a financial analysis question using journal data.
@@ -438,7 +450,7 @@ def create_report_definition(
     name: str,
     prompt: str,
     unparameterized_sql: str,
-    description: Optional[str] = None,
+    description: str | None = None,
 ) -> dict:
     """
     Save a reusable report definition from a verified SQL query.
@@ -535,8 +547,8 @@ def delete_report_definition(report_definition_id: str) -> dict:
 @mcp.tool()
 def generate_report(
     report_definition_id: str,
-    parameters: Optional[dict] = None,
-    local_path: Optional[str] = None,
+    parameters: dict | None = None,
+    local_path: str | None = None,
 ) -> dict:
     """
     Execute a saved report definition with the given parameters.

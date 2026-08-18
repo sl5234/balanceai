@@ -1,7 +1,6 @@
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from decimal import Decimal
 from enum import Enum
-from typing import Optional
 
 from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.category import Category
@@ -19,7 +18,7 @@ class Account:
     id: str  # hashed account number
     bank: Bank
     account_type: AccountType
-    balance: Optional[Decimal] = None
+    balance: Decimal | None = None
     categories: list[Category] = field(default_factory=list)
 
     def to_dict(self) -> dict:

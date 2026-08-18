@@ -2,13 +2,12 @@ import datetime
 from decimal import Decimal
 
 import pytest
-
 from balanceai_backend.models.journal import (
+    RECIPIENT_SELF,
     GeneratedJournalEntry,
     GeneratedJournalEntrySet,
     JournalAccount,
     JournalEntry,
-    RECIPIENT_SELF,
 )
 
 # ---------------------------------------------------------------------------
@@ -41,7 +40,7 @@ class TestGeneratedJournalEntry:
         assert entry.category == "haircut"
 
     def test_tax_defaults_to_zero(self, base_entry):
-        assert base_entry.tax == Decimal("0")
+        assert base_entry.tax == Decimal(0)
 
     def test_tax_accepts_nonzero_value(self, base_entry):
         entry = base_entry.model_copy(update={"tax": Decimal("2.25")})
@@ -100,7 +99,7 @@ class TestJournalEntryToDict:
         assert journal_entry.to_dict()["tax"] == "2.25"
 
     def test_includes_tax_as_zero_string_when_default(self, journal_entry):
-        entry = journal_entry.model_copy(update={"tax": Decimal("0")})
+        entry = journal_entry.model_copy(update={"tax": Decimal(0)})
         assert entry.to_dict()["tax"] == "0"
 
 
@@ -134,7 +133,7 @@ class TestGeneratedJournalEntrySet:
         cash = base_entry.model_copy(
             update={
                 "account": JournalAccount.CASH,
-                "debit": Decimal("0"),
+                "debit": Decimal(0),
                 "credit": Decimal("25.00"),
             }
         )
@@ -168,4 +167,4 @@ class TestJournalEntryFromDict:
 
     def test_defaults_tax_to_zero_when_missing(self, entry_dict):
         del entry_dict["tax"]
-        assert JournalEntry.from_dict(entry_dict).tax == Decimal("0")
+        assert JournalEntry.from_dict(entry_dict).tax == Decimal(0)

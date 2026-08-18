@@ -1,6 +1,9 @@
 # Development Commands
 
-This document lists all commands for building, linting, formatting, and testing the project. Agents should run these commands after code changes.
+This document lists all commands for building, linting, formatting, and testing the
+`balanceai_backend` package. Agents should run these commands after code changes.
+
+**All commands below are run from within this directory (`src/balanceai_backend/`).**
 
 ## Setup
 
@@ -27,27 +30,27 @@ rm -rf dist/ build/ *.egg-info
 
 ```bash
 # Run ruff linter
-ruff check src/ tests/
+ruff check .
 
 # Run ruff with auto-fix
-ruff check --fix src/ tests/
+ruff check --fix .
 ```
 
 ## Formatting
 
 ```bash
 # Format code with black
-black src/ tests/
+black .
 
 # Check formatting without making changes
-black --check src/ tests/
+black --check .
 ```
 
 ## Type Checking
 
 ```bash
-# Run mypy type checker (if configured)
-mypy src/
+# Run mypy type checker (excludes venv/, tests/, integ_tests/ — see pyproject.toml)
+mypy .
 ```
 
 ## Testing
@@ -57,18 +60,18 @@ mypy src/
 pytest
 
 # Run tests with coverage
-pytest --cov=src/balanceai --cov-report=html
+pytest --cov=balanceai_backend --cov-report=html
 
 # Run tests verbosely
 pytest -v
 
-# Run unit test
+# Run unit tests
 pytest tests/ -v
 
 # Run specific test file
 pytest tests/test_specific.py
 
-# Run integ test
+# Run integ tests
 pytest integ_tests/ -v
 ```
 
@@ -78,13 +81,13 @@ After making code changes, run these commands in order:
 
 ```bash
 # 1. Format code
-black src/ tests/
+black .
 
 # 2. Lint code
-ruff check --fix src/ tests/
+ruff check --fix .
 
 # 3. Type check code
-mypy src/
+mypy .
 
 # 4. Run tests
 pytest
@@ -92,4 +95,3 @@ pytest
 # 5. Build
 python -m build
 ```
-

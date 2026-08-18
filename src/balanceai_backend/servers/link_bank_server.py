@@ -7,18 +7,16 @@ Provides tools for managing bank accounts, transactions, and categories.
 import json
 import logging
 from datetime import date
-from typing import Optional
-
-from mcp.server.fastmcp import FastMCP
 
 from appdevcommons.hash_generator import HashGenerator
+from mcp.server.fastmcp import FastMCP
 
-from balanceai_backend.models import Account, AccountType, Bank, Category, Transaction
-from balanceai_backend.parsers import get_parser
 import balanceai_backend.parsers.chase  # noqa: F401 - register parser
+from balanceai_backend.config import settings
 from balanceai_backend.constants import DEFAULT_CATEGORIES
 from balanceai_backend.dagger.aws import AWSClients
-from balanceai_backend.config import settings
+from balanceai_backend.models import Account, AccountType, Bank, Category, Transaction
+from balanceai_backend.parsers import get_parser
 from balanceai_backend.prompts.categorizer import build_categorization_prompt
 from balanceai_backend.services.plaid import transactions_sync
 from balanceai_backend.statements.storage import (
@@ -73,8 +71,8 @@ def get_supported_banks() -> str:
 def create_account(
     bank: Bank,
     account_type: AccountType,
-    balance: Optional[float] = None,
-    categories: Optional[list[Category]] = None,
+    balance: float | None = None,
+    categories: list[Category] | None = None,
 ) -> dict:
     """
     Create a new bank account.
@@ -147,7 +145,7 @@ def list_accounts() -> list[dict]:
 
 
 @mcp.tool()
-def get_balance(account_id: Optional[str] = None) -> list[dict]:
+def get_balance(account_id: str | None = None) -> list[dict]:
     """
     Get account balances.
 
@@ -173,9 +171,9 @@ def get_balance(account_id: Optional[str] = None) -> list[dict]:
 
 @mcp.tool()
 def get_transactions(
-    account_id: Optional[str] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    account_id: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> list[dict]:
     """
     Query transactions with optional filters.
@@ -240,9 +238,7 @@ def update_categories(account_id: str, categories: list[dict]) -> dict:
 
 
 @mcp.tool()
-def categorize_transaction(
-    account: dict, transaction: dict, category: Optional[str] = None
-) -> dict:
+def categorize_transaction(account: dict, transaction: dict, category: str | None = None) -> dict:
     """
     Categorize a transaction. If category is omitted, uses AI (Bedrock) to
     auto-categorize based on the account's configured categories. If category
@@ -288,7 +284,7 @@ def categorize_transaction(
                 return {"error": f"AI returned invalid category '{category}'"}
         except Exception as e:
             logger.error(f"Bedrock categorization failed: {e}")
-            return {"error": f"AI categorization failed: {str(e)}"}
+            return {"error": f"AI categorization failed: {e!s}"}
 
     updated = update_transaction(txn.id, category=category)
     if not updated:
@@ -300,8 +296,8 @@ def categorize_transaction(
 @mcp.tool()
 def list_transactions(
     access_token: str,
-    cursor: Optional[str] = None,
-    account_id: Optional[str] = None,
+    cursor: str | None = None,
+    account_id: str | None = None,
 ) -> dict:
     """
     List transactions for a Plaid item via /transactions/sync.

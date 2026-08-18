@@ -275,9 +275,9 @@ class TestAnalyzeFinancialQuestion:
             end_date=date(2025, 10, 31),
         )
         assert result["row_count"] >= 1
-        assert _contains_approx(_numeric_values(result["rows"]), 360.0), (
-            f"Expected 360.0 in rows, got: {result['rows']}"
-        )
+        assert _contains_approx(
+            _numeric_values(result["rows"]), 360.0
+        ), f"Expected 360.0 in rows, got: {result['rows']}"
         time.sleep(RATE_LIMIT_DELAY)
 
     def test_spend_in_period_2(self):
@@ -288,9 +288,9 @@ class TestAnalyzeFinancialQuestion:
             end_date=date(2025, 10, 31),
         )
         assert result["row_count"] >= 1
-        assert _contains_approx(_numeric_values(result["rows"]), 360.0), (
-            f"Expected 360.0 in rows, got: {result['rows']}"
-        )
+        assert _contains_approx(
+            _numeric_values(result["rows"]), 360.0
+        ), f"Expected 360.0 in rows, got: {result['rows']}"
         time.sleep(RATE_LIMIT_DELAY)
 
     def test_spend_in_first_half_of_month(self):
@@ -301,9 +301,9 @@ class TestAnalyzeFinancialQuestion:
             end_date=date(2025, 10, 15),
         )
         assert result["row_count"] >= 1
-        assert _contains_approx(_numeric_values(result["rows"]), 185.0), (
-            f"Expected 185.0 in rows, got: {result['rows']}"
-        )
+        assert _contains_approx(
+            _numeric_values(result["rows"]), 185.0
+        ), f"Expected 185.0 in rows, got: {result['rows']}"
         time.sleep(RATE_LIMIT_DELAY)
 
     # -----------------------------------------------------------------------
@@ -318,9 +318,9 @@ class TestAnalyzeFinancialQuestion:
             end_date=date(2025, 10, 31),
         )
         assert result["row_count"] >= 1
-        assert _contains_approx(_numeric_values(result["rows"]), 200.0), (
-            f"Expected 200.0 in rows, got: {result['rows']}"
-        )
+        assert _contains_approx(
+            _numeric_values(result["rows"]), 200.0
+        ), f"Expected 200.0 in rows, got: {result['rows']}"
         time.sleep(RATE_LIMIT_DELAY)
 
     def test_spend_on_gas(self):
@@ -331,9 +331,9 @@ class TestAnalyzeFinancialQuestion:
             end_date=date(2025, 10, 31),
         )
         assert result["row_count"] >= 1
-        assert _contains_approx(_numeric_values(result["rows"]), 50.0), (
-            f"Expected 50.0 in rows, got: {result['rows']}"
-        )
+        assert _contains_approx(
+            _numeric_values(result["rows"]), 50.0
+        ), f"Expected 50.0 in rows, got: {result['rows']}"
         time.sleep(RATE_LIMIT_DELAY)
 
     # -----------------------------------------------------------------------
@@ -348,12 +348,12 @@ class TestAnalyzeFinancialQuestion:
             end_date=date(2025, 10, 31),
         )
         assert result["row_count"] >= 1
-        assert _contains_approx(_numeric_values(result["rows"]), 200.0), (
-            f"Expected 200.0 in rows, got: {result['rows']}"
-        )
-        assert "recipient" in result["sql"].lower(), (
-            "SQL should filter by recipient for merchant queries"
-        )
+        assert _contains_approx(
+            _numeric_values(result["rows"]), 200.0
+        ), f"Expected 200.0 in rows, got: {result['rows']}"
+        assert (
+            "recipient" in result["sql"].lower()
+        ), "SQL should filter by recipient for merchant queries"
         time.sleep(RATE_LIMIT_DELAY)
 
     def test_spend_at_shell(self):
@@ -364,9 +364,9 @@ class TestAnalyzeFinancialQuestion:
             end_date=date(2025, 10, 31),
         )
         assert result["row_count"] >= 1
-        assert _contains_approx(_numeric_values(result["rows"]), 50.0), (
-            f"Expected 50.0 in rows, got: {result['rows']}"
-        )
+        assert _contains_approx(
+            _numeric_values(result["rows"]), 50.0
+        ), f"Expected 50.0 in rows, got: {result['rows']}"
         time.sleep(RATE_LIMIT_DELAY)
 
     # -----------------------------------------------------------------------
@@ -393,7 +393,7 @@ class TestAnalyzeFinancialQuestion:
         assert result["row_count"] >= 1
         # The first row should contain the largest value, which is 200.0 (Whole Foods)
         first_row_values = _numeric_values([result["rows"][0]])
-        assert _contains_approx(first_row_values, 200.0), (
-            f"Expected top expense to be 200.0 (Whole Foods), got first row: {result['rows'][0]}"
-        )
+        assert _contains_approx(
+            first_row_values, 200.0
+        ), f"Expected top expense to be 200.0 (Whole Foods), got first row: {result['rows'][0]}"
         time.sleep(RATE_LIMIT_DELAY)

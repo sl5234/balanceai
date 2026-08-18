@@ -3,7 +3,6 @@ import sqlite3
 from decimal import Decimal
 
 import pytest
-
 from balanceai_backend.db import create_schema
 from balanceai_backend.journals.journal_db import (
     delete_journal,
@@ -97,9 +96,9 @@ def _make_entry(entry_id: str, date: datetime.date, amount: Decimal) -> JournalE
         account=JournalAccount.CASH,
         description="Test transaction",
         debit=amount,
-        credit=Decimal("0"),
+        credit=Decimal(0),
         category="groceries",
-        tax=Decimal("0"),
+        tax=Decimal(0),
         recipient="Self",
     )
 

@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "balanceai"
+version = "0.1.0"
+description = "Automated accounting tool for receipt handling and bookkeeping"
+requires-python = ">=3.12"
+dependencies = [
+    "appdevcommons>=0.1.4",
+    "boto3",
+    "google-cloud-aiplatform",
+    "anthropic",
+    "openai",
+    "mcp",
+    "pdfplumber",
+    "pydantic",
+    "pydantic-settings",
+    "tavily-python",
+    "gspread>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "pytest>=7.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.19.1",
+]
+
+[tool.setuptools]
+# Explicit list instead of [tool.setuptools.packages.find]: every "where" tried
+# (parent dir, ".", "..") either swept in unrelated siblings (balanceai_frontend,
+# balanceai_infrastructure, including its whole node_modules tree) via PEP 420
+# namespace-package discovery, or produced a package_dir mapping containing ".."
+# that setuptools silently drops during the actual build/copy step (discovery
+# works, the built wheel ends up empty), or produced duplicate/conflicting
+# package names with no resolvable physical location at all. An explicit list
+# has none of these failure modes: no scanning happens, so there's nothing to
+# accidentally sweep in, and package-dir maps cleanly to "." (this directory
+# itself) with no path traversal involved.
+#
+# Includes both the __init__.py-having subpackages and the ones that work today
+# as implicit namespace packages (dagger/, prompts/, services/, utils/ — real
+# .py modules, just no __init__.py). Excludes data/ (no .py files, just db/json
+# assets — already gitignored) and tests/integ_tests (not meant to ship).
+#
+# Cost: a new top-level subpackage must be added here by hand, or it will
+# import fine locally (editable installs make everything on disk importable
+# regardless of this list) but silently be missing from a real `python -m build`
+# wheel — verified this exact failure mode empirically before choosing this
+# approach over packages.find.
+packages = [
+    "balanceai_backend",
+    "balanceai_backend.dagger",
+    "balanceai_backend.helpers",
+    "balanceai_backend.journals",
+    "balanceai_backend.models",
+    "balanceai_backend.parsers",
+    "balanceai_backend.prompts",
+    "balanceai_backend.reports",
+    "balanceai_backend.servers",
+    "balanceai_backend.services",
+    "balanceai_backend.statements",
+    "balanceai_backend.utils",
+]
+package-dir = { "balanceai_backend" = "." }
+
+[tool.black]
+line-length = 100
+target-version = ['py312']
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+exclude = ["^venv/", "^tests/", "^integ_tests/", "^build/", "^dist/"]
+
+[[tool.mypy.overrides]]
+module = "appdevcommons.*"
+ignore_missing_imports = true

@@ -1,8 +1,7 @@
 import base64
 
-from openai import OpenAI
-
 from balanceai_backend.config import settings
+from openai import OpenAI
 
 
 def response(

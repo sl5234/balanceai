@@ -7,21 +7,21 @@ import pytest
 
 sys.modules.setdefault("anthropic", MagicMock())
 
+from balanceai_backend.db import conn
 from balanceai_backend.helpers.journal_entry_helper import (
+    handle_sync_journal_entries_from_bank_statement,
     handle_sync_journal_entries_from_receipt,
     handle_sync_journal_entries_from_transactions,
-    handle_sync_journal_entries_from_bank_statement,
 )
 from balanceai_backend.models.account import Account, AccountType
 from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import (
+    GeneratedJournalEntry,
+    GeneratedJournalEntrySet,
     Journal,
     JournalAccount,
     JournalEntry,
-    GeneratedJournalEntry,
-    GeneratedJournalEntrySet,
 )
-from balanceai_backend.db import conn
 from balanceai_backend.models.transaction import Transaction
 
 # ---------------------------------------------------------------------------
@@ -104,40 +104,44 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
                 handle_sync_journal_entries_from_receipt("journal-999", receipt_path)
 
     def test_creates_new_entry_when_no_match(self, empty_journal, receipt_path, ocr_result):
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
                 return_value=ocr_result,
-            ):
-                with patch(
-                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
-                    return_value=None,
-                ):
-                    with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                        result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
+            ),
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                return_value=None,
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+        ):
+            result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 2
         descriptions = {e["description"] for e in result["entries"]}
         assert "Grocery purchase at Trader Joe's" in descriptions
 
     def test_new_entry_gets_fresh_id(self, empty_journal, receipt_path, ocr_result):
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
                 return_value=ocr_result,
-            ):
-                with patch(
-                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
-                    return_value=None,
-                ):
-                    with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                        result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
+            ),
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                return_value=None,
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+        ):
+            result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         entry_id = result["entries"][0]["journal_entry_id"]
         assert entry_id is not None
@@ -155,19 +159,22 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
             entries=[existing_entry],
         )
 
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[journal]
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[journal],
+            ),
+            patch(
                 "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
                 return_value=ocr_result,
-            ):
-                with patch(
-                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
-                    side_effect=[existing_entry, None],
-                ):
-                    with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                        result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
+            ),
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                side_effect=[existing_entry, None],
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+        ):
+            result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 2
         expense = next(
@@ -199,92 +206,100 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
             ]
         )
 
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
                 return_value=double_entry_result,
-            ):
-                with patch(
-                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
-                    return_value=None,
-                ):
-                    with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                        result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
+            ),
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                return_value=None,
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+        ):
+            result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 2
 
     def test_no_entries_from_ocr_leaves_journal_unchanged(self, empty_journal, receipt_path):
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
                 return_value=GeneratedJournalEntrySet(entries=[]),
-            ):
-                with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                    result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+        ):
+            result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert result["entries"] == []
 
     def test_storage_update_called_once(self, empty_journal, receipt_path, ocr_result):
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
                 return_value=ocr_result,
-            ):
-                with patch(
-                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
-                    return_value=None,
-                ):
-                    with patch(
-                        "balanceai_backend.helpers.journal_entry_helper.db_update_journal"
-                    ) as mock_save:
-                        handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
+            ),
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                return_value=None,
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal") as mock_save,
+        ):
+            handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         mock_save.assert_called_once_with(empty_journal, conn)
 
     def test_returns_journal_as_dict(self, empty_journal, receipt_path, ocr_result):
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
                 return_value=ocr_result,
-            ):
-                with patch(
-                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
-                    return_value=None,
-                ):
-                    with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                        result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
+            ),
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                return_value=None,
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+        ):
+            result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert isinstance(result, dict)
         assert "journal_id" in result
         assert "entries" in result
 
     def test_passes_file_bytes_and_mime_type_to_ocr(self, empty_journal, receipt_path, ocr_result):
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
                 return_value=ocr_result,
-            ) as mock_ocr:
-                with patch(
-                    "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
-                    return_value=None,
-                ):
-                    with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                        handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
+            ) as mock_ocr,
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                return_value=None,
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+        ):
+            handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         mock_ocr.assert_called_once()
         call_kwargs = mock_ocr.call_args.kwargs
@@ -689,18 +704,20 @@ class TestHandleSyncJournalEntriesFromBankStatement:
     def test_no_transactions_leaves_journal_unchanged(self, empty_journal):
         mock_parser = self._make_parser([])
 
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.helpers.journal_entry_helper.get_parser",
                 return_value=mock_parser,
-            ):
-                with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                    result = handle_sync_journal_entries_from_bank_statement(
-                        "journal-1", "/path/to/statement.pdf"
-                    )
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+        ):
+            result = handle_sync_journal_entries_from_bank_statement(
+                "journal-1", "/path/to/statement.pdf"
+            )
 
         assert result["entries"] == []
 
@@ -811,39 +828,39 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         mock_parser = MagicMock()
         mock_parser.parse.side_effect = ValueError("Balance mismatch")
 
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.helpers.journal_entry_helper.get_parser",
                 return_value=mock_parser,
-            ):
-                with patch(
-                    "balanceai_backend.helpers.journal_entry_helper.db_update_journal"
-                ) as mock_save:
-                    with pytest.raises(ValueError, match="Balance mismatch"):
-                        handle_sync_journal_entries_from_bank_statement(
-                            "journal-1", "/path/to/statement.pdf"
-                        )
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal") as mock_save,
+            pytest.raises(ValueError, match="Balance mismatch"),
+        ):
+            handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
 
         mock_save.assert_not_called()
 
     def test_uses_bank_from_journal_account(self, empty_journal):
         mock_parser = self._make_parser([])
 
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.helpers.journal_entry_helper.get_parser",
                 return_value=mock_parser,
-            ) as mock_get_parser:
-                with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                    handle_sync_journal_entries_from_bank_statement(
-                        "journal-1", "/path/to/statement.pdf"
-                    )
+            ) as mock_get_parser,
+        ):
+            with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
+                handle_sync_journal_entries_from_bank_statement(
+                    "journal-1", "/path/to/statement.pdf"
+                )
 
         mock_get_parser.assert_called_once_with(Bank.CHASE)
 
@@ -851,16 +868,18 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         mock_parser = self._make_parser([])
         file_path = "/path/to/statement.pdf"
 
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.helpers.journal_entry_helper.get_parser",
                 return_value=mock_parser,
-            ):
-                with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                    handle_sync_journal_entries_from_bank_statement("journal-1", file_path)
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+        ):
+            handle_sync_journal_entries_from_bank_statement("journal-1", file_path)
 
         mock_parser.parse.assert_called_once_with(file_path)
 
@@ -945,18 +964,20 @@ class TestHandleSyncJournalEntriesFromBankStatement:
     def test_returns_journal_as_dict(self, empty_journal):
         mock_parser = self._make_parser([])
 
-        with patch(
-            "balanceai_backend.helpers.journal_entry_helper.find_journals",
-            return_value=[empty_journal],
-        ):
-            with patch(
+        with (
+            patch(
+                "balanceai_backend.helpers.journal_entry_helper.find_journals",
+                return_value=[empty_journal],
+            ),
+            patch(
                 "balanceai_backend.helpers.journal_entry_helper.get_parser",
                 return_value=mock_parser,
-            ):
-                with patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"):
-                    result = handle_sync_journal_entries_from_bank_statement(
-                        "journal-1", "/path/to/statement.pdf"
-                    )
+            ),
+            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+        ):
+            result = handle_sync_journal_entries_from_bank_statement(
+                "journal-1", "/path/to/statement.pdf"
+            )
 
         assert isinstance(result, dict)
         assert "journal_id" in result

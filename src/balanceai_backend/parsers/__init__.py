@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from balanceai_backend.models import Account, Transaction, Bank
+from balanceai_backend.models import Account, Bank, Transaction
 
 
 class StatementParser(ABC):
@@ -17,7 +17,6 @@ class StatementParser(ABC):
         Returns:
             Tuple of (Account, list of Transactions)
         """
-        pass
 
 
 _parsers: dict[Bank, type[StatementParser]] = {}

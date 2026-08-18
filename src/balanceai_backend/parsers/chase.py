@@ -7,7 +7,7 @@ from typing import NamedTuple
 import pdfplumber
 from appdevcommons.hash_generator import HashGenerator
 
-from balanceai_backend.models import Account, AccountType, Transaction, Bank
+from balanceai_backend.models import Account, AccountType, Bank, Transaction
 from balanceai_backend.parsers import StatementParser, register_parser
 
 logging.basicConfig(

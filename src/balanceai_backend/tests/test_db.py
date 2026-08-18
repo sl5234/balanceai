@@ -3,7 +3,6 @@
 import sqlite3
 
 import pytest
-
 from balanceai_backend.db import get_distinct_accounts, get_distinct_categories, get_schema_summary
 
 

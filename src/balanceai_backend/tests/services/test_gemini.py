@@ -4,7 +4,6 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from balanceai_backend.services.gemini import GeminiClient, converse
 
 
@@ -135,6 +134,7 @@ class TestGeminiIntegration:
 
     def _call_with_retry(self, func, *args, **kwargs):
         import time
+
         from google.genai.errors import ClientError
 
         for attempt in range(self.MAX_RETRIES):
@@ -174,6 +174,7 @@ class TestGeminiIntegration:
         import re
         import time
         from datetime import date
+
         from balanceai_backend.prompts.financial_query_prompt import financial_query_system_prompt
 
         response = self._call_with_retry(

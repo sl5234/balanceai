@@ -1,8 +1,8 @@
 import json
 import logging
 
-from balanceai_backend.journals.journal_db import find_journal_entries
 from balanceai_backend.db import conn
+from balanceai_backend.journals.journal_db import find_journal_entries
 from balanceai_backend.models.journal import JournalEntry
 from balanceai_backend.prompts.journal_entry_finder import SYSTEM_PROMPT
 from balanceai_backend.utils.ocr_util import _extract_json
