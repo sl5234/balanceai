@@ -1,8 +1,7 @@
-from dataclasses import dataclass, asdict
 import datetime
+from dataclasses import asdict, dataclass
 from decimal import Decimal
 from hashlib import sha256
-from typing import Optional
 
 
 @dataclass
@@ -14,8 +13,8 @@ class Transaction:
     amount: Decimal  # negative = debit, positive = credit
     previous_balance: Decimal
     new_balance: Decimal
-    category: Optional[str] = None
-    transaction_date: Optional[datetime.date] = None
+    category: str | None = None
+    transaction_date: datetime.date | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)

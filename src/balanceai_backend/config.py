@@ -1,7 +1,8 @@
 import base64
-from typing import Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from appdevcommons.kms_encryptor import KMSEncryptor  # type: ignore[import-untyped]
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from balanceai_backend.dagger.aws import AWSClients
 
 
@@ -42,7 +43,7 @@ class Settings(BaseSettings):
         "AQICAHg7rDJp72oZrIfl2vnBxkvlcidlgcJm7juguFV/iuWU+AHpeNXM1+xDGzIOkq3hyxr0AAAAiDCBhQYJKoZIhvcNAQcGoHgwdgIBADBxBgkqhkiG9w0BBwEwHgYJYIZIAWUDBAEuMBEEDHVB7aMFakksi489HAIBEIBEEyuVc/n9WUT/u9P2nsnQl/h7jBidNJKmCssSymJIZFlgUTnhUyw4bvsrmUJYRcVfoXIGYdcFZRXWzxqYVZBHPYuJQDU="
     )
 
-    _aws_clients: Optional[AWSClients] = None
+    _aws_clients: AWSClients | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

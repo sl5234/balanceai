@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "BalanceAI",
+    "slug": "balanceai",
+    "owner": "slee5234",
+    "version": "1.0.0",
+    "scheme": "balanceai",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f3f2f2"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.balanceai.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f3f2f2"
+      },
+      "package": "com.balanceai.app",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BalanceAI uses your camera to capture receipts for your books."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BalanceAI uses your photo library to attach receipts to your books."
+        }
+      ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "506cfbe7-95d1-4694-ada0-b7516deef766"
+      }
+    }
+  }
+}

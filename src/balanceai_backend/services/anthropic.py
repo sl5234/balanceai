@@ -1,7 +1,6 @@
 import base64
 
 import anthropic
-
 from balanceai_backend.config import settings
 
 

@@ -93,7 +93,7 @@ class GeneratedJournalEntry(BaseModel):
         ],
     )
     tax: Decimal = Field(
-        default=Decimal("0"),
+        default=Decimal(0),
         description=(
             "Sales tax or VAT included in this transaction, if any. "
             "Default to 0 if unknown or not applicable."

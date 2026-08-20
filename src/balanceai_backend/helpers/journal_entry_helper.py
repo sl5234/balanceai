@@ -4,18 +4,19 @@ from pathlib import Path
 
 import anthropic
 
+import balanceai_backend.parsers.chase  # noqa: F401 - register parsers
+from balanceai_backend.db import conn
 from balanceai_backend.helpers.plaid_helper import extract_journal_entries_from_transactions
 from balanceai_backend.journals.finder import find_journal_entry as finder_find_journal_entry
-from balanceai_backend.journals.journal_db import find_journals, update_journal as db_update_journal
-from balanceai_backend.db import conn
+from balanceai_backend.journals.journal_db import find_journals
+from balanceai_backend.journals.journal_db import update_journal as db_update_journal
 from balanceai_backend.models.journal import GeneratedJournalEntrySet
 from balanceai_backend.parsers import get_parser
-import balanceai_backend.parsers.chase  # noqa: F401 - register parsers
+from balanceai_backend.utils.general_util import get_mime_type
 from balanceai_backend.utils.journal_entry_util import (
     extract_journal_entries_from_bank_statement_transaction,
     generate_transaction_category,
 )
-from balanceai_backend.utils.general_util import get_mime_type
 from balanceai_backend.utils.ocr_util import OcrUtil
 
 _BATCH_SIZE = 10

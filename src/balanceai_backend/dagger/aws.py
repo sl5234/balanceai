@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+
 import boto3  # type: ignore[import-untyped]
 from botocore.client import BaseClient  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError, NoCredentialsError  # type: ignore[import-untyped]
@@ -20,7 +20,7 @@ class AWSClients:
     No credentials are stored in this class - boto3 handles credential resolution.
     """
 
-    def __init__(self, region_name: Optional[str] = None):
+    def __init__(self, region_name: str | None = None):
         """
         Initialize AWS clients container.
 
@@ -28,9 +28,9 @@ class AWSClients:
             region_name: AWS region name (e.g., 'us-east-1'). If None, uses default region.
         """
         self.region_name = region_name
-        self.s3_client: Optional[BaseClient] = None
-        self.kms_client: Optional[BaseClient] = None
-        self.bedrock_runtime_client: Optional[BaseClient] = None
+        self.s3_client: BaseClient | None = None
+        self.kms_client: BaseClient | None = None
+        self.bedrock_runtime_client: BaseClient | None = None
         self._initialized = False
 
     def initialize(self) -> None:

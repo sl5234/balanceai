@@ -1,0 +1,10 @@
+appdevcommons>=0.1.4
+boto3
+anthropic
+openai
+mcp
+pdfplumber
+pydantic
+pydantic-settings
+tavily-python
+gspread>=6.0

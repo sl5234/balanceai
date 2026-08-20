@@ -1,9 +1,6 @@
-from typing import Optional
-
+from balanceai_backend.config import settings
 from google import genai
 from google.genai.types import GenerateContentResponse
-
-from balanceai_backend.config import settings
 
 DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
 # DEFAULT_MODEL_ID = "gemini-2.5-flash"
@@ -12,7 +9,7 @@ DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
 class GeminiClient:
     """Client for interacting with Google's Gemini API."""
 
-    def __init__(self, api_key: Optional[str] = None, model_id: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, model_id: str | None = None):
         """Initialize the Gemini client.
 
         Args:

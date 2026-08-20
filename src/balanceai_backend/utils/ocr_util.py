@@ -2,9 +2,8 @@ import json
 import logging
 from typing import TypeVar
 
-from pydantic import BaseModel
-
 from balanceai_backend.services import anthropic
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
