@@ -1,15 +1,17 @@
 import { useRef, useState } from 'react';
-import { View, Text, ScrollView, TextInput, Pressable, KeyboardAvoidingView, Platform, Modal } from 'react-native';
+import { View, Text, ScrollView, TextInput, Pressable, KeyboardAvoidingView, Platform, Modal, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../theme';
 import { Avatar, Icon } from '../components';
 import { UserMessage } from '../components/chat/UserMessage';
 import { AssistantMessage } from '../components/chat/AssistantMessage';
+import { PhotoMessage } from '../components/chat/PhotoMessage';
+import { CameraOverlay } from '../components/chat/CameraOverlay';
 
 const ATTACH_DRAWER_OPTIONS = [
   { key: 'camera', icon: 'camera', label: 'Camera' },
   { key: 'photos', icon: 'photos', label: 'Photos' },
-  { key: 'files', icon: 'files', label: 'Files' },
 ];
 
 let turnId = 1;
@@ -25,17 +27,41 @@ export default function ChatScreen() {
   const [conversationTurns, setConversationTurns] = useState([]);
   const [scrollViewportHeight, setScrollViewportHeight] = useState(0);
   const [isAttachDrawerOpen, setIsAttachDrawerOpen] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [stagedPhotoUri, setStagedPhotoUri] = useState(null);
 
   const send = () => {
-    if (!composerText.trim()) return;
+    const question = composerText.trim();
+    if (!question && !stagedPhotoUri) return;
     const id = turnId++;
-    setConversationTurns((prev) => [...prev, { id, question: composerText.trim(), answer: null }]);
+    const uri = stagedPhotoUri;
+    setConversationTurns((prev) => [...prev, { id, uri, question: question || null, answer: null }]);
     setComposerText('');
-    setTimeout(() => {
-      setConversationTurns((prev) => prev.map((tn) => (
-        tn.id === id ? { ...tn, answer: 'Not wired up to real data yet — placeholder response.' } : tn
-      )));
-    }, 600);
+    setStagedPhotoUri(null);
+    if (question) {
+      setTimeout(() => {
+        setConversationTurns((prev) => prev.map((tn) => (
+          tn.id === id ? { ...tn, answer: 'Not wired up to real data yet — placeholder response.' } : tn
+        )));
+      }, 600);
+    }
+  };
+
+  const usePhoto = (uri) => {
+    setStagedPhotoUri(uri);
+    setIsCameraOpen(false);
+  };
+
+  const pickPhoto = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setStagedPhotoUri(result.assets[0].uri);
+    }
   };
 
   const handleTurnLayout = (id, y) => {
@@ -84,8 +110,9 @@ export default function ChatScreen() {
                 onLayout={(e) => handleTurnLayout(turn.id, e.nativeEvent.layout.y)}
                 style={{ gap: 10 }}
               >
-                <UserMessage text={turn.question} />
-                <AssistantMessage text={turn.answer ?? '…'} />
+                {turn.uri && <PhotoMessage uri={turn.uri} />}
+                {turn.question && <UserMessage text={turn.question} />}
+                {turn.question && <AssistantMessage text={turn.answer ?? '…'} />}
               </View>
             ))}
             {/* Reserves scroll room so the latest turn can always be pushed to the
@@ -96,6 +123,26 @@ export default function ChatScreen() {
           </ScrollView>
 
           <View style={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 14 }}>
+            {stagedPhotoUri && (
+              <View style={{ paddingBottom: 8 }}>
+                <View style={{ width: 56, height: 72 }}>
+                  <Image
+                    source={{ uri: stagedPhotoUri }}
+                    style={{ width: 56, height: 72, borderRadius: t.radius.md }}
+                    resizeMode="cover"
+                  />
+                  <Pressable
+                    onPress={() => setStagedPhotoUri(null)}
+                    style={{
+                      position: 'absolute', top: -7, right: -7, width: 20, height: 20, borderRadius: 10,
+                      backgroundColor: t.text, alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ color: t.bg, fontSize: 12, lineHeight: 14 }}>×</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Pressable
                 onPress={() => setIsAttachDrawerOpen(true)}
@@ -133,7 +180,7 @@ export default function ChatScreen() {
                 }}
               />
 
-              {composerText.length > 0 && (
+              {(composerText.length > 0 || stagedPhotoUri) && (
                 <Pressable
                   onPress={send}
                   style={{
@@ -176,7 +223,11 @@ export default function ChatScreen() {
             {ATTACH_DRAWER_OPTIONS.map((opt, i) => (
               <Pressable
                 key={opt.key}
-                onPress={() => setIsAttachDrawerOpen(false)}
+                onPress={() => {
+                  setIsAttachDrawerOpen(false);
+                  if (opt.key === 'camera') setIsCameraOpen(true);
+                  if (opt.key === 'photos') pickPhoto();
+                }}
                 style={{
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -194,6 +245,12 @@ export default function ChatScreen() {
           </View>
         </View>
       </Modal>
+
+      <CameraOverlay
+        visible={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        onUsePhoto={usePhoto}
+      />
     </View>
   );
 }

@@ -34,7 +34,19 @@
     },
     "plugins": [
       "expo-router",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BalanceAI uses your camera to capture receipts for your books."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BalanceAI uses your photo library to attach receipts to your books."
+        }
+      ]
     ],
     "extra": {
       "router": {},

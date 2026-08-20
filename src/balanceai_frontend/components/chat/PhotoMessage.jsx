@@ -1,4 +1,4 @@
-import { View, Text } from 'react-native';
+import { View, Text, Image } from 'react-native';
 import { useTheme } from '../../theme';
 
 export function ReceiptPlaceholder({ width, height }) {
@@ -20,10 +20,19 @@ export function ReceiptPlaceholder({ width, height }) {
   );
 }
 
-export function PhotoMessage() {
+export function PhotoMessage({ uri }) {
+  const t = useTheme();
   return (
     <View style={{ alignItems: 'flex-end' }}>
-      <ReceiptPlaceholder width={150} height={196} />
+      {uri ? (
+        <Image
+          source={{ uri }}
+          style={{ width: 150, height: 196, borderRadius: t.radius.md }}
+          resizeMode="cover"
+        />
+      ) : (
+        <ReceiptPlaceholder width={150} height={196} />
+      )}
     </View>
   );
 }
