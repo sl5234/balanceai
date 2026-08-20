@@ -1,8 +1,9 @@
 import json
 import logging
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from balanceai_backend.services import anthropic
+from balanceai_backend.services.anthropic import ImageMimeType
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -10,6 +11,13 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_ANTHROPIC_MODEL_ID = "claude-sonnet-4-6"
+
+_VALID_IMAGE_MIME_TYPES: tuple[ImageMimeType, ...] = (
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+)
 
 
 class OcrUtil:
@@ -42,11 +50,14 @@ class OcrUtil:
             "Return ONLY valid JSON. No extra text."
         )
 
+        if mime_type not in _VALID_IMAGE_MIME_TYPES:
+            raise ValueError(f"Unsupported image mime type for OCR: {mime_type}")
+
         response_text = anthropic.messages(
             model_id=model_id,
             content=content,
             system_instruction=system_instruction,
-            mime_type=mime_type,
+            mime_type=cast(ImageMimeType, mime_type),
         )
 
         cleaned = _extract_json(response_text)

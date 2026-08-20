@@ -9,6 +9,7 @@ import logging
 from datetime import date
 
 from appdevcommons.hash_generator import HashGenerator
+from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
 from mcp.server.fastmcp import FastMCP
 
 import balanceai_backend.parsers.chase  # noqa: F401 - register parser
@@ -282,7 +283,7 @@ def categorize_transaction(account: dict, transaction: dict, category: str | Non
 
             if category not in valid_names:
                 return {"error": f"AI returned invalid category '{category}'"}
-        except Exception as e:
+        except (ClientError, BotoCoreError, json.JSONDecodeError, KeyError, IndexError) as e:
             logger.error(f"Bedrock categorization failed: {e}")
             return {"error": f"AI categorization failed: {e!s}"}
 

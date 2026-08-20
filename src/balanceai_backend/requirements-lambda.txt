@@ -2,7 +2,7 @@ appdevcommons>=0.1.4
 boto3
 anthropic
 openai
-mcp
+mcp<2.0.0
 pdfplumber
 pydantic
 pydantic-settings

@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.modules.setdefault("anthropic", MagicMock())
 sys.modules.setdefault("tavily", MagicMock())
 
 from balanceai_backend.models.journal import (
@@ -69,9 +68,9 @@ class TestGenerateTransactionCategory:
                 "balanceai_backend.utils.journal_entry_util.tavily_service.search",
                 return_value=None,
             ) as mock_tavily,
+            patch("balanceai_backend.utils.journal_entry_util.anthropic_service.messages"),
         ):
-            with patch("balanceai_backend.utils.journal_entry_util.anthropic_service.messages"):
-                generate_transaction_category(uncategorized_entry)
+            generate_transaction_category(uncategorized_entry)
 
         mock_tavily.assert_called_once()
 
@@ -320,7 +319,7 @@ class TestExtractJournalEntriesFromBankStatementTransaction:
             extract_journal_entries_from_bank_statement_transaction(sample_transaction)
 
         call_kwargs = mock_llm.call_args.kwargs
-        assert str(cache) in call_kwargs["system_instruction"]
+        assert json.dumps(cache) in call_kwargs["system_instruction"]
 
     def test_returns_entries_from_llm_response(self, sample_transaction, sample_entry_set):
         llm_response = sample_entry_set.model_dump_json()

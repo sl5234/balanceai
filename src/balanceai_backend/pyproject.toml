@@ -13,7 +13,7 @@ dependencies = [
     "google-cloud-aiplatform",
     "anthropic",
     "openai",
-    "mcp",
+    "mcp<2.0.0",
     "pdfplumber",
     "pydantic",
     "pydantic-settings",
@@ -81,4 +81,8 @@ exclude = ["^venv/", "^tests/", "^integ_tests/", "^build/", "^dist/"]
 
 [[tool.mypy.overrides]]
 module = "appdevcommons.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tavily.*"
 ignore_missing_imports = true

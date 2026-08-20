@@ -1,14 +1,22 @@
 import base64
+from typing import Literal
 
 from balanceai_backend.config import settings
 from openai import OpenAI
+from openai.types.responses import EasyInputMessageParam
+from openai.types.responses.response_input_message_content_list_param import (
+    ResponseInputMessageContentListParam,
+)
+from openai.types.responses.response_input_param import ResponseInputParam
+
+ImageMimeType = Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
 
 
 def response(
     model_id: str,
     content: str | bytes,
     system_instruction: str | None = None,
-    mime_type: str = "image/jpeg",
+    mime_type: ImageMimeType = "image/jpeg",
     max_output_tokens: int = 1024,
     temperature: float = 0.7,
 ) -> str:
@@ -28,15 +36,20 @@ def response(
     """
     client = OpenAI(api_key=settings.openai_api_key)
 
+    input_content: ResponseInputMessageContentListParam
     if isinstance(content, bytes):
         b64 = base64.b64encode(content).decode("utf-8")
         input_content = [
-            {"type": "input_image", "image_url": f"data:{mime_type};base64,{b64}"},
+            {
+                "type": "input_image",
+                "image_url": f"data:{mime_type};base64,{b64}",
+                "detail": "auto",
+            },
         ]
     else:
         input_content = [{"type": "input_text", "text": content}]
 
-    user_input = [{"role": "user", "content": input_content}]
+    user_input: ResponseInputParam = [EasyInputMessageParam(role="user", content=input_content)]
 
     resp = client.responses.create(
         model=model_id,

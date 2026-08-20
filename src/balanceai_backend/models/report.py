@@ -14,7 +14,7 @@ class ReportDefinition:
     unparameterized_sql: str | None = None
     parameters: list[dict] = field(default_factory=list)
     report_definition_id: str = field(default_factory=UniqueIdGenerator.generate_id)
-    created_at: str = field(default_factory=lambda: datetime.datetime.now().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat())
 
     def to_dict(self) -> dict:
         return {
