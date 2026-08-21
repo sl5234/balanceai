@@ -3,7 +3,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
-from balanceai_backend.db import conn
+from balanceai_backend.db.connection import conn
 from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_bank_statement,
     handle_sync_journal_entries_from_receipt,

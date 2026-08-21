@@ -3,7 +3,7 @@ import sqlite3
 from decimal import Decimal
 
 import pytest
-from balanceai_backend.db import create_schema
+from balanceai_backend.db.connection import create_schema
 from balanceai_backend.journals.journal_db import (
     delete_journal,
     find_journal_entries,

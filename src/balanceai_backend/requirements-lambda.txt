@@ -8,3 +8,4 @@ pydantic
 pydantic-settings
 tavily-python
 gspread>=6.0
+plaid-python

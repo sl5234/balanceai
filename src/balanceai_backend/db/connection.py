@@ -1,4 +1,5 @@
 import logging
+import os
 import sqlite3
 from pathlib import Path
 
@@ -48,43 +49,23 @@ def create_schema(connection: sqlite3.Connection) -> None:
             parameters            TEXT,
             created_at            TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS plaid_items (
+            item_id             TEXT PRIMARY KEY,
+            access_token        TEXT NOT NULL,
+            institution_id      TEXT,
+            institution_name    TEXT,
+            plaid_account_ids   TEXT NOT NULL DEFAULT '[]',
+            our_account_ids     TEXT NOT NULL DEFAULT '[]',
+            created_at          TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS plaid_sync_cursors (
+            item_id         TEXT PRIMARY KEY REFERENCES plaid_items(item_id) ON DELETE CASCADE,
+            cursor          TEXT NOT NULL,
+            last_synced_at  TEXT NOT NULL
+        );
     """)
-
-
-def get_distinct_categories(connection: sqlite3.Connection) -> list[str | None]:
-    """Return all distinct category values from journal_entries, including NULL."""
-    rows = connection.execute("SELECT DISTINCT category FROM journal_entries").fetchall()
-    return [row[0] for row in rows]
-
-
-def get_distinct_accounts(connection: sqlite3.Connection) -> list[str | None]:
-    """Return all distinct account values from journal_entries, including NULL."""
-    rows = connection.execute("SELECT DISTINCT account FROM journal_entries").fetchall()
-    return [row[0] for row in rows]
-
-
-def get_schema_summary(connection: sqlite3.Connection) -> str:
-    """Return a compact schema string derived from the live database.
-
-    Queries PRAGMA table_info for each table so the output always reflects
-    the actual schema without constraint noise (NOT NULL, DEFAULT, etc.).
-
-    Example output:
-        journals(journal_id TEXT, account_id TEXT, ...)
-        journal_entries(journal_entry_id TEXT, journal_id TEXT, ...)
-    """
-    tables = [
-        row[0]
-        for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        ).fetchall()
-    ]
-    lines = []
-    for table in tables:
-        columns = connection.execute(f"PRAGMA table_info({table})").fetchall()
-        col_defs = ", ".join(f"{col[1]} {col[2]}" for col in columns)
-        lines.append(f"{table}({col_defs})")
-    return "\n".join(lines)
 
 
 def _apply_migrations(connection: sqlite3.Connection) -> None:
@@ -103,10 +84,17 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
             pass  # Already applied or column doesn't exist yet on a fresh schema
 
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).parent.parent / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-conn = sqlite3.connect(DATA_DIR / "balanceai.db", check_same_thread=False)
+_DB_PATH = DATA_DIR / "balanceai.db"
+
+conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 create_schema(conn)
 _apply_migrations(conn)
+
+try:
+    os.chmod(_DB_PATH, 0o600)
+except OSError:
+    pass  # e.g. Windows or a filesystem without chmod semantics

@@ -35,7 +35,7 @@ from unittest.mock import patch
 
 import pytest
 
-from balanceai_backend.db import create_schema
+from balanceai_backend.db.connection import create_schema
 from balanceai_backend.servers.bookkeeping_server import analyze_financial_question
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
-from balanceai_backend.db import (
-    conn,
+from balanceai_backend.db.connection import conn
+from balanceai_backend.db.utils import (
     get_distinct_accounts,
     get_distinct_categories,
     get_schema_summary,

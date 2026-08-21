@@ -1,9 +1,13 @@
-"""Tests for db.py utilities."""
+"""Tests for db/utils.py."""
 
 import sqlite3
 
 import pytest
-from balanceai_backend.db import get_distinct_accounts, get_distinct_categories, get_schema_summary
+from balanceai_backend.db.utils import (
+    get_distinct_accounts,
+    get_distinct_categories,
+    get_schema_summary,
+)
 
 
 @pytest.fixture
@@ -63,7 +67,7 @@ class TestGetSchemaSummary:
 
     def test_real_schema_tables_present(self):
         """Smoke test against the real DB — journals and journal_entries must appear."""
-        from balanceai_backend.db import conn
+        from balanceai_backend.db.connection import conn
 
         result = get_schema_summary(conn)
         assert "journals(" in result
@@ -71,7 +75,7 @@ class TestGetSchemaSummary:
 
     def test_real_schema_key_columns_present(self):
         """Key columns used in queries must be present in the summary."""
-        from balanceai_backend.db import conn
+        from balanceai_backend.db.connection import conn
 
         result = get_schema_summary(conn)
         for col in ("recipient", "credit", "debit", "category", "date"):

@@ -19,6 +19,7 @@ dependencies = [
     "pydantic-settings",
     "tavily-python",
     "gspread>=6.0",
+    "plaid-python",
 ]
 
 [project.optional-dependencies]
@@ -54,7 +55,9 @@ dev = [
 # approach over packages.find.
 packages = [
     "balanceai_backend",
+    "balanceai_backend.bank_link",
     "balanceai_backend.dagger",
+    "balanceai_backend.db",
     "balanceai_backend.helpers",
     "balanceai_backend.journals",
     "balanceai_backend.models",
@@ -81,6 +84,10 @@ exclude = ["^venv/", "^tests/", "^integ_tests/", "^build/", "^dist/"]
 
 [[tool.mypy.overrides]]
 module = "appdevcommons.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "plaid.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

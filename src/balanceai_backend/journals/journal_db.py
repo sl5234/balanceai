@@ -2,7 +2,7 @@ import datetime
 import sqlite3
 from decimal import Decimal
 
-from balanceai_backend.db import conn as _default_conn
+from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.models import Journal
 from balanceai_backend.models.account import Account, AccountType
 from balanceai_backend.models.bank import Bank

@@ -3,7 +3,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
-from balanceai_backend.db import conn
+from balanceai_backend.db.connection import conn
 from balanceai_backend.models.account import Account, AccountType
 from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import (
