@@ -2,6 +2,7 @@ import datetime
 from decimal import Decimal
 from unittest.mock import patch
 
+import pytest
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.models.raw_transaction import RawTransaction
 from balanceai_backend.servers.link_bank_server import (
@@ -52,6 +53,46 @@ class TestSyncBankTransactions:
 
         mock_sync.assert_called_once_with("item-1")
         assert result == {"added": 3, "modified": 1, "removed": 0}
+
+    def test_defaults_to_the_only_linked_item_when_item_id_omitted(self):
+        item = PlaidItem(item_id="item-1", access_token="access-sandbox-abc")
+        with (
+            patch(
+                "balanceai_backend.servers.link_bank_server.db_find_plaid_items",
+                return_value=[item],
+            ),
+            patch(
+                "balanceai_backend.servers.link_bank_server.db_sync_transactions",
+                return_value={"added": 0, "modified": 0, "removed": 0},
+            ) as mock_sync,
+        ):
+            sync_bank_transactions()
+
+        mock_sync.assert_called_once_with("item-1")
+
+    def test_raises_when_no_banks_linked_and_item_id_omitted(self):
+        with (
+            patch(
+                "balanceai_backend.servers.link_bank_server.db_find_plaid_items",
+                return_value=[],
+            ),
+            pytest.raises(ValueError, match="No banks are linked"),
+        ):
+            sync_bank_transactions()
+
+    def test_raises_when_multiple_banks_linked_and_item_id_omitted(self):
+        items = [
+            PlaidItem(item_id="item-1", access_token="a"),
+            PlaidItem(item_id="item-2", access_token="b"),
+        ]
+        with (
+            patch(
+                "balanceai_backend.servers.link_bank_server.db_find_plaid_items",
+                return_value=items,
+            ),
+            pytest.raises(ValueError, match="Multiple banks are linked"),
+        ):
+            sync_bank_transactions()
 
 
 class TestGetBankTransactions:

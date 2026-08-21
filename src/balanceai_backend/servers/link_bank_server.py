@@ -324,17 +324,26 @@ def list_linked_banks() -> list[dict]:
 
 
 @mcp.tool()
-def sync_bank_transactions(item_id: str) -> dict:
+def sync_bank_transactions(item_id: str | None = None) -> dict:
     """
     Pull the latest transaction changes for a linked bank via Plaid's /transactions/sync.
     The access token never leaves the server — pass the item_id from list_linked_banks.
 
     Args:
-        item_id: The Plaid item to sync
+        item_id: The Plaid item to sync. Optional if exactly one bank is linked, in
+            which case that item is used automatically. Required once more than one
+            bank is linked — look it up via list_linked_banks.
 
     Returns:
         dict with counts: {"added": int, "modified": int, "removed": int}
     """
+    if item_id is None:
+        items = db_find_plaid_items()
+        if not items:
+            raise ValueError("No banks are linked yet.")
+        if len(items) > 1:
+            raise ValueError("Multiple banks are linked — specify item_id (see list_linked_banks).")
+        item_id = items[0].item_id
     return db_sync_transactions(item_id)
 
 
