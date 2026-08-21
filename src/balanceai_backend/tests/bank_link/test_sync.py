@@ -20,10 +20,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from balanceai_backend.bank_link.plaid_item_db import save_plaid_item
 from balanceai_backend.bank_link.plaid_sync_cursor_db import get_plaid_sync_cursor
-from balanceai_backend.bank_link.raw_transaction_db import find_raw_transactions
 from balanceai_backend.bank_link.sync import sync_transactions
 from balanceai_backend.db.connection import create_schema
 from balanceai_backend.models.plaid_item import PlaidItem
+from balanceai_backend.raw_transactions.raw_transaction_db import find_raw_transactions
 
 
 @pytest.fixture

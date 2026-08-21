@@ -15,13 +15,13 @@ from balanceai_backend.bank_link.plaid_sync_cursor_db import (
     get_plaid_sync_cursor,
     update_plaid_sync_cursor,
 )
-from balanceai_backend.bank_link.raw_transaction_db import (
-    delete_raw_transaction,
-    upsert_raw_transaction,
-)
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.models.plaid_sync_cursor import PlaidSyncCursor
 from balanceai_backend.models.raw_transaction import RawTransaction
+from balanceai_backend.raw_transactions.raw_transaction_db import (
+    delete_raw_transaction,
+    upsert_raw_transaction,
+)
 from balanceai_backend.services.plaid import get_client
 
 

@@ -4,14 +4,14 @@ from decimal import Decimal
 
 import pytest
 from balanceai_backend.bank_link.plaid_item_db import delete_plaid_item, save_plaid_item
-from balanceai_backend.bank_link.raw_transaction_db import (
+from balanceai_backend.db.connection import create_schema
+from balanceai_backend.models.plaid_item import PlaidItem
+from balanceai_backend.models.raw_transaction import RawTransaction
+from balanceai_backend.raw_transactions.raw_transaction_db import (
     delete_raw_transaction,
     find_raw_transactions,
     upsert_raw_transaction,
 )
-from balanceai_backend.db.connection import create_schema
-from balanceai_backend.models.plaid_item import PlaidItem
-from balanceai_backend.models.raw_transaction import RawTransaction
 
 
 @pytest.fixture

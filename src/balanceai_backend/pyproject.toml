@@ -63,6 +63,7 @@ packages = [
     "balanceai_backend.models",
     "balanceai_backend.parsers",
     "balanceai_backend.prompts",
+    "balanceai_backend.raw_transactions",
     "balanceai_backend.reports",
     "balanceai_backend.servers",
     "balanceai_backend.services",
