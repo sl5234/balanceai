@@ -1,15 +1,96 @@
 import datetime
+import webbrowser
 from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
+from balanceai_backend.bank_link.link import LinkExitedError
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.models.raw_transaction import RawTransaction
 from balanceai_backend.servers.link_bank_server import (
     get_bank_transactions,
+    link_bank,
     list_linked_banks,
     sync_bank_transactions,
 )
+
+
+class TestLinkBank:
+    def test_opens_browser_and_returns_linked_item_summary(self):
+        item = PlaidItem(
+            item_id="item-1",
+            access_token="access-sandbox-should-never-appear",
+            institution_name="Tartan Bank",
+            plaid_account_ids=["acc-1", "acc-2"],
+        )
+        with (
+            patch(
+                "balanceai_backend.servers.link_bank_server.create_hosted_link",
+                return_value=("link-token-1", "https://plaid.com/hosted/abc"),
+            ),
+            patch(
+                "balanceai_backend.servers.link_bank_server.complete_link", return_value=item
+            ) as mock_complete,
+            patch("balanceai_backend.servers.link_bank_server.webbrowser.open") as mock_open,
+        ):
+            result = link_bank()
+
+        mock_open.assert_called_once_with("https://plaid.com/hosted/abc")
+        mock_complete.assert_called_once_with("link-token-1")
+        assert result == {
+            "item_id": "item-1",
+            "institution_name": "Tartan Bank",
+            "accounts_linked": 2,
+        }
+        assert "access_token" not in result
+        assert "access-sandbox-should-never-appear" not in str(result)
+
+    def test_completes_link_even_when_browser_cannot_open(self):
+        item = PlaidItem(item_id="item-1", access_token="a", plaid_account_ids=[])
+        with (
+            patch(
+                "balanceai_backend.servers.link_bank_server.create_hosted_link",
+                return_value=("link-token-1", "https://plaid.com/hosted/abc"),
+            ),
+            patch("balanceai_backend.servers.link_bank_server.complete_link", return_value=item),
+            patch(
+                "balanceai_backend.servers.link_bank_server.webbrowser.open",
+                side_effect=webbrowser.Error("no browser available"),
+            ),
+        ):
+            result = link_bank()
+
+        assert result["item_id"] == "item-1"
+
+    def test_propagates_link_exited_error(self):
+        with (
+            patch(
+                "balanceai_backend.servers.link_bank_server.create_hosted_link",
+                return_value=("link-token-1", "https://plaid.com/hosted/abc"),
+            ),
+            patch(
+                "balanceai_backend.servers.link_bank_server.complete_link",
+                side_effect=LinkExitedError("user exited Hosted Link"),
+            ),
+            patch("balanceai_backend.servers.link_bank_server.webbrowser.open"),
+            pytest.raises(LinkExitedError),
+        ):
+            link_bank()
+
+    def test_propagates_timeout_error(self):
+        with (
+            patch(
+                "balanceai_backend.servers.link_bank_server.create_hosted_link",
+                return_value=("link-token-1", "https://plaid.com/hosted/abc"),
+            ),
+            patch(
+                "balanceai_backend.servers.link_bank_server.complete_link",
+                side_effect=TimeoutError("timed out"),
+            ),
+            patch("balanceai_backend.servers.link_bank_server.webbrowser.open"),
+            pytest.raises(TimeoutError),
+        ):
+            link_bank()
 
 
 class TestListLinkedBanks:

@@ -7,6 +7,7 @@ whether sourced from uploaded statement PDFs or synced from Plaid.
 
 import json
 import logging
+import webbrowser
 from datetime import date
 
 from appdevcommons.hash_generator import HashGenerator
@@ -14,6 +15,7 @@ from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[impor
 from mcp.server.fastmcp import FastMCP
 
 import balanceai_backend.parsers.chase  # noqa: F401 - register parser
+from balanceai_backend.bank_link.link import complete_link, create_hosted_link
 from balanceai_backend.bank_link.plaid_item_db import find_plaid_items as db_find_plaid_items
 from balanceai_backend.config import settings
 from balanceai_backend.constants import DEFAULT_CATEGORIES
@@ -48,9 +50,9 @@ mcp = FastMCP(
       before calling categorize_transaction. Only proceed without one if the user explicitly
       says they don't have a category to provide.
     - Monetary amounts are in USD unless otherwise noted.
-    - Connecting a new bank is done via a one-time local CLI command
-      (`python -m balanceai_backend.bank_link.link`), not an MCP tool — the Plaid access
-      token must never pass through this server's tool arguments or results.
+    - link_bank opens a browser window and blocks for up to 5 minutes while the user
+      logs into their bank on Plaid's hosted page — tell the user to check their
+      browser after calling it. The Plaid access token is never returned by any tool.
     """,
 )
 
@@ -303,6 +305,37 @@ def categorize_transaction(account: dict, transaction: dict, category: str | Non
         return {"error": f"Failed to update transaction {txn.id}"}
 
     return {"success": True, "transaction_id": txn.id, "category": category}
+
+
+@mcp.tool()
+def link_bank() -> dict:
+    """
+    Connect a new bank account via Plaid Hosted Link.
+
+    Opens a Plaid-hosted webpage in the browser where the user logs into their
+    bank — the MCP client should tell the user to check their browser and log
+    in. Blocks for up to 5 minutes while polling for completion. The resulting
+    access token is written straight to local storage and never returned here.
+
+    Returns:
+        dict with item_id, institution_name, and accounts_linked (count).
+
+    Raises:
+        LinkExitedError: if the user exits Hosted Link, or Plaid reports an error.
+        TimeoutError: if the user doesn't complete the connection within 5 minutes.
+    """
+    link_token, hosted_link_url = create_hosted_link()
+    try:
+        webbrowser.open(hosted_link_url)
+    except webbrowser.Error:
+        logger.warning("Could not open a browser automatically for %s", hosted_link_url)
+
+    item = complete_link(link_token)
+    return {
+        "item_id": item.item_id,
+        "institution_name": item.institution_name,
+        "accounts_linked": len(item.plaid_account_ids),
+    }
 
 
 @mcp.tool()
