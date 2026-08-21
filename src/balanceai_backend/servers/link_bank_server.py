@@ -15,7 +15,6 @@ from mcp.server.fastmcp import FastMCP
 
 import balanceai_backend.parsers.chase  # noqa: F401 - register parser
 from balanceai_backend.bank_link.plaid_item_db import find_plaid_items as db_find_plaid_items
-from balanceai_backend.bank_link.sync import sync_transactions as db_sync_transactions
 from balanceai_backend.config import settings
 from balanceai_backend.constants import DEFAULT_CATEGORIES
 from balanceai_backend.dagger.aws import AWSClients
@@ -24,6 +23,9 @@ from balanceai_backend.parsers import get_parser
 from balanceai_backend.prompts.categorizer import build_categorization_prompt
 from balanceai_backend.raw_transactions.raw_transaction_db import (
     find_raw_transactions as db_find_raw_transactions,
+)
+from balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid import (
+    sync_raw_transactions_from_plaid as db_sync_transactions,
 )
 from balanceai_backend.statements.storage import (
     load_accounts,

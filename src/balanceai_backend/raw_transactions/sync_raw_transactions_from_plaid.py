@@ -1,6 +1,6 @@
 """Keep local transaction data in sync with Plaid via /transactions/sync.
 
-Run as: python -m balanceai_backend.bank_link.sync <item_id>
+Run as: python -m balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid <item_id>
 """
 
 import sqlite3
@@ -54,7 +54,9 @@ def _to_raw_transaction(txn: PlaidTransaction, item_id: str) -> RawTransaction:
     )
 
 
-def sync_transactions(item_id: str, conn: sqlite3.Connection = _default_conn) -> dict:
+def sync_raw_transactions_from_plaid(
+    item_id: str, conn: sqlite3.Connection = _default_conn
+) -> dict:
     """
     Pull the latest transaction changes for a linked Plaid item.
 
@@ -109,10 +111,12 @@ def sync_transactions(item_id: str, conn: sqlite3.Connection = _default_conn) ->
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python -m balanceai_backend.bank_link.sync <item_id>")
+        print(
+            "Usage: python -m balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid <item_id>"
+        )
         raise SystemExit(2)
 
-    result = sync_transactions(sys.argv[1])
+    result = sync_raw_transactions_from_plaid(sys.argv[1])
     print(
         f"Synced: {result['added']} added, {result['modified']} modified, "
         f"{result['removed']} removed"

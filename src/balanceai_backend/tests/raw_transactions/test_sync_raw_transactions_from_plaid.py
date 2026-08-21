@@ -5,7 +5,7 @@ reasoning as test_link.py: Plaid's real generated SDK models raise
 ApiAttributeError on unset optional fields instead of returning None, and
 SimpleNamespace matches that "attribute genuinely absent" behavior.
 
-Every sync_transactions() call below passes conn=db explicitly — its default
+Every sync_raw_transactions_from_plaid() call below passes conn=db explicitly — its default
 argument is bound once at function-definition time, so patching the storage
 modules' module-level _default_conn after the fact would silently do nothing
 and these tests would otherwise hit the real data/balanceai.db.
@@ -20,10 +20,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from balanceai_backend.bank_link.plaid_item_db import save_plaid_item
 from balanceai_backend.bank_link.plaid_sync_cursor_db import get_plaid_sync_cursor
-from balanceai_backend.bank_link.sync import sync_transactions
 from balanceai_backend.db.connection import create_schema
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.raw_transactions.raw_transaction_db import find_raw_transactions
+from balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid import (
+    sync_raw_transactions_from_plaid,
+)
 
 
 @pytest.fixture
@@ -68,7 +70,7 @@ def _plaid_txn(
 class TestSyncTransactions:
     def test_raises_when_item_not_found(self, db):
         with pytest.raises(ValueError, match="item-missing"):
-            sync_transactions("item-missing", conn=db)
+            sync_raw_transactions_from_plaid("item-missing", conn=db)
 
     def test_first_sync_omits_cursor(self, db, linked_item):
         mock_client = MagicMock()
@@ -76,8 +78,11 @@ class TestSyncTransactions:
             added=[], modified=[], removed=[], next_cursor="cursor-A", has_more=False
         )
 
-        with patch("balanceai_backend.bank_link.sync.get_client", return_value=mock_client):
-            sync_transactions("item-1", conn=db)
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            sync_raw_transactions_from_plaid("item-1", conn=db)
 
         request = mock_client.transactions_sync.call_args[0][0]
         assert not hasattr(request, "cursor")
@@ -93,8 +98,11 @@ class TestSyncTransactions:
             has_more=False,
         )
 
-        with patch("balanceai_backend.bank_link.sync.get_client", return_value=mock_client):
-            counts = sync_transactions("item-1", conn=db)
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            counts = sync_raw_transactions_from_plaid("item-1", conn=db)
 
         assert counts == {"added": 1, "modified": 0, "removed": 0}
         [txn] = find_raw_transactions(conn=db)
@@ -113,8 +121,11 @@ class TestSyncTransactions:
             has_more=False,
         )
 
-        with patch("balanceai_backend.bank_link.sync.get_client", return_value=mock_client):
-            sync_transactions("item-1", conn=db)
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            sync_raw_transactions_from_plaid("item-1", conn=db)
 
         [txn] = find_raw_transactions(conn=db)
         assert txn.amount == Decimal("1000.0")  # Plaid negative (deposit) -> our positive (credit)
@@ -131,8 +142,11 @@ class TestSyncTransactions:
                 has_more=False,
             ),
         ]
-        with patch("balanceai_backend.bank_link.sync.get_client", return_value=mock_client):
-            sync_transactions("item-1", conn=db)
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            sync_raw_transactions_from_plaid("item-1", conn=db)
 
         mock_client.transactions_sync.side_effect = [
             SimpleNamespace(
@@ -143,8 +157,11 @@ class TestSyncTransactions:
                 has_more=False,
             ),
         ]
-        with patch("balanceai_backend.bank_link.sync.get_client", return_value=mock_client):
-            counts = sync_transactions("item-1", conn=db)
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            counts = sync_raw_transactions_from_plaid("item-1", conn=db)
 
         assert counts == {"added": 0, "modified": 1, "removed": 0}
         transactions = find_raw_transactions(conn=db)
@@ -156,8 +173,11 @@ class TestSyncTransactions:
         mock_client.transactions_sync.return_value = SimpleNamespace(
             added=[_plaid_txn()], modified=[], removed=[], next_cursor="cursor-A", has_more=False
         )
-        with patch("balanceai_backend.bank_link.sync.get_client", return_value=mock_client):
-            sync_transactions("item-1", conn=db)
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            sync_raw_transactions_from_plaid("item-1", conn=db)
 
         mock_client.transactions_sync.return_value = SimpleNamespace(
             added=[],
@@ -166,8 +186,11 @@ class TestSyncTransactions:
             next_cursor="cursor-B",
             has_more=False,
         )
-        with patch("balanceai_backend.bank_link.sync.get_client", return_value=mock_client):
-            counts = sync_transactions("item-1", conn=db)
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            counts = sync_raw_transactions_from_plaid("item-1", conn=db)
 
         assert counts == {"added": 0, "modified": 0, "removed": 1}
         assert find_raw_transactions(conn=db) == []
@@ -191,8 +214,11 @@ class TestSyncTransactions:
             ),
         ]
 
-        with patch("balanceai_backend.bank_link.sync.get_client", return_value=mock_client):
-            counts = sync_transactions("item-1", conn=db)
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            counts = sync_raw_transactions_from_plaid("item-1", conn=db)
 
         assert counts == {"added": 2, "modified": 0, "removed": 0}
         assert mock_client.transactions_sync.call_count == 2
@@ -205,14 +231,20 @@ class TestSyncTransactions:
         mock_client.transactions_sync.return_value = SimpleNamespace(
             added=[], modified=[], removed=[], next_cursor="cursor-A", has_more=False
         )
-        with patch("balanceai_backend.bank_link.sync.get_client", return_value=mock_client):
-            sync_transactions("item-1", conn=db)
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            sync_raw_transactions_from_plaid("item-1", conn=db)
 
         mock_client.transactions_sync.return_value = SimpleNamespace(
             added=[], modified=[], removed=[], next_cursor="cursor-B", has_more=False
         )
-        with patch("balanceai_backend.bank_link.sync.get_client", return_value=mock_client):
-            sync_transactions("item-1", conn=db)
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            sync_raw_transactions_from_plaid("item-1", conn=db)
 
         second_call_request = mock_client.transactions_sync.call_args_list[1][0][0]
         assert second_call_request.cursor == "cursor-A"
