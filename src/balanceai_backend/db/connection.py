@@ -65,6 +65,23 @@ def create_schema(connection: sqlite3.Connection) -> None:
             cursor          TEXT NOT NULL,
             last_synced_at  TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS raw_transactions (
+            id             TEXT PRIMARY KEY,
+            source         TEXT NOT NULL,
+            plaid_item_id  TEXT REFERENCES plaid_items(item_id) ON DELETE CASCADE,
+            account_id     TEXT NOT NULL,
+            posting_date   TEXT NOT NULL,
+            description    TEXT NOT NULL,
+            amount         TEXT NOT NULL,
+            category       TEXT,
+            pending        INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_raw_transactions_plaid_item_id ON raw_transactions(plaid_item_id);
+        CREATE INDEX IF NOT EXISTS idx_raw_transactions_account_id    ON raw_transactions(account_id);
+        CREATE INDEX IF NOT EXISTS idx_raw_transactions_posting_date  ON raw_transactions(posting_date);
+        CREATE INDEX IF NOT EXISTS idx_raw_transactions_source        ON raw_transactions(source);
     """)
 
 
