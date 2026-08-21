@@ -1,7 +1,8 @@
 """
 BalanceAI Link Bank MCP Server
 
-Provides tools for managing bank accounts, transactions, and categories.
+Provides tools for managing bank accounts, transactions, and categories —
+whether sourced from uploaded statement PDFs or synced from Plaid.
 """
 
 import json
@@ -13,13 +14,17 @@ from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[impor
 from mcp.server.fastmcp import FastMCP
 
 import balanceai_backend.parsers.chase  # noqa: F401 - register parser
+from balanceai_backend.bank_link.plaid_item_db import find_plaid_items as db_find_plaid_items
+from balanceai_backend.bank_link.raw_transaction_db import (
+    find_raw_transactions as db_find_raw_transactions,
+)
+from balanceai_backend.bank_link.sync import sync_transactions as db_sync_transactions
 from balanceai_backend.config import settings
 from balanceai_backend.constants import DEFAULT_CATEGORIES
 from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.models import Account, AccountType, Bank, Category, Transaction
 from balanceai_backend.parsers import get_parser
 from balanceai_backend.prompts.categorizer import build_categorization_prompt
-from balanceai_backend.services.plaid import transactions_sync
 from balanceai_backend.statements.storage import (
     load_accounts,
     load_transactions_by_account,
@@ -33,13 +38,17 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(
     "balanceai_link_bank",
     instructions="""
-    BalanceAI Link Bank is an MCP server for managing bank accounts and transactions.
+    BalanceAI Link Bank is an MCP server for managing bank accounts and transactions,
+    from either uploaded statement PDFs or banks linked via Plaid.
 
     General behavioral guidelines for the MCP client:
     - When a user asks to categorize a transaction, ALWAYS ask the user for a category object
       before calling categorize_transaction. Only proceed without one if the user explicitly
       says they don't have a category to provide.
     - Monetary amounts are in USD unless otherwise noted.
+    - Connecting a new bank is done via a one-time local CLI command
+      (`python -m balanceai_backend.bank_link.link`), not an MCP tool — the Plaid access
+      token must never pass through this server's tool arguments or results.
     """,
 )
 
@@ -295,23 +304,59 @@ def categorize_transaction(account: dict, transaction: dict, category: str | Non
 
 
 @mcp.tool()
-def list_transactions(
-    access_token: str,
-    cursor: str | None = None,
-    account_id: str | None = None,
-) -> dict:
+def list_linked_banks() -> list[dict]:
     """
-    List transactions for a Plaid item via /transactions/sync.
-
-    Args:
-        access_token: The Plaid access token for the item
-        cursor: Cursor from a previous sync to fetch only new updates. Omit to fetch full history.
-        account_id: Filter results to a specific account
+    List banks linked via Plaid.
 
     Returns:
-        Plaid transactions response with added, modified, removed, has_more, and next_cursor
+        List of linked items with item_id, institution_id, and institution_name.
+        Never includes the Plaid access_token — that stays server-side.
     """
-    return transactions_sync(access_token, cursor=cursor, account_id=account_id)
+    items = db_find_plaid_items()
+    return [
+        {
+            "item_id": item.item_id,
+            "institution_id": item.institution_id,
+            "institution_name": item.institution_name,
+        }
+        for item in items
+    ]
+
+
+@mcp.tool()
+def sync_bank_transactions(item_id: str) -> dict:
+    """
+    Pull the latest transaction changes for a linked bank via Plaid's /transactions/sync.
+    The access token never leaves the server — pass the item_id from list_linked_banks.
+
+    Args:
+        item_id: The Plaid item to sync
+
+    Returns:
+        dict with counts: {"added": int, "modified": int, "removed": int}
+    """
+    return db_sync_transactions(item_id)
+
+
+@mcp.tool()
+def get_bank_transactions(
+    item_id: str | None = None,
+    account_id: str | None = None,
+) -> list[dict]:
+    """
+    Query Plaid transactions already pulled down by sync_bank_transactions.
+
+    Args:
+        item_id: Filter to a specific linked bank
+        account_id: Filter to a specific Plaid account
+
+    Returns:
+        List of transactions with id, account_id, date, description, amount, and category
+    """
+    transactions = db_find_raw_transactions(
+        plaid_item_id=item_id, account_id=account_id, source="plaid"
+    )
+    return [t.to_dict() for t in transactions]
 
 
 if __name__ == "__main__":

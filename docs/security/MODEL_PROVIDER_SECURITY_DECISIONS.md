@@ -10,7 +10,7 @@
 **Short example:** For "how much did I spend on coffee?", send `Starbucks | $8.72 | Aug 19` — not the full account record it was pulled from.
 
 **Grounded facts:**
-- [verified] `servers/link_bank_server.py:299` currently passes the raw Plaid `access_token` as a direct MCP tool parameter on `list_transactions` — if an LLM client is the one invoking the tool, that token is visible in the tool-call arguments the model sees.
+- [verified, resolved 2026-08-21] `servers/link_bank_server.py`'s old `list_transactions` tool passed the raw Plaid `access_token` as a direct MCP tool parameter — visible in tool-call arguments to any LLM client invoking it. Replaced with `list_linked_banks` / `sync_bank_transactions` / `get_bank_transactions`, all scoped to `item_id`; the access token is looked up server-side from `bank_link/plaid_item_db.py` and never crosses the tool boundary.
 - [verified] `servers/bookkeeping_server.py:410-437` logs the full `user_message`, `system_prompt`, and LLM-generated `sql` for every `analyze_financial_question` call to a local DEBUG-level file handler (`logs/bookkeeping_server.log`) — recipient names, categories, and amounts land in plaintext on disk regardless of the model provider's own data handling.
 - [verified] Existing partial redaction already exists in the codebase (`redact` / `redact_entries` flags on `list_journals` / `list_journal_entries` in `models/journal.py`), but it's inconsistently applied — `analyze_financial_question`, `get_transactions`, and `list_transactions` return unredacted data today.
 

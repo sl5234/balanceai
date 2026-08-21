@@ -53,6 +53,12 @@ See `DEVELOPMENT.md` for setup, linting, formatting, and testing commands.
 | `list_categories` | List categories for an account |
 | `update_categories` | Replace category list for an account |
 | `categorize_transaction` | Manually or AI-categorize a transaction |
+| `list_linked_banks` | List banks linked via Plaid |
+| `sync_bank_transactions` | Pull the latest transactions for a linked bank via Plaid |
+| `get_bank_transactions` | Query transactions synced from Plaid |
+
+Connecting a new bank via Plaid is a one-time local CLI command, not an MCP tool:
+`venv/bin/python -m balanceai_backend.bank_link.link`
 
 ## Supported Banks
 
