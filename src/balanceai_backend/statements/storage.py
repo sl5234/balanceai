@@ -121,7 +121,7 @@ def update_transaction(transaction_id: str, **updates) -> bool:
     """
     all_transactions = _load_all_transactions()
 
-    for account_id, transactions in all_transactions.items():
+    for transactions in all_transactions.values():
         for txn in transactions:
             if txn.id == transaction_id:
                 for key, value in updates.items():

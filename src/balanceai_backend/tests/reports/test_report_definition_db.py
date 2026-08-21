@@ -1,7 +1,7 @@
 import sqlite3
 
 import pytest
-from balanceai_backend.db import create_schema
+from balanceai_backend.db.connection import create_schema
 from balanceai_backend.models.report import ReportDefinition
 from balanceai_backend.reports.report_definition_db import (
     delete_report_definition,

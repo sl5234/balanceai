@@ -1,15 +1,9 @@
 import json
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from pydantic import BaseModel, ValidationError
-
-# anthropic is not installed in the test environment — stub it out so that
-# balanceai.services.anthropic_service can be imported and patched.
-sys.modules.setdefault("anthropic", MagicMock())
-
 from balanceai_backend.utils.ocr_util import OcrUtil, _extract_json
+from pydantic import BaseModel, ValidationError
 
 
 class SampleOutput(BaseModel):

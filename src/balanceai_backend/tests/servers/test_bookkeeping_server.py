@@ -1,15 +1,9 @@
 import datetime
-import sys
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
-# anthropic is not installed in the test environment — stub it out so that
-# balanceai.services.anthropic_service can be imported and patched.
-sys.modules.setdefault("anthropic", MagicMock())
-
-from balanceai_backend.db import conn
+from balanceai_backend.db.connection import conn
 from balanceai_backend.models.account import Account, AccountType
 from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import (
@@ -226,9 +220,11 @@ def ocr_result(ocr_entry_data):
 
 class TestCreateOrUpdateJournalEntriesForReceipt:
     def test_raises_when_journal_not_found(self, receipt_path):
-        with patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[]):
-            with pytest.raises(ValueError, match="journal-999"):
-                sync_journal_entries_from_receipt("journal-999", receipt_path)
+        with (
+            patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[]),
+            pytest.raises(ValueError, match="journal-999"),
+        ):
+            sync_journal_entries_from_receipt("journal-999", receipt_path)
 
     def test_creates_new_entry_when_no_match(self, journal, receipt_path, ocr_result):
         with (

@@ -9,14 +9,14 @@ import csv
 import json
 import logging
 import re
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from balanceai_backend.config import settings
 from balanceai_backend.dagger.aws import AWSClients
-from balanceai_backend.db import conn
+from balanceai_backend.db.connection import conn
 from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_bank_statement,
     handle_sync_journal_entries_from_receipt,
@@ -130,7 +130,7 @@ def create_journal(
     """
     acct = Account.from_dict(account)
 
-    today = date.today()
+    today = datetime.now(UTC).date()
     if start_date is None:
         start_date = today
     if end_date is None:
@@ -406,7 +406,7 @@ def analyze_financial_question(
         user_parts.append(f"Context from prior queries: {json.dumps(context)}")
 
     user_message = "\n".join(user_parts)
-    system_prompt = financial_query_system_prompt(date.today())
+    system_prompt = financial_query_system_prompt(datetime.now(UTC).date())
     logger.debug("analyze_financial_question | user_message: %s", user_message)
     logger.debug("analyze_financial_question | system_prompt: %s", system_prompt)
 
@@ -417,8 +417,8 @@ def analyze_financial_question(
             system_prompt=system_prompt,
             max_tokens=1024,
         )
-    except Exception as e:
-        logger.error("analyze_financial_question | gemini call failed: %s", e, exc_info=True)
+    except Exception:
+        logger.exception("analyze_financial_question | gemini call failed")
         raise
     logger.debug("analyze_financial_question | raw_response:\n%s", raw)
 
@@ -428,8 +428,8 @@ def analyze_financial_question(
         parsed = json.loads(json_str)
         sql = parsed["sql"]
         description = parsed.get("description", "")
-    except Exception as e:
-        logger.error("analyze_financial_question | response parsing failed: %s", e, exc_info=True)
+    except Exception:
+        logger.exception("analyze_financial_question | response parsing failed")
         raise
     logger.debug("analyze_financial_question | sql: %s", sql)
 
@@ -490,8 +490,8 @@ def create_report_definition(
             system_prompt=system_prompt,
             max_tokens=1024,
         )
-    except Exception as e:
-        logger.error("create_report_definition | gemini call failed: %s", e, exc_info=True)
+    except Exception:
+        logger.exception("create_report_definition | gemini call failed")
         raise
     logger.debug("create_report_definition | raw_response:\n%s", raw)
 
@@ -501,8 +501,8 @@ def create_report_definition(
         parsed = json.loads(json_str)
         sql_template = parsed["sql"]
         parameters = parsed.get("parameters", [])
-    except Exception as e:
-        logger.error("create_report_definition | response parsing failed: %s", e, exc_info=True)
+    except Exception:
+        logger.exception("create_report_definition | response parsing failed")
         raise
 
     defn = ReportDefinition(

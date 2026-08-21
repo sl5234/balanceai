@@ -73,7 +73,9 @@ def extract_journal_entries_from_bank_statement_transaction(transaction: Transac
     response = anthropic_service.messages(
         model_id=DEFAULT_MODEL_ID,
         content=json.dumps(transaction.to_dict()),
-        system_instruction=extract_journal_entries_prompt(schema, merchant_context),
+        system_instruction=extract_journal_entries_prompt(
+            schema, json.dumps(merchant_context) if merchant_context else None
+        ),
     )
     logger.info(
         "extract_journal_entries_from_bank_statement_transaction LLM raw response: %s", response

@@ -1,7 +1,7 @@
 import json
 import sqlite3
 
-from balanceai_backend.db import conn as _default_conn
+from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.models.report import ReportDefinition
 
 

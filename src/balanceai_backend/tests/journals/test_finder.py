@@ -1,12 +1,7 @@
 import datetime
 import json
-import sys
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
-
-# anthropic is not installed in the test environment — stub it out so that
-# balanceai.services.anthropic_service can be imported and patched.
-sys.modules.setdefault("anthropic", MagicMock())
+from unittest.mock import patch
 
 import pytest
 from balanceai_backend.journals.finder import find_journal_entry
@@ -69,9 +64,11 @@ class TestFindJournalEntryNoLlm:
         assert result is None
 
     def test_does_not_call_llm_when_no_candidates(self, candidate):
-        with patch("balanceai_backend.journals.finder.find_journal_entries", return_value=[]):
-            with patch("balanceai_backend.services.anthropic.messages") as mock_llm:
-                find_journal_entry("journal-1", candidate)
+        with (
+            patch("balanceai_backend.journals.finder.find_journal_entries", return_value=[]),
+            patch("balanceai_backend.services.anthropic.messages") as mock_llm,
+        ):
+            find_journal_entry("journal-1", candidate)
         mock_llm.assert_not_called()
 
 

@@ -19,19 +19,23 @@ class TestGeminiClient:
 
     def test_init_defaults_to_settings(self):
         """Test client initialization falls back to settings.gemini_api_key."""
-        with patch("balanceai_backend.services.gemini.genai") as mock_genai:
-            with patch("balanceai_backend.services.gemini.settings") as mock_settings:
-                mock_settings.gemini_api_key = "settings-key"
-                GeminiClient()
-                mock_genai.Client.assert_called_once_with(api_key="settings-key")
+        with (
+            patch("balanceai_backend.services.gemini.genai") as mock_genai,
+            patch("balanceai_backend.services.gemini.settings") as mock_settings,
+        ):
+            mock_settings.gemini_api_key = "settings-key"
+            GeminiClient()
+            mock_genai.Client.assert_called_once_with(api_key="settings-key")
 
     def test_custom_model_id(self):
         """Test client initialization with a custom model ID."""
-        with patch("balanceai_backend.services.gemini.genai"):
-            with patch("balanceai_backend.services.gemini.settings") as mock_settings:
-                mock_settings.gemini_api_key = "test-key"
-                client = GeminiClient(model_id="gemini-2.5-pro")
-                assert client.model_id == "gemini-2.5-pro"
+        with (
+            patch("balanceai_backend.services.gemini.genai"),
+            patch("balanceai_backend.services.gemini.settings") as mock_settings,
+        ):
+            mock_settings.gemini_api_key = "test-key"
+            client = GeminiClient(model_id="gemini-2.5-pro")
+            assert client.model_id == "gemini-2.5-pro"
 
     def test_converse(self):
         """Test the converse method passes arguments correctly and returns text."""
@@ -173,14 +177,14 @@ class TestGeminiIntegration:
         import json
         import re
         import time
-        from datetime import date
+        from datetime import UTC, datetime
 
         from balanceai_backend.prompts.financial_query_prompt import financial_query_system_prompt
 
         response = self._call_with_retry(
             client.converse,
             user_message="How much did I spend at Shell in October 2025?",
-            system_prompt=financial_query_system_prompt(date.today()),
+            system_prompt=financial_query_system_prompt(datetime.now(UTC).date()),
             max_tokens=1024,
         )
 

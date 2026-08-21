@@ -48,3 +48,8 @@ web-build/
 *.sqlite
 data/
 logs/
+
+# Secrets — never commit real env files
+.env
+.env.*
+!.env.example

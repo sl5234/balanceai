@@ -1,13 +1,9 @@
 import json
 import sqlite3
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
-sys.modules.setdefault("anthropic", MagicMock())
-
-from balanceai_backend.db import create_schema
+from balanceai_backend.db.connection import create_schema
 from balanceai_backend.models.report import ReportDefinition
 from balanceai_backend.servers.bookkeeping_server import (
     create_report_definition,

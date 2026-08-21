@@ -1,54 +1,41 @@
-def transactions_sync(
-    access_token: str,
-    cursor: str | None = None,
-    account_id: str | None = None,
-) -> dict:
-    """
-    Fetch transaction updates for a Plaid item.
+from functools import lru_cache
 
-    Args:
-        access_token: The Plaid access token for the item
-        cursor: Cursor from a previous sync to fetch only new updates. Omit to fetch full history.
-        account_id: Filter results to a specific account
+import plaid
+from balanceai_backend.config import settings
+from plaid.api.plaid_api import PlaidApi
 
-    Returns:
-        Plaid /transactions/sync response dict with added, modified, removed, has_more, next_cursor
+_ENVIRONMENTS = {
+    "sandbox": plaid.Environment.Sandbox,
+    "production": plaid.Environment.Production,
+}
+
+
+@lru_cache(maxsize=1)
+def get_client() -> PlaidApi:
     """
-    return {
-        "added": [
-            {
-                "transaction_id": "pR7k8mXnQ3",
-                "account_id": "acc_12345",
-                "amount": 50.00,
-                "iso_currency_code": "USD",
-                "date": "2026-02-27",
-                "name": "SAFEWAY #1234",
-                "merchant_name": "Safeway",
-                "pending": False,
-                "category": ["Shops", "Supermarkets and Groceries"],
-                "personal_finance_category": {
-                    "primary": "FOOD_AND_DRINK",
-                    "detailed": "FOOD_AND_DRINK_GROCERIES",
-                },
-            },
-            {
-                "transaction_id": "qT9j2nYoR5",
-                "account_id": "acc_12345",
-                "amount": 15.99,
-                "iso_currency_code": "USD",
-                "date": "2026-02-25",
-                "name": "NETFLIX.COM",
-                "merchant_name": "Netflix",
-                "pending": False,
-                "category": ["Service", "Subscription"],
-                "personal_finance_category": {
-                    "primary": "ENTERTAINMENT",
-                    "detailed": "ENTERTAINMENT_TV_AND_MOVIES",
-                },
-            },
-        ],
-        "modified": [],
-        "removed": [],
-        "has_more": False,
-        "next_cursor": "eyJwYWdlX3Rva2VuIjoiMTI0In0=",
-    }
+    Build (once, lazily) and cache the Plaid API client.
+
+    Reads settings.plaid_client_id / plaid_secret / plaid_env. Raises ValueError
+    if credentials are missing or plaid_env isn't a recognized environment, rather
+    than letting the SDK fail with a confusing downstream error.
+    """
+    if not settings.plaid_client_id or not settings.plaid_secret:
+        raise ValueError(
+            "Plaid credentials are not configured. Set PLAID_CLIENT_ID and PLAID_SECRET."
+        )
+
+    host = _ENVIRONMENTS.get(settings.plaid_env.lower())
+    if host is None:
+        raise ValueError(
+            f"Unknown PLAID_ENV '{settings.plaid_env}'. Must be one of {sorted(_ENVIRONMENTS)}."
+        )
+
+    configuration = plaid.Configuration(
+        host=host,
+        api_key={
+            "clientId": settings.plaid_client_id,
+            "secret": settings.plaid_secret,
+        },
+    )
+    api_client = plaid.ApiClient(configuration)
+    return PlaidApi(api_client)

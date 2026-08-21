@@ -13,12 +13,13 @@ dependencies = [
     "google-cloud-aiplatform",
     "anthropic",
     "openai",
-    "mcp",
+    "mcp<2.0.0",
     "pdfplumber",
     "pydantic",
     "pydantic-settings",
     "tavily-python",
     "gspread>=6.0",
+    "plaid-python",
 ]
 
 [project.optional-dependencies]
@@ -54,12 +55,15 @@ dev = [
 # approach over packages.find.
 packages = [
     "balanceai_backend",
+    "balanceai_backend.bank_link",
     "balanceai_backend.dagger",
+    "balanceai_backend.db",
     "balanceai_backend.helpers",
     "balanceai_backend.journals",
     "balanceai_backend.models",
     "balanceai_backend.parsers",
     "balanceai_backend.prompts",
+    "balanceai_backend.raw_transactions",
     "balanceai_backend.reports",
     "balanceai_backend.servers",
     "balanceai_backend.services",
@@ -81,4 +85,12 @@ exclude = ["^venv/", "^tests/", "^integ_tests/", "^build/", "^dist/"]
 
 [[tool.mypy.overrides]]
 module = "appdevcommons.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "plaid.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tavily.*"
 ignore_missing_imports = true

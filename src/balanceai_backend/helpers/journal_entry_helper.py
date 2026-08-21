@@ -5,7 +5,7 @@ from pathlib import Path
 import anthropic
 
 import balanceai_backend.parsers.chase  # noqa: F401 - register parsers
-from balanceai_backend.db import conn
+from balanceai_backend.db.connection import conn
 from balanceai_backend.helpers.plaid_helper import extract_journal_entries_from_transactions
 from balanceai_backend.journals.finder import find_journal_entry as finder_find_journal_entry
 from balanceai_backend.journals.journal_db import find_journals

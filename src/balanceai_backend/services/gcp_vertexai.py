@@ -1,8 +1,13 @@
 import os
+from collections.abc import Sequence
 from typing import Any
 
 import vertexai  # type: ignore[import-untyped]
-from vertexai.generative_models import GenerativeModel, Part  # type: ignore[import-untyped]
+from vertexai.generative_models import (  # type: ignore[import-untyped]
+    GenerativeModel,
+    Image,
+    Part,
+)
 
 vertexai.init(
     project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
@@ -12,7 +17,7 @@ vertexai.init(
 
 def generate_content(
     model_id: str,
-    contents: list[Part],
+    contents: Sequence[Part],
     system_instruction: str | None = None,
     max_output_tokens: int = 1024,
     temperature: float = 0.7,
@@ -40,8 +45,9 @@ def generate_content(
         "temperature": temperature,
     }
 
+    typed_contents: list[str | Image | Part] = list(contents)
     response = model.generate_content(
-        contents=contents,
+        contents=typed_contents,
         generation_config=generation_config,
     )
 

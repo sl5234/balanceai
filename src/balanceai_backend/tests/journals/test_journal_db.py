@@ -3,7 +3,7 @@ import sqlite3
 from decimal import Decimal
 
 import pytest
-from balanceai_backend.db import create_schema
+from balanceai_backend.db.connection import create_schema
 from balanceai_backend.journals.journal_db import (
     delete_journal,
     find_journal_entries,
@@ -546,7 +546,6 @@ class TestUpdateJournal:
         assert row["end_date"] == "2026-01-30"
 
     def test_replaces_entries(self, db, sample_journal):
-        entry1 = _make_entry("entry-1", datetime.date(2026, 1, 10), Decimal("10.00"))
         save_journal(sample_journal, db)
         db.execute(
             "INSERT INTO journal_entries VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -612,7 +611,7 @@ class TestUpdateJournal:
         )
         sample_journal.entries = [collision_entry]
 
-        with pytest.raises(Exception):
+        with pytest.raises(sqlite3.IntegrityError):
             update_journal(sample_journal, db)
 
         # journal description must be unchanged
