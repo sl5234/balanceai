@@ -12,7 +12,8 @@ from datetime import date
 
 from appdevcommons.hash_generator import HashGenerator
 from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from pydantic import BaseModel
 
 import balanceai_backend.parsers.chase  # noqa: F401 - register parser
 from balanceai_backend.bank_link.link import complete_link, create_hosted_link
@@ -53,6 +54,8 @@ mcp = FastMCP(
     - link_bank opens a browser window and blocks for up to 5 minutes while the user
       logs into their bank on Plaid's hosted page — tell the user to check their
       browser after calling it. The Plaid access token is never returned by any tool.
+    - get_bank_transactions asks the user to approve sharing transaction data before
+      returning it. If the user declines, do not retry unless they ask you to.
     """,
 )
 
@@ -382,13 +385,21 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
     return db_sync_transactions(item_id)
 
 
+class ShareTransactionsConsent(BaseModel):
+    """Empty schema: the prompt is a plain accept/decline."""
+
+
 @mcp.tool()
-def get_bank_transactions(
+async def get_bank_transactions(
+    ctx: Context,
     item_id: str | None = None,
     account_id: str | None = None,
 ) -> list[dict]:
     """
     Query Plaid transactions already pulled down by sync_bank_transactions.
+
+    Transactions are private, so the user is asked to approve sharing them before any
+    are returned.
 
     Args:
         item_id: Filter to a specific linked bank
@@ -396,10 +407,26 @@ def get_bank_transactions(
 
     Returns:
         List of transactions with id, account_id, date, description, amount, and category
+
+    Raises:
+        PermissionError: if the user declines or cancels the approval prompt.
     """
     transactions = db_find_raw_transactions(
         plaid_item_id=item_id, account_id=account_id, source="plaid"
     )
+    if not transactions:
+        return []
+
+    dates = [t.posting_date for t in transactions]
+    result = await ctx.elicit(
+        message=(
+            f"Share {len(transactions)} bank transactions "
+            f"({min(dates).isoformat()} to {max(dates).isoformat()}) with the assistant?"
+        ),
+        schema=ShareTransactionsConsent,
+    )
+    if result.action != "accept":
+        raise PermissionError("User declined to share bank transactions.")
     return [t.to_dict() for t in transactions]
 
 

@@ -1,17 +1,24 @@
+import asyncio
 import datetime
 import webbrowser
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from balanceai_backend.bank_link.link import LinkExitedError
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.models.raw_transaction import RawTransaction
 from balanceai_backend.servers.link_bank_server import (
+    ShareTransactionsConsent,
     get_bank_transactions,
     link_bank,
     list_linked_banks,
     sync_bank_transactions,
+)
+from mcp.server.elicitation import (
+    AcceptedElicitation,
+    CancelledElicitation,
+    DeclinedElicitation,
 )
 
 
@@ -176,32 +183,86 @@ class TestSyncBankTransactions:
             sync_bank_transactions()
 
 
+def _make_ctx(elicit_result) -> MagicMock:
+    ctx = MagicMock()
+    ctx.elicit = AsyncMock(return_value=elicit_result)
+    return ctx
+
+
+def _make_txn(txn_id: str, posting_date: datetime.date) -> RawTransaction:
+    return RawTransaction(
+        id=txn_id,
+        source="plaid",
+        plaid_item_id="item-1",
+        account_id="plaid-acc-1",
+        posting_date=posting_date,
+        description="Starbucks",
+        amount=Decimal("-4.50"),
+        category="FOOD_AND_DRINK",
+    )
+
+
 class TestGetBankTransactions:
-    def test_returns_synced_transactions_filtered_to_plaid_source(self):
-        txn = RawTransaction(
-            id="txn-1",
-            source="plaid",
-            plaid_item_id="item-1",
-            account_id="plaid-acc-1",
-            posting_date=datetime.date(2026, 8, 19),
-            description="Starbucks",
-            amount=Decimal("-4.50"),
-            category="FOOD_AND_DRINK",
-        )
+    def test_returns_transactions_when_user_approves(self):
+        txns = [
+            _make_txn("txn-1", datetime.date(2026, 8, 19)),
+            _make_txn("txn-2", datetime.date(2026, 7, 2)),
+        ]
+        ctx = _make_ctx(AcceptedElicitation(data=ShareTransactionsConsent()))
         with patch(
             "balanceai_backend.servers.link_bank_server.db_find_raw_transactions",
-            return_value=[txn],
+            return_value=txns,
         ) as mock_find:
-            result = get_bank_transactions(item_id="item-1", account_id="plaid-acc-1")
+            result = asyncio.run(
+                get_bank_transactions(ctx, item_id="item-1", account_id="plaid-acc-1")
+            )
 
         mock_find.assert_called_once_with(
             plaid_item_id="item-1", account_id="plaid-acc-1", source="plaid"
         )
-        assert result == [txn.to_dict()]
+        ctx.elicit.assert_awaited_once()
+        message = ctx.elicit.await_args.kwargs["message"]
+        assert "2 bank transactions" in message
+        assert "2026-07-02 to 2026-08-19" in message
+        assert result == [t.to_dict() for t in txns]
 
-    def test_returns_empty_list_when_no_transactions_synced(self):
+    @pytest.mark.parametrize(
+        "elicit_result",
+        [
+            DeclinedElicitation(),
+            CancelledElicitation(),
+        ],
+        ids=["declined", "cancelled"],
+    )
+    def test_raises_and_returns_nothing_when_user_does_not_approve(self, elicit_result):
+        ctx = _make_ctx(elicit_result)
+        with (
+            patch(
+                "balanceai_backend.servers.link_bank_server.db_find_raw_transactions",
+                return_value=[_make_txn("txn-1", datetime.date(2026, 8, 19))],
+            ),
+            pytest.raises(PermissionError, match="declined"),
+        ):
+            asyncio.run(get_bank_transactions(ctx))
+
+    def test_propagates_error_when_client_does_not_support_elicitation(self):
+        ctx = MagicMock()
+        ctx.elicit = AsyncMock(side_effect=RuntimeError("elicitation not supported"))
+        with (
+            patch(
+                "balanceai_backend.servers.link_bank_server.db_find_raw_transactions",
+                return_value=[_make_txn("txn-1", datetime.date(2026, 8, 19))],
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            asyncio.run(get_bank_transactions(ctx))
+
+    def test_returns_empty_list_without_asking_when_no_transactions_synced(self):
+        ctx = _make_ctx(DeclinedElicitation())
         with patch(
             "balanceai_backend.servers.link_bank_server.db_find_raw_transactions",
             return_value=[],
         ):
-            assert get_bank_transactions() == []
+            assert asyncio.run(get_bank_transactions(ctx)) == []
+
+        ctx.elicit.assert_not_called()
