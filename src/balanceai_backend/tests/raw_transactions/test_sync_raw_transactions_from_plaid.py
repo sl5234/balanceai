@@ -37,6 +37,17 @@ def db():
     conn.close()
 
 
+@pytest.fixture(autouse=True)
+def mock_sync_bank_accounts():
+    """Bank-account creation has its own tests (tests/helpers/test_plaid_helper.py);
+    stub it here so these tests only exercise the transaction loop."""
+    with patch(
+        "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.sync_bank_accounts_from_plaid",
+        return_value={"saved": [], "skipped": []},
+    ) as mock:
+        yield mock
+
+
 @pytest.fixture
 def linked_item(db):
     item = PlaidItem(item_id="item-1", access_token="access-sandbox-abc")
@@ -104,7 +115,12 @@ class TestSyncTransactions:
         ):
             counts = sync_raw_transactions_from_plaid("item-1", conn=db)
 
-        assert counts == {"added": 1, "modified": 0, "removed": 0}
+        assert counts == {
+            "added": 1,
+            "modified": 0,
+            "removed": 0,
+            "bank_accounts": {"saved": 0, "skipped": 0},
+        }
         [txn] = find_raw_transactions(conn=db)
         assert txn.id == "txn-1"
         assert txn.amount == Decimal("-4.5")  # Plaid positive (spend) -> our negative (debit)
@@ -163,7 +179,12 @@ class TestSyncTransactions:
         ):
             counts = sync_raw_transactions_from_plaid("item-1", conn=db)
 
-        assert counts == {"added": 0, "modified": 1, "removed": 0}
+        assert counts == {
+            "added": 0,
+            "modified": 1,
+            "removed": 0,
+            "bank_accounts": {"saved": 0, "skipped": 0},
+        }
         transactions = find_raw_transactions(conn=db)
         assert len(transactions) == 1
         assert transactions[0].amount == Decimal("-4.75")
@@ -192,7 +213,12 @@ class TestSyncTransactions:
         ):
             counts = sync_raw_transactions_from_plaid("item-1", conn=db)
 
-        assert counts == {"added": 0, "modified": 0, "removed": 1}
+        assert counts == {
+            "added": 0,
+            "modified": 0,
+            "removed": 1,
+            "bank_accounts": {"saved": 0, "skipped": 0},
+        }
         assert find_raw_transactions(conn=db) == []
 
     def test_loops_while_has_more_and_persists_cursor_each_page(self, db, linked_item):
@@ -220,7 +246,12 @@ class TestSyncTransactions:
         ):
             counts = sync_raw_transactions_from_plaid("item-1", conn=db)
 
-        assert counts == {"added": 2, "modified": 0, "removed": 0}
+        assert counts == {
+            "added": 2,
+            "modified": 0,
+            "removed": 0,
+            "bank_accounts": {"saved": 0, "skipped": 0},
+        }
         assert mock_client.transactions_sync.call_count == 2
         second_call_request = mock_client.transactions_sync.call_args_list[1][0][0]
         assert second_call_request.cursor == "cursor-page-1"
@@ -248,3 +279,28 @@ class TestSyncTransactions:
 
         second_call_request = mock_client.transactions_sync.call_args_list[1][0][0]
         assert second_call_request.cursor == "cursor-A"
+
+
+class TestSyncBankAccounts:
+    def test_syncs_bank_accounts_before_transactions_and_reports_counts(
+        self, db, linked_item, mock_sync_bank_accounts
+    ):
+        mock_sync_bank_accounts.return_value = {
+            "saved": ["tartan_bank:checking:0000", "tartan_bank:savings:1111"],
+            "skipped": [{"plaid_account_id": "plaid-acc-9", "reason": "no mask (last 4 digits)"}],
+        }
+        mock_client = MagicMock()
+        mock_client.transactions_sync.return_value = SimpleNamespace(
+            added=[], modified=[], removed=[], next_cursor="cursor-A", has_more=False
+        )
+
+        with patch(
+            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            return_value=mock_client,
+        ):
+            counts = sync_raw_transactions_from_plaid("item-1", conn=db)
+
+        [call] = mock_sync_bank_accounts.call_args_list
+        assert call.args[0].item_id == "item-1"
+        assert call.kwargs["conn"] is db
+        assert counts["bank_accounts"] == {"saved": 2, "skipped": 1}

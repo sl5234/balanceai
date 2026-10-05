@@ -66,6 +66,30 @@ def create_schema(connection: sqlite3.Connection) -> None:
             last_synced_at  TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS bank_accounts (
+            id                    TEXT PRIMARY KEY,
+            institution_name      TEXT NOT NULL,
+            account_type          TEXT NOT NULL,
+            last4                 TEXT NOT NULL,
+            display_name          TEXT,
+            plaid_institution_id  TEXT,
+            plaid_item_id         TEXT REFERENCES plaid_items(item_id) ON DELETE SET NULL,
+            plaid_account_id      TEXT UNIQUE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_bank_accounts_plaid_item_id ON bank_accounts(plaid_item_id);
+
+        -- Unlinking a Plaid item keeps its bank accounts but clears their whole
+        -- Plaid link, not just plaid_item_id — a stale plaid_account_id would
+        -- block re-linking the same bank (which issues new Plaid account ids).
+        CREATE TRIGGER IF NOT EXISTS trg_plaid_items_unlink_bank_accounts
+        BEFORE DELETE ON plaid_items
+        BEGIN
+            UPDATE bank_accounts
+            SET plaid_item_id = NULL, plaid_account_id = NULL
+            WHERE plaid_item_id = OLD.item_id;
+        END;
+
         CREATE TABLE IF NOT EXISTS raw_transactions (
             id             TEXT PRIMARY KEY,
             source         TEXT NOT NULL,

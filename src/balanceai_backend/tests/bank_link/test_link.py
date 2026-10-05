@@ -140,7 +140,7 @@ class TestCompleteLink:
     def _metadata(self, institution=None, accounts=None):
         return SimpleNamespace(institution=institution, accounts=accounts)
 
-    def test_saves_and_returns_plaid_item(self):
+    def test_returns_unsaved_plaid_item(self):
         metadata = self._metadata(
             institution=SimpleNamespace(institution_id="ins_3", name="Chase"),
             accounts=[SimpleNamespace(id="plaid-acc-1"), SimpleNamespace(id="plaid-acc-2")],
@@ -156,7 +156,6 @@ class TestCompleteLink:
                 "balanceai_backend.bank_link.link.poll_for_public_token",
                 return_value=("public-tok-1", metadata),
             ),
-            patch("balanceai_backend.bank_link.link.save_plaid_item") as mock_save,
         ):
             item = complete_link("link-tok-1")
 
@@ -166,7 +165,6 @@ class TestCompleteLink:
         assert item.institution_name == "Chase"
         assert item.plaid_account_ids == ["plaid-acc-1", "plaid-acc-2"]
         assert item.our_account_ids == []
-        mock_save.assert_called_once_with(item)
 
     def test_handles_missing_institution_and_accounts_gracefully(self):
         metadata = self._metadata(institution=None, accounts=None)
@@ -181,7 +179,6 @@ class TestCompleteLink:
                 "balanceai_backend.bank_link.link.poll_for_public_token",
                 return_value=("public-tok-1", metadata),
             ),
-            patch("balanceai_backend.bank_link.link.save_plaid_item"),
         ):
             item = complete_link("link-tok-1")
 

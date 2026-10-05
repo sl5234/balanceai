@@ -16,6 +16,7 @@ from balanceai_backend.bank_link.plaid_sync_cursor_db import (
     update_plaid_sync_cursor,
 )
 from balanceai_backend.db.connection import conn as _default_conn
+from balanceai_backend.helpers.plaid_helper import sync_bank_accounts_from_plaid
 from balanceai_backend.models.plaid_sync_cursor import PlaidSyncCursor
 from balanceai_backend.models.raw_transaction import RawTransaction
 from balanceai_backend.raw_transactions.raw_transaction_db import (
@@ -67,18 +68,25 @@ def sync_raw_transactions_from_plaid(
     handles "new" and "changed" with one call); removed transactions are
     deleted.
 
+    Bank accounts are created/updated first (sync_bank_accounts_from_plaid),
+    so every transaction's account already exists by the time it's saved.
+
     Returns:
-        dict with counts: {"added": int, "modified": int, "removed": int}
+        dict with transaction counts plus the bank account result:
+        {"added": int, "modified": int, "removed": int,
+         "bank_accounts": {"saved": int, "skipped": int}}
     """
     items = find_plaid_items(item_id=item_id, conn=conn)
     if not items:
         raise ValueError(f"Plaid item {item_id} not found")
     item = items[0]
 
+    bank_accounts = sync_bank_accounts_from_plaid(item, conn=conn)
+
     cursor = get_plaid_sync_cursor(item_id, conn=conn)
     client = get_client()
 
-    counts = {"added": 0, "modified": 0, "removed": 0}
+    counts: dict = {"added": 0, "modified": 0, "removed": 0}
     has_more = True
 
     while has_more:
@@ -106,6 +114,10 @@ def sync_raw_transactions_from_plaid(
         update_plaid_sync_cursor(PlaidSyncCursor(item_id=item_id, cursor=cursor), conn=conn)
         has_more = bool(getattr(response, "has_more", False))
 
+    counts["bank_accounts"] = {
+        "saved": len(bank_accounts["saved"]),
+        "skipped": len(bank_accounts["skipped"]),
+    }
     return counts
 
 

@@ -1,9 +1,15 @@
-"""Tests for the Plaid client factory."""
+"""Tests for the Plaid client factory and /accounts/get wrapper.
 
-from unittest.mock import patch
+Fake Plaid response objects use SimpleNamespace rather than MagicMock: Plaid's
+real SDK models raise ApiAttributeError on unset optional fields, and
+SimpleNamespace matches that "attribute genuinely absent" behavior.
+"""
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
-from balanceai_backend.services.plaid import get_client
+from balanceai_backend.services.plaid import PlaidAccount, get_accounts, get_client
 
 
 @pytest.fixture(autouse=True)
@@ -70,3 +76,48 @@ class TestGetClient:
             first = get_client()
             second = get_client()
             assert first is second
+
+
+class TestGetAccounts:
+    def _get_accounts(self, accounts):
+        mock_client = MagicMock()
+        mock_client.accounts_get.return_value = SimpleNamespace(accounts=accounts)
+        with patch("balanceai_backend.services.plaid.get_client", return_value=mock_client):
+            result = get_accounts("access-sandbox-abc")
+        return result, mock_client
+
+    def test_returns_accounts_as_plain_data(self):
+        result, mock_client = self._get_accounts(
+            [
+                SimpleNamespace(
+                    account_id="plaid-acc-1",
+                    name="Plaid Checking",
+                    type=SimpleNamespace(value="depository"),
+                    subtype=SimpleNamespace(value="checking"),
+                    mask="0000",
+                )
+            ]
+        )
+
+        assert result == [
+            PlaidAccount(
+                account_id="plaid-acc-1",
+                name="Plaid Checking",
+                type="depository",
+                subtype="checking",
+                mask="0000",
+            )
+        ]
+        request = mock_client.accounts_get.call_args[0][0]
+        assert request.access_token == "access-sandbox-abc"
+
+    def test_missing_optional_fields_come_back_as_none(self):
+        result, _ = self._get_accounts([SimpleNamespace(account_id="plaid-acc-1")])
+
+        assert result == [
+            PlaidAccount(account_id="plaid-acc-1", name=None, type=None, subtype=None, mask=None)
+        ]
+
+    def test_returns_empty_list_when_no_accounts(self):
+        result, _ = self._get_accounts([])
+        assert result == []

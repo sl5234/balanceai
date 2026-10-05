@@ -30,6 +30,16 @@ class TestLinkBank:
             institution_name="Tartan Bank",
             plaid_account_ids=["acc-1", "acc-2"],
         )
+        bank_accounts = {
+            "saved": ["tartan_bank:checking:0000"],
+            "skipped": [
+                {
+                    "plaid_account_id": "acc-2",
+                    "display_name": "Plaid Other",
+                    "reason": "unsupported Plaid account type 'other'",
+                }
+            ],
+        }
         with (
             patch(
                 "balanceai_backend.servers.link_bank_server.create_hosted_link",
@@ -38,16 +48,21 @@ class TestLinkBank:
             patch(
                 "balanceai_backend.servers.link_bank_server.complete_link", return_value=item
             ) as mock_complete,
+            patch(
+                "balanceai_backend.servers.link_bank_server.save_linked_plaid_item",
+                return_value=bank_accounts,
+            ) as mock_save,
             patch("balanceai_backend.servers.link_bank_server.webbrowser.open") as mock_open,
         ):
             result = link_bank()
 
         mock_open.assert_called_once_with("https://plaid.com/hosted/abc")
         mock_complete.assert_called_once_with("link-token-1")
+        mock_save.assert_called_once_with(item)
         assert result == {
             "item_id": "item-1",
             "institution_name": "Tartan Bank",
-            "accounts_linked": 2,
+            "bank_accounts": bank_accounts,
         }
         assert "access_token" not in result
         assert "access-sandbox-should-never-appear" not in str(result)
@@ -60,6 +75,7 @@ class TestLinkBank:
                 return_value=("link-token-1", "https://plaid.com/hosted/abc"),
             ),
             patch("balanceai_backend.servers.link_bank_server.complete_link", return_value=item),
+            patch("balanceai_backend.servers.link_bank_server.save_linked_plaid_item"),
             patch(
                 "balanceai_backend.servers.link_bank_server.webbrowser.open",
                 side_effect=webbrowser.Error("no browser available"),

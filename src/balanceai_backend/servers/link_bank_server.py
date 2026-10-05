@@ -21,6 +21,7 @@ from balanceai_backend.bank_link.plaid_item_db import find_plaid_items as db_fin
 from balanceai_backend.config import settings
 from balanceai_backend.constants import DEFAULT_CATEGORIES
 from balanceai_backend.dagger.aws import AWSClients
+from balanceai_backend.helpers.plaid_helper import save_linked_plaid_item
 from balanceai_backend.models import Account, AccountType, Bank, Category, Transaction
 from balanceai_backend.parsers import get_parser
 from balanceai_backend.prompts.categorizer import build_categorization_prompt
@@ -321,7 +322,10 @@ def link_bank() -> dict:
     access token is written straight to local storage and never returned here.
 
     Returns:
-        dict with item_id, institution_name, and accounts_linked (count).
+        dict with item_id, institution_name, and bank_accounts: {"saved": [bank
+        account ids], "skipped": [{"plaid_account_id", "display_name", "reason"}]} —
+        accounts that couldn't be added (unsupported type, no last 4 digits, or an
+        id clash) are listed under skipped.
 
     Raises:
         LinkExitedError: if the user exits Hosted Link, or Plaid reports an error.
@@ -334,10 +338,11 @@ def link_bank() -> dict:
         logger.warning("Could not open a browser automatically for %s", hosted_link_url)
 
     item = complete_link(link_token)
+    bank_accounts = save_linked_plaid_item(item)
     return {
         "item_id": item.item_id,
         "institution_name": item.institution_name,
-        "accounts_linked": len(item.plaid_account_ids),
+        "bank_accounts": bank_accounts,
     }
 
 
@@ -373,7 +378,9 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
             bank is linked — look it up via list_linked_banks.
 
     Returns:
-        dict with counts: {"added": int, "modified": int, "removed": int}
+        dict with transaction counts {"added", "modified", "removed"} plus
+        "bank_accounts": {"saved", "skipped"} — the bank accounts created/updated
+        from the item first.
     """
     if item_id is None:
         items = db_find_plaid_items()
