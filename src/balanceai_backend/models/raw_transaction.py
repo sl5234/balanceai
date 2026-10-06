@@ -17,17 +17,16 @@ class RawTransaction:
     content hash wouldn't survive once a field like amount changes). Other
     sources should use whatever stable identifier makes sense for them.
 
-    account_id: for Plaid, this is Plaid's own raw account id (the mapping to
-    our Account.id is deferred — see PLAID_INTEGRATION_DECISIONS.md). For
-    receipt/bank-statement sources, this should be our actual Account.id
-    directly, since those sources already know which of our accounts a
-    transaction belongs to — no Plaid-account-mapping ambiguity there. That
-    means the same column means something different depending on `source`,
-    at least until the Plaid account-mapping work lands.
+    account_id: our BankAccount id, for every source. Plaid transactions are
+    mapped from Plaid's own account id to it at sync time.
+
+    plaid_account_id: Plaid's own account id, kept alongside account_id for
+    Plaid rows (None for other sources).
 
     plaid_item_id: only set when source == "plaid" — nullable so
     receipt/bank-statement rows (which have no Plaid item at all) aren't
-    forced to fake one.
+    forced to fake one. Also cleared (the row itself is kept) if that Plaid
+    item is later unlinked.
     """
 
     id: str
@@ -37,6 +36,7 @@ class RawTransaction:
     description: str
     amount: Decimal  # negative = debit, positive = credit — flipped from Plaid's own convention
     plaid_item_id: str | None = None
+    plaid_account_id: str | None = None
     category: str | None = None
     pending: bool = False
 
@@ -52,6 +52,7 @@ class RawTransaction:
             id=d["id"],
             source=d["source"],
             plaid_item_id=d.get("plaid_item_id"),
+            plaid_account_id=d.get("plaid_account_id"),
             account_id=d["account_id"],
             posting_date=datetime.date.fromisoformat(d["posting_date"]),
             description=d["description"],

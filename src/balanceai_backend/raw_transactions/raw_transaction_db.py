@@ -11,6 +11,7 @@ def _build_transaction(row) -> RawTransaction:
         id=row["id"],
         source=row["source"],
         plaid_item_id=row["plaid_item_id"],
+        plaid_account_id=row["plaid_account_id"],
         account_id=row["account_id"],
         posting_date=datetime.date.fromisoformat(row["posting_date"]),
         description=row["description"],
@@ -53,13 +54,15 @@ def upsert_raw_transaction(txn: RawTransaction, conn: sqlite3.Connection = _defa
     with conn:
         conn.execute(
             "INSERT OR REPLACE INTO raw_transactions"
-            " (id, source, plaid_item_id, account_id, posting_date, description, amount, category, pending)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
+            " (id, source, plaid_item_id, account_id, plaid_account_id,"
+            "  posting_date, description, amount, category, pending)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 txn.id,
                 txn.source,
                 txn.plaid_item_id,
                 txn.account_id,
+                txn.plaid_account_id,
                 txn.posting_date.isoformat(),
                 txn.description,
                 str(txn.amount),

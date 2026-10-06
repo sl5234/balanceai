@@ -55,8 +55,6 @@ def create_schema(connection: sqlite3.Connection) -> None:
             access_token        TEXT NOT NULL,
             institution_id      TEXT,
             institution_name    TEXT,
-            plaid_account_ids   TEXT NOT NULL DEFAULT '[]',
-            our_account_ids     TEXT NOT NULL DEFAULT '[]',
             created_at          TEXT NOT NULL
         );
 
@@ -66,11 +64,36 @@ def create_schema(connection: sqlite3.Connection) -> None:
             last_synced_at  TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS bank_accounts (
+            id                    TEXT PRIMARY KEY,
+            institution_name      TEXT NOT NULL,
+            account_type          TEXT NOT NULL,
+            last4                 TEXT NOT NULL,
+            display_name          TEXT,
+            plaid_institution_id  TEXT,
+            plaid_item_id         TEXT REFERENCES plaid_items(item_id) ON DELETE SET NULL,
+            plaid_account_id      TEXT UNIQUE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_bank_accounts_plaid_item_id ON bank_accounts(plaid_item_id);
+
+        -- Unlinking a Plaid item keeps its bank accounts but clears their whole
+        -- Plaid link, not just plaid_item_id — a stale plaid_account_id would
+        -- block re-linking the same bank (which issues new Plaid account ids).
+        CREATE TRIGGER IF NOT EXISTS trg_plaid_items_unlink_bank_accounts
+        BEFORE DELETE ON plaid_items
+        BEGIN
+            UPDATE bank_accounts
+            SET plaid_item_id = NULL, plaid_account_id = NULL
+            WHERE plaid_item_id = OLD.item_id;
+        END;
+
         CREATE TABLE IF NOT EXISTS raw_transactions (
             id             TEXT PRIMARY KEY,
             source         TEXT NOT NULL,
-            plaid_item_id  TEXT REFERENCES plaid_items(item_id) ON DELETE CASCADE,
-            account_id     TEXT NOT NULL,
+            plaid_item_id  TEXT REFERENCES plaid_items(item_id) ON DELETE SET NULL,
+            account_id     TEXT NOT NULL REFERENCES bank_accounts(id) ON UPDATE CASCADE,
+            plaid_account_id TEXT,
             posting_date   TEXT NOT NULL,
             description    TEXT NOT NULL,
             amount         TEXT NOT NULL,
@@ -92,6 +115,9 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         "ALTER TABLE report_definitions RENAME COLUMN sample_sql TO unparameterized_sql",
         # Add parameters column for LLM-identified named params
         "ALTER TABLE report_definitions ADD COLUMN parameters TEXT",
+        # Account ids moved to bank_accounts (plaid_item_id / plaid_account_id)
+        "ALTER TABLE plaid_items DROP COLUMN plaid_account_ids",
+        "ALTER TABLE plaid_items DROP COLUMN our_account_ids",
     ]
     for sql in migrations:
         try:

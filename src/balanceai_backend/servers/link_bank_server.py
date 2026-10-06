@@ -7,17 +7,22 @@ whether sourced from uploaded statement PDFs or synced from Plaid.
 
 import json
 import logging
+import webbrowser
 from datetime import date
 
 from appdevcommons.hash_generator import HashGenerator
 from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from pydantic import BaseModel
 
 import balanceai_backend.parsers.chase  # noqa: F401 - register parser
+from balanceai_backend.bank_link.link import complete_link, create_hosted_link
 from balanceai_backend.bank_link.plaid_item_db import find_plaid_items as db_find_plaid_items
 from balanceai_backend.config import settings
 from balanceai_backend.constants import DEFAULT_CATEGORIES
 from balanceai_backend.dagger.aws import AWSClients
+from balanceai_backend.db.bank_account_db import find_bank_accounts as db_find_bank_accounts
+from balanceai_backend.helpers.plaid_helper import save_linked_plaid_item
 from balanceai_backend.models import Account, AccountType, Bank, Category, Transaction
 from balanceai_backend.parsers import get_parser
 from balanceai_backend.prompts.categorizer import build_categorization_prompt
@@ -25,7 +30,7 @@ from balanceai_backend.raw_transactions.raw_transaction_db import (
     find_raw_transactions as db_find_raw_transactions,
 )
 from balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid import (
-    sync_raw_transactions_from_plaid as db_sync_transactions,
+    sync_raw_transactions_from_plaid,
 )
 from balanceai_backend.statements.storage import (
     load_accounts,
@@ -48,9 +53,11 @@ mcp = FastMCP(
       before calling categorize_transaction. Only proceed without one if the user explicitly
       says they don't have a category to provide.
     - Monetary amounts are in USD unless otherwise noted.
-    - Connecting a new bank is done via a one-time local CLI command
-      (`python -m balanceai_backend.bank_link.link`), not an MCP tool — the Plaid access
-      token must never pass through this server's tool arguments or results.
+    - link_bank opens a browser window and blocks for up to 5 minutes while the user
+      logs into their bank on Plaid's hosted page — tell the user to check their
+      browser after calling it. The Plaid access token is never returned by any tool.
+    - get_bank_transactions asks the user to approve sharing transaction data before
+      returning it. If the user declines, do not retry unless they ask you to.
     """,
 )
 
@@ -306,6 +313,41 @@ def categorize_transaction(account: dict, transaction: dict, category: str | Non
 
 
 @mcp.tool()
+def link_bank() -> dict:
+    """
+    Connect a new bank account via Plaid Hosted Link.
+
+    Opens a Plaid-hosted webpage in the browser where the user logs into their
+    bank — the MCP client should tell the user to check their browser and log
+    in. Blocks for up to 5 minutes while polling for completion. The resulting
+    access token is written straight to local storage and never returned here.
+
+    Returns:
+        dict with item_id, institution_name, and bank_accounts: {"saved": [bank
+        account ids], "skipped": [{"plaid_account_id", "display_name", "reason"}]} —
+        accounts that couldn't be added (unsupported type, no last 4 digits, or an
+        id clash) are listed under skipped.
+
+    Raises:
+        LinkExitedError: if the user exits Hosted Link, or Plaid reports an error.
+        TimeoutError: if the user doesn't complete the connection within 5 minutes.
+    """
+    link_token, hosted_link_url = create_hosted_link()
+    try:
+        webbrowser.open(hosted_link_url)
+    except webbrowser.Error:
+        logger.warning("Could not open a browser automatically for %s", hosted_link_url)
+
+    item = complete_link(link_token)
+    bank_accounts = save_linked_plaid_item(item)
+    return {
+        "item_id": item.item_id,
+        "institution_name": item.institution_name,
+        "bank_accounts": bank_accounts,
+    }
+
+
+@mcp.tool()
 def list_linked_banks() -> list[dict]:
     """
     List banks linked via Plaid.
@@ -326,6 +368,21 @@ def list_linked_banks() -> list[dict]:
 
 
 @mcp.tool()
+def list_bank_accounts(item_id: str | None = None) -> list[dict]:
+    """
+    List bank accounts — currently those created from banks linked via Plaid.
+
+    Args:
+        item_id: Optional Plaid item to filter by (see list_linked_banks).
+
+    Returns:
+        List of bank accounts with id, institution_name, account_type, last4,
+        display_name, plaid_institution_id, plaid_item_id, and plaid_account_id.
+    """
+    return [a.to_dict() for a in db_find_bank_accounts(plaid_item_id=item_id)]
+
+
+@mcp.tool()
 def sync_bank_transactions(item_id: str | None = None) -> dict:
     """
     Pull the latest transaction changes for a linked bank via Plaid's /transactions/sync.
@@ -337,7 +394,13 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
             bank is linked — look it up via list_linked_banks.
 
     Returns:
-        dict with counts: {"added": int, "modified": int, "removed": int}
+        dict with transaction counts {"added", "modified", "removed"} plus
+        "bank_accounts": {"saved", "skipped"} — the bank accounts created/updated
+        from the item first.
+
+    Raises:
+        ValueError: if a transaction belongs to a Plaid account that has no bank
+            account (it was skipped at link/sync time).
     """
     if item_id is None:
         items = db_find_plaid_items()
@@ -346,27 +409,51 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
         if len(items) > 1:
             raise ValueError("Multiple banks are linked — specify item_id (see list_linked_banks).")
         item_id = items[0].item_id
-    return db_sync_transactions(item_id)
+    return sync_raw_transactions_from_plaid(item_id)
+
+
+class ShareTransactionsConsent(BaseModel):
+    """Empty schema: the prompt is a plain accept/decline."""
 
 
 @mcp.tool()
-def get_bank_transactions(
+async def get_bank_transactions(
+    ctx: Context,
     item_id: str | None = None,
     account_id: str | None = None,
 ) -> list[dict]:
     """
     Query Plaid transactions already pulled down by sync_bank_transactions.
 
+    Transactions are private, so the user is asked to approve sharing them before any
+    are returned.
+
     Args:
         item_id: Filter to a specific linked bank
-        account_id: Filter to a specific Plaid account
+        account_id: Filter to a specific bank account (BankAccount id)
 
     Returns:
         List of transactions with id, account_id, date, description, amount, and category
+
+    Raises:
+        PermissionError: if the user declines or cancels the approval prompt.
     """
     transactions = db_find_raw_transactions(
         plaid_item_id=item_id, account_id=account_id, source="plaid"
     )
+    if not transactions:
+        return []
+
+    dates = [t.posting_date for t in transactions]
+    result = await ctx.elicit(
+        message=(
+            f"Share {len(transactions)} bank transactions "
+            f"({min(dates).isoformat()} to {max(dates).isoformat()}) with the assistant?"
+        ),
+        schema=ShareTransactionsConsent,
+    )
+    if result.action != "accept":
+        raise PermissionError("User declined to share bank transactions.")
     return [t.to_dict() for t in transactions]
 
 

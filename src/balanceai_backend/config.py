@@ -1,4 +1,5 @@
 import base64
+from pathlib import Path
 
 from appdevcommons.kms_encryptor import KMSEncryptor  # type: ignore[import-untyped]
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,7 +49,7 @@ class Settings(BaseSettings):
     _aws_clients: AWSClients | None = None
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=Path(__file__).parent / ".env",
         case_sensitive=False,
         extra="ignore",  # Ignore extra fields from environment variables
     )

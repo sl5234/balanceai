@@ -1,6 +1,14 @@
 # Status
 
-<!-- INSTRUCTIONS: Clear everything below and replace with a fresh summary each session. Keep it short — 3-4 sentences max. -->
+<!-- INSTRUCTIONS: Add a new `## Session: YYYY-MM-DD` entry at the top of the log below with a summary of that session's status. Keep each entry short — 3-4 sentences max. Never edit or remove previous entries; they stay as a permanent history. -->
+
+## Session: 2026-09-26
+
+Audited the journal MCP tools and designed how Plaid connects to accounts; logged in `docs/PLAID_INTEGRATION_DECISIONS.md` #3 (Account ID = `institution:type:last4`) and #4 (build order: Plaid → accounts + raw transactions, then journals, then receipts/statements). Next: phase 1 via a new `BankAccount` model + `bank_accounts` SQLite table, created from Plaid `/accounts/get` on link and sync, with raw transactions storing its ID; the old `Account` stays untouched until phases 2–3. Watch for duplicate IDs and missing masks in the Tartan sandbox.
+
+## Session: 2026-09-23
+
+`get_bank_transactions` now asks the user to approve (via MCP elicitation) before returning data, and raises `PermissionError` on decline — committed (`6c9843d`). Verified live against Tartan Bank: approve returned all 48 synced transactions, decline returned nothing. Also fixed `config.py` to load `.env` relative to the module, not the working directory.
 
 ## Session: 2026-08-20
 

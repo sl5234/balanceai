@@ -4,7 +4,9 @@ from decimal import Decimal
 
 import pytest
 from balanceai_backend.bank_link.plaid_item_db import delete_plaid_item, save_plaid_item
+from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import create_schema
+from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.models.raw_transaction import RawTransaction
 from balanceai_backend.raw_transactions.raw_transaction_db import (
@@ -19,6 +21,17 @@ def db():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     create_schema(conn)
+    # raw_transactions.account_id references bank_accounts(id)
+    for account_id in ("plaid-acc-1", "acc-1", "acc-2", "acct-1"):
+        upsert_bank_account(
+            BankAccount(
+                id=account_id,
+                institution_name="Test Bank",
+                account_type=BankAccountType.CHECKING,
+                last4="0000",
+            ),
+            conn=conn,
+        )
     yield conn
     conn.close()
 
@@ -37,6 +50,7 @@ def sample_txn():
         source="plaid",
         plaid_item_id="item-1",
         account_id="plaid-acc-1",
+        plaid_account_id="plaid-raw-acc-1",
         posting_date=datetime.date(2026, 8, 19),
         description="Starbucks",
         amount=Decimal("-4.50"),
@@ -55,6 +69,7 @@ class TestFindRawTransactions:
         assert txn.id == "txn-1"
         assert txn.description == "Starbucks"
         assert txn.amount == Decimal("-4.50")
+        assert txn.plaid_account_id == "plaid-raw-acc-1"
 
     def test_filters_by_plaid_item_id(self, db):
         save_plaid_item(PlaidItem(item_id="item-1", access_token="a"), conn=db)
@@ -160,8 +175,32 @@ class TestDeleteRawTransaction:
         delete_raw_transaction("txn-missing", conn=db)  # should not raise
 
 
-class TestCascadeDelete:
-    def test_deleting_item_also_deletes_its_transactions(self, db, linked_item, sample_txn):
+class TestPlaidItemDeletion:
+    def test_deleting_item_keeps_its_transactions_and_clears_item_id(
+        self, db, linked_item, sample_txn
+    ):
         upsert_raw_transaction(sample_txn, conn=db)
         delete_plaid_item("item-1", conn=db)
-        assert find_raw_transactions(conn=db) == []
+
+        [txn] = find_raw_transactions(conn=db)
+        assert txn.id == "txn-1"
+        assert txn.plaid_item_id is None
+        assert txn.plaid_account_id == "plaid-raw-acc-1"
+
+
+class TestBankAccountReference:
+    def test_rejects_unknown_account_id(self, db, linked_item, sample_txn):
+        sample_txn.account_id = "no-such-account"
+        with pytest.raises(sqlite3.IntegrityError):
+            upsert_raw_transaction(sample_txn, conn=db)
+
+    def test_renaming_bank_account_updates_its_transactions(self, db, linked_item, sample_txn):
+        upsert_raw_transaction(sample_txn, conn=db)
+
+        with db:
+            db.execute(
+                "UPDATE bank_accounts SET id = ? WHERE id = ?", ("renamed-acc", "plaid-acc-1")
+            )
+
+        [txn] = find_raw_transactions(conn=db)
+        assert txn.account_id == "renamed-acc"

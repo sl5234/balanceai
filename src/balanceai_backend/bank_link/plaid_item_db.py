@@ -1,4 +1,3 @@
-import json
 import sqlite3
 
 from balanceai_backend.db.connection import conn as _default_conn
@@ -11,8 +10,6 @@ def _build_item(row) -> PlaidItem:
         access_token=row["access_token"],
         institution_id=row["institution_id"],
         institution_name=row["institution_name"],
-        plaid_account_ids=json.loads(row["plaid_account_ids"]),
-        our_account_ids=json.loads(row["our_account_ids"]),
         created_at=row["created_at"],
     )
 
@@ -37,16 +34,13 @@ def save_plaid_item(item: PlaidItem, conn: sqlite3.Connection = _default_conn) -
     with conn:
         conn.execute(
             "INSERT INTO plaid_items"
-            " (item_id, access_token, institution_id, institution_name,"
-            "  plaid_account_ids, our_account_ids, created_at)"
-            " VALUES (?,?,?,?,?,?,?)",
+            " (item_id, access_token, institution_id, institution_name, created_at)"
+            " VALUES (?,?,?,?,?)",
             (
                 item.item_id,
                 item.access_token,
                 item.institution_id,
                 item.institution_name,
-                json.dumps(item.plaid_account_ids),
-                json.dumps(item.our_account_ids),
                 item.created_at,
             ),
         )

@@ -14,7 +14,7 @@ from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUse
 from plaid.model.link_token_get_request import LinkTokenGetRequest
 from plaid.model.products import Products
 
-from balanceai_backend.bank_link.plaid_item_db import save_plaid_item
+from balanceai_backend.helpers.plaid_helper import save_linked_plaid_item
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.services.plaid import get_client
 
@@ -92,14 +92,14 @@ def poll_for_public_token(link_token: str, timeout_s: int = _DEFAULT_TIMEOUT_S):
 
 def complete_link(link_token: str, timeout_s: int = _DEFAULT_TIMEOUT_S) -> PlaidItem:
     """
-    Wait for the Hosted Link flow to finish, exchange the resulting public_token
-    for a permanent access_token, and persist the linked item.
+    Wait for the Hosted Link flow to finish and exchange the resulting
+    public_token for a permanent access_token.
 
-    our_account_ids is left empty — mapping Plaid's accounts to our own Account
-    records is a separate, not-yet-built piece.
+    Only completes the auth flow — the returned item is not saved. Callers
+    persist it with helpers.plaid_helper.save_linked_plaid_item.
 
     Returns:
-        The saved PlaidItem.
+        The linked (unsaved) PlaidItem.
     """
     public_token, item_add_result = poll_for_public_token(link_token, timeout_s=timeout_s)
 
@@ -108,16 +108,13 @@ def complete_link(link_token: str, timeout_s: int = _DEFAULT_TIMEOUT_S) -> Plaid
     )
 
     institution = getattr(item_add_result, "institution", None)
-    accounts = getattr(item_add_result, "accounts", None) or []
 
     item = PlaidItem(
         item_id=exchange_response.item_id,
         access_token=exchange_response.access_token,
         institution_id=getattr(institution, "institution_id", None),
         institution_name=getattr(institution, "name", None),
-        plaid_account_ids=[account.id for account in accounts],
     )
-    save_plaid_item(item)
     return item
 
 
@@ -139,6 +136,7 @@ if __name__ == "__main__":
         print(str(e))
         raise SystemExit(2) from e
 
+    save_linked_plaid_item(linked_item)
     print(
         f"Connected: {linked_item.institution_name or 'unknown institution'} "
         f"(item_id={linked_item.item_id})"
