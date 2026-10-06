@@ -21,6 +21,7 @@ from balanceai_backend.bank_link.plaid_item_db import find_plaid_items as db_fin
 from balanceai_backend.config import settings
 from balanceai_backend.constants import DEFAULT_CATEGORIES
 from balanceai_backend.dagger.aws import AWSClients
+from balanceai_backend.db.bank_account_db import find_bank_accounts as db_find_bank_accounts
 from balanceai_backend.helpers.plaid_helper import save_linked_plaid_item
 from balanceai_backend.models import Account, AccountType, Bank, Category, Transaction
 from balanceai_backend.parsers import get_parser
@@ -29,7 +30,7 @@ from balanceai_backend.raw_transactions.raw_transaction_db import (
     find_raw_transactions as db_find_raw_transactions,
 )
 from balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid import (
-    sync_raw_transactions_from_plaid as db_sync_transactions,
+    sync_raw_transactions_from_plaid,
 )
 from balanceai_backend.statements.storage import (
     load_accounts,
@@ -367,6 +368,21 @@ def list_linked_banks() -> list[dict]:
 
 
 @mcp.tool()
+def list_bank_accounts(item_id: str | None = None) -> list[dict]:
+    """
+    List bank accounts — currently those created from banks linked via Plaid.
+
+    Args:
+        item_id: Optional Plaid item to filter by (see list_linked_banks).
+
+    Returns:
+        List of bank accounts with id, institution_name, account_type, last4,
+        display_name, plaid_institution_id, plaid_item_id, and plaid_account_id.
+    """
+    return [a.to_dict() for a in db_find_bank_accounts(plaid_item_id=item_id)]
+
+
+@mcp.tool()
 def sync_bank_transactions(item_id: str | None = None) -> dict:
     """
     Pull the latest transaction changes for a linked bank via Plaid's /transactions/sync.
@@ -381,6 +397,10 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
         dict with transaction counts {"added", "modified", "removed"} plus
         "bank_accounts": {"saved", "skipped"} — the bank accounts created/updated
         from the item first.
+
+    Raises:
+        ValueError: if a transaction belongs to a Plaid account that has no bank
+            account (it was skipped at link/sync time).
     """
     if item_id is None:
         items = db_find_plaid_items()
@@ -389,7 +409,7 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
         if len(items) > 1:
             raise ValueError("Multiple banks are linked — specify item_id (see list_linked_banks).")
         item_id = items[0].item_id
-    return db_sync_transactions(item_id)
+    return sync_raw_transactions_from_plaid(item_id)
 
 
 class ShareTransactionsConsent(BaseModel):
@@ -410,7 +430,7 @@ async def get_bank_transactions(
 
     Args:
         item_id: Filter to a specific linked bank
-        account_id: Filter to a specific Plaid account
+        account_id: Filter to a specific bank account (BankAccount id)
 
     Returns:
         List of transactions with id, account_id, date, description, amount, and category

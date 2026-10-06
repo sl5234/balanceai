@@ -26,8 +26,6 @@ def sample_item():
         access_token="access-sandbox-abc",
         institution_id="ins_3",
         institution_name="Chase",
-        plaid_account_ids=["plaid-acc-1", "plaid-acc-2"],
-        our_account_ids=["acct-1", "acct-2"],
     )
 
 
@@ -42,8 +40,6 @@ class TestFindPlaidItems:
         assert items[0].item_id == "item-1"
         assert items[0].access_token == "access-sandbox-abc"
         assert items[0].institution_name == "Chase"
-        assert items[0].plaid_account_ids == ["plaid-acc-1", "plaid-acc-2"]
-        assert items[0].our_account_ids == ["acct-1", "acct-2"]
 
     def test_filters_by_item_id(self, db):
         save_plaid_item(PlaidItem(item_id="item-1", access_token="a"), conn=db)

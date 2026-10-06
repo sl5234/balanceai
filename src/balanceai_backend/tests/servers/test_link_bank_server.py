@@ -6,12 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from balanceai_backend.bank_link.link import LinkExitedError
+from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.models.raw_transaction import RawTransaction
 from balanceai_backend.servers.link_bank_server import (
     ShareTransactionsConsent,
     get_bank_transactions,
     link_bank,
+    list_bank_accounts,
     list_linked_banks,
     sync_bank_transactions,
 )
@@ -28,7 +30,6 @@ class TestLinkBank:
             item_id="item-1",
             access_token="access-sandbox-should-never-appear",
             institution_name="Tartan Bank",
-            plaid_account_ids=["acc-1", "acc-2"],
         )
         bank_accounts = {
             "saved": ["tartan_bank:checking:0000"],
@@ -68,7 +69,7 @@ class TestLinkBank:
         assert "access-sandbox-should-never-appear" not in str(result)
 
     def test_completes_link_even_when_browser_cannot_open(self):
-        item = PlaidItem(item_id="item-1", access_token="a", plaid_account_ids=[])
+        item = PlaidItem(item_id="item-1", access_token="a")
         with (
             patch(
                 "balanceai_backend.servers.link_bank_server.create_hosted_link",
@@ -147,10 +148,39 @@ class TestListLinkedBanks:
         assert "access-sandbox-should-never-appear" not in str(result)
 
 
+class TestListBankAccounts:
+    def test_returns_accounts_as_dicts(self):
+        account = BankAccount(
+            id="tartan_bank:checking:0000",
+            institution_name="Tartan Bank",
+            account_type=BankAccountType.CHECKING,
+            last4="0000",
+            plaid_item_id="item-1",
+            plaid_account_id="plaid-acc-1",
+        )
+        with patch(
+            "balanceai_backend.servers.link_bank_server.db_find_bank_accounts",
+            return_value=[account],
+        ) as mock_find:
+            result = list_bank_accounts()
+
+        mock_find.assert_called_once_with(plaid_item_id=None)
+        assert result == [account.to_dict()]
+        assert result[0]["account_type"] == "checking"
+
+    def test_filters_by_item_id(self):
+        with patch(
+            "balanceai_backend.servers.link_bank_server.db_find_bank_accounts", return_value=[]
+        ) as mock_find:
+            assert list_bank_accounts(item_id="item-1") == []
+
+        mock_find.assert_called_once_with(plaid_item_id="item-1")
+
+
 class TestSyncBankTransactions:
     def test_delegates_to_sync_transactions_by_item_id(self):
         with patch(
-            "balanceai_backend.servers.link_bank_server.db_sync_transactions",
+            "balanceai_backend.servers.link_bank_server.sync_raw_transactions_from_plaid",
             return_value={"added": 3, "modified": 1, "removed": 0},
         ) as mock_sync:
             result = sync_bank_transactions("item-1")
@@ -166,7 +196,7 @@ class TestSyncBankTransactions:
                 return_value=[item],
             ),
             patch(
-                "balanceai_backend.servers.link_bank_server.db_sync_transactions",
+                "balanceai_backend.servers.link_bank_server.sync_raw_transactions_from_plaid",
                 return_value={"added": 0, "modified": 0, "removed": 0},
             ) as mock_sync,
         ):

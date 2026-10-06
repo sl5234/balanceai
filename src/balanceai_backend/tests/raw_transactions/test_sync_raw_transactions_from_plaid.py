@@ -20,12 +20,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from balanceai_backend.bank_link.plaid_item_db import save_plaid_item
 from balanceai_backend.bank_link.plaid_sync_cursor_db import get_plaid_sync_cursor
+from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import create_schema
+from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.raw_transactions.raw_transaction_db import find_raw_transactions
 from balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid import (
     sync_raw_transactions_from_plaid,
 )
+
+BANK_ACCOUNT_ID = "tartan_bank:checking:0000"
 
 
 @pytest.fixture
@@ -52,6 +56,17 @@ def mock_sync_bank_accounts():
 def linked_item(db):
     item = PlaidItem(item_id="item-1", access_token="access-sandbox-abc")
     save_plaid_item(item, conn=db)
+    upsert_bank_account(
+        BankAccount(
+            id=BANK_ACCOUNT_ID,
+            institution_name="Tartan Bank",
+            account_type=BankAccountType.CHECKING,
+            last4="0000",
+            plaid_item_id="item-1",
+            plaid_account_id="plaid-acc-1",
+        ),
+        conn=db,
+    )
     return item
 
 
@@ -123,6 +138,8 @@ class TestSyncTransactions:
         }
         [txn] = find_raw_transactions(conn=db)
         assert txn.id == "txn-1"
+        assert txn.account_id == BANK_ACCOUNT_ID  # our id, not Plaid's "plaid-acc-1"
+        assert txn.plaid_account_id == "plaid-acc-1"
         assert txn.amount == Decimal("-4.5")  # Plaid positive (spend) -> our negative (debit)
         assert txn.description == "Starbucks"
         assert txn.category == "FOOD_AND_DRINK"
@@ -304,3 +321,29 @@ class TestSyncBankAccounts:
         assert call.args[0].item_id == "item-1"
         assert call.kwargs["conn"] is db
         assert counts["bank_accounts"] == {"saved": 2, "skipped": 1}
+
+
+class TestUnknownPlaidAccount:
+    def test_raises_and_keeps_cursor_when_transaction_account_has_no_bank_account(
+        self, db, linked_item
+    ):
+        mock_client = MagicMock()
+        mock_client.transactions_sync.return_value = SimpleNamespace(
+            added=[_plaid_txn(account_id="plaid-acc-skipped")],
+            modified=[],
+            removed=[],
+            next_cursor="cursor-A",
+            has_more=False,
+        )
+
+        with (
+            patch(
+                "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+                return_value=mock_client,
+            ),
+            pytest.raises(ValueError, match="plaid-acc-skipped"),
+        ):
+            sync_raw_transactions_from_plaid("item-1", conn=db)
+
+        assert find_raw_transactions(conn=db) == []
+        assert get_plaid_sync_cursor("item-1", conn=db) is None

@@ -108,14 +108,12 @@ def complete_link(link_token: str, timeout_s: int = _DEFAULT_TIMEOUT_S) -> Plaid
     )
 
     institution = getattr(item_add_result, "institution", None)
-    accounts = getattr(item_add_result, "accounts", None) or []
 
     item = PlaidItem(
         item_id=exchange_response.item_id,
         access_token=exchange_response.access_token,
         institution_id=getattr(institution, "institution_id", None),
         institution_name=getattr(institution, "name", None),
-        plaid_account_ids=[account.id for account in accounts],
     )
     return item
 

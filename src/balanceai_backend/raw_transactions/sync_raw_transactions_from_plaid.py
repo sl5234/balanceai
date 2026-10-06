@@ -15,6 +15,7 @@ from balanceai_backend.bank_link.plaid_sync_cursor_db import (
     get_plaid_sync_cursor,
     update_plaid_sync_cursor,
 )
+from balanceai_backend.db.bank_account_db import find_bank_accounts
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.helpers.plaid_helper import sync_bank_accounts_from_plaid
 from balanceai_backend.models.plaid_sync_cursor import PlaidSyncCursor
@@ -26,7 +27,9 @@ from balanceai_backend.raw_transactions.raw_transaction_db import (
 from balanceai_backend.services.plaid import get_client
 
 
-def _to_raw_transaction(txn: PlaidTransaction, item_id: str) -> RawTransaction:
+def _to_raw_transaction(
+    txn: PlaidTransaction, item_id: str, bank_account_id_by_plaid_account_id: dict[str, str]
+) -> RawTransaction:
     """
     Convert a Plaid Transaction into our RawTransaction.
 
@@ -34,7 +37,24 @@ def _to_raw_transaction(txn: PlaidTransaction, item_id: str) -> RawTransaction:
     embedded docs, sourced from Plaid's API reference) is positive = money out
     of the account, negative = money in — the exact opposite of ours
     (negative = debit, positive = credit).
+
+    bank_account_id_by_plaid_account_id maps Plaid's account_id to our
+    BankAccount id. Both are stored on the RawTransaction.
+
+    Raises:
+        ValueError: if the transaction's Plaid account has no BankAccount (it
+            was skipped when bank accounts were synced).
     """
+    bank_account_id = bank_account_id_by_plaid_account_id.get(txn.account_id)
+    if bank_account_id is None:
+        # TODO: no way yet to attach a BankAccount to a skipped Plaid account.
+        # See docs/BACKLOGS.md BL-2.
+        raise ValueError(
+            f"No bank account for Plaid account {txn.account_id} (transaction "
+            f"{txn.transaction_id}). It was skipped when bank accounts were synced — "
+            "create that bank account first, then sync again."
+        )
+
     category = None
     pfc = getattr(txn, "personal_finance_category", None)
     if pfc is not None:
@@ -46,13 +66,44 @@ def _to_raw_transaction(txn: PlaidTransaction, item_id: str) -> RawTransaction:
         id=txn.transaction_id,
         source="plaid",
         plaid_item_id=item_id,
-        account_id=txn.account_id,
+        account_id=bank_account_id,
+        plaid_account_id=txn.account_id,
         posting_date=txn.date,
         description=description,
         amount=-Decimal(str(txn.amount)),
         category=category,
         pending=txn.pending,
     )
+
+
+def _apply_sync_page(
+    response,
+    item_id: str,
+    bank_account_id_by_plaid_account_id: dict[str, str],
+    conn: sqlite3.Connection,
+) -> dict[str, int]:
+    """
+    Apply one /transactions/sync page to raw_transactions: upsert added and
+    modified transactions, delete removed ones.
+
+    Returns:
+        dict with this page's counts: {"added": int, "modified": int, "removed": int}
+    """
+    added = getattr(response, "added", None) or []
+    modified = getattr(response, "modified", None) or []
+    removed = getattr(response, "removed", None) or []
+
+    # TODO: raw transactions are kept when a Plaid item is unlinked, so re-linking
+    # the same bank saves them again under new Plaid transaction ids.
+    # See docs/BACKLOGS.md BL-4.
+    for txn in added + modified:
+        upsert_raw_transaction(
+            _to_raw_transaction(txn, item_id, bank_account_id_by_plaid_account_id), conn=conn
+        )
+    for removed_txn in removed:
+        delete_raw_transaction(removed_txn.transaction_id, conn=conn)
+
+    return {"added": len(added), "modified": len(modified), "removed": len(removed)}
 
 
 def sync_raw_transactions_from_plaid(
@@ -69,7 +120,9 @@ def sync_raw_transactions_from_plaid(
     deleted.
 
     Bank accounts are created/updated first (sync_bank_accounts_from_plaid),
-    so every transaction's account already exists by the time it's saved.
+    and each transaction is saved under its BankAccount id. A transaction whose
+    Plaid account has no BankAccount fails the sync; pages already processed
+    stay saved and the next sync retries from the failing page.
 
     Returns:
         dict with transaction counts plus the bank account result:
@@ -82,6 +135,11 @@ def sync_raw_transactions_from_plaid(
     item = items[0]
 
     bank_accounts = sync_bank_accounts_from_plaid(item, conn=conn)
+    bank_account_id_by_plaid_account_id = {
+        a.plaid_account_id: a.id
+        for a in find_bank_accounts(plaid_item_id=item_id, conn=conn)
+        if a.plaid_account_id is not None
+    }
 
     cursor = get_plaid_sync_cursor(item_id, conn=conn)
     client = get_client()
@@ -95,20 +153,9 @@ def sync_raw_transactions_from_plaid(
             request_kwargs["cursor"] = cursor
         response = client.transactions_sync(TransactionsSyncRequest(**request_kwargs))
 
-        added = getattr(response, "added", None) or []
-        modified = getattr(response, "modified", None) or []
-        removed = getattr(response, "removed", None) or []
-
-        for txn in added:
-            upsert_raw_transaction(_to_raw_transaction(txn, item_id), conn=conn)
-        for txn in modified:
-            upsert_raw_transaction(_to_raw_transaction(txn, item_id), conn=conn)
-        for removed_txn in removed:
-            delete_raw_transaction(removed_txn.transaction_id, conn=conn)
-
-        counts["added"] += len(added)
-        counts["modified"] += len(modified)
-        counts["removed"] += len(removed)
+        page_counts = _apply_sync_page(response, item_id, bank_account_id_by_plaid_account_id, conn)
+        for key, value in page_counts.items():
+            counts[key] += value
 
         cursor = response.next_cursor
         update_plaid_sync_cursor(PlaidSyncCursor(item_id=item_id, cursor=cursor), conn=conn)
