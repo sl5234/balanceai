@@ -6,10 +6,11 @@ import anthropic
 
 import balanceai_backend.parsers.chase  # noqa: F401 - register parsers
 from balanceai_backend.db.connection import conn
+from balanceai_backend.db.journal_db import find_journals
+from balanceai_backend.db.journal_db import update_journal as db_update_journal
 from balanceai_backend.helpers.plaid_helper import extract_journal_entries_from_transactions
 from balanceai_backend.journals.finder import find_journal_entry as finder_find_journal_entry
-from balanceai_backend.journals.journal_db import find_journals
-from balanceai_backend.journals.journal_db import update_journal as db_update_journal
+from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import GeneratedJournalEntrySet
 from balanceai_backend.parsers import get_parser
 from balanceai_backend.utils.general_util import get_mime_type
@@ -74,13 +75,15 @@ def handle_sync_journal_entries_from_transactions(journal_id: str, transactions:
     return journal.to_dict()
 
 
-def handle_sync_journal_entries_from_bank_statement(journal_id: str, file_path: str) -> dict:
+def handle_sync_journal_entries_from_bank_statement(
+    journal_id: str, file_path: str, bank: Bank
+) -> dict:
     results = find_journals(journal_id=journal_id, conn=conn)
     if not results:
         raise ValueError(f"Journal {journal_id} not found")
     journal = results[0]
 
-    _, transactions = get_parser(journal.account.bank).parse(file_path)
+    _, transactions = get_parser(bank).parse(file_path)
 
     batches = [transactions[i : i + _BATCH_SIZE] for i in range(0, len(transactions), _BATCH_SIZE)]
 

@@ -4,17 +4,10 @@ from decimal import Decimal
 
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.models import Journal
-from balanceai_backend.models.account import Account, AccountType
-from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import RECIPIENT_SELF, JournalAccount, JournalEntry
 
 
 def _build_journal(row, entry_rows) -> Journal:
-    account = Account(
-        id=row["account_id"],
-        bank=Bank(row["bank"]),
-        account_type=AccountType(row["account_type"]),
-    )
     entries = [
         JournalEntry(
             journal_entry_id=r["journal_entry_id"],
@@ -31,29 +24,24 @@ def _build_journal(row, entry_rows) -> Journal:
     ]
     return Journal(
         journal_id=row["journal_id"],
-        account=account,
+        name=row["name"],
         description=row["description"],
-        start_date=datetime.date.fromisoformat(row["start_date"]),
-        end_date=datetime.date.fromisoformat(row["end_date"]),
+        created_at=row["created_at"],
         entries=entries,
     )
 
 
 def find_journals(
     journal_id: str | None = None,
-    account_id: str | None = None,
     conn: sqlite3.Connection = _default_conn,
 ) -> list[Journal]:
-    """Find journals, optionally filtered by journal_id and/or account_id."""
+    """Find journals, optionally filtered by journal_id."""
     query = "SELECT * FROM journals WHERE 1=1"
     params: list = []
     if journal_id is not None:
         query += " AND journal_id = ?"
         params.append(journal_id)
-    if account_id is not None:
-        query += " AND account_id = ?"
-        params.append(account_id)
-    query += " ORDER BY start_date"
+    query += " ORDER BY created_at"
 
     rows = conn.execute(query, params).fetchall()
     journals = []
@@ -100,15 +88,12 @@ def save_journal(journal: Journal, conn: sqlite3.Connection = _default_conn) -> 
     """Insert a new journal into storage."""
     with conn:
         conn.execute(
-            "INSERT INTO journals VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO journals (journal_id, name, description, created_at) VALUES (?,?,?,?)",
             (
                 journal.journal_id,
-                journal.account.id,
-                journal.account.bank.value,
-                journal.account.account_type.value,
+                journal.name,
                 journal.description,
-                journal.start_date.isoformat(),
-                journal.end_date.isoformat(),
+                journal.created_at,
             ),
         )
 
@@ -127,14 +112,10 @@ def update_journal(updated: Journal, conn: sqlite3.Connection = _default_conn) -
         raise ValueError(f"Journal {updated.journal_id} not found")
     with conn:
         conn.execute(
-            "UPDATE journals SET account_id=?, bank=?, account_type=?, description=?, start_date=?, end_date=? WHERE journal_id=?",
+            "UPDATE journals SET name=?, description=? WHERE journal_id=?",
             (
-                updated.account.id,
-                updated.account.bank.value,
-                updated.account.account_type.value,
+                updated.name,
                 updated.description,
-                updated.start_date.isoformat(),
-                updated.end_date.isoformat(),
                 updated.journal_id,
             ),
         )

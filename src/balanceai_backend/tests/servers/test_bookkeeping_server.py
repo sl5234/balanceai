@@ -1,11 +1,10 @@
 import datetime
+import sqlite3
 from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
-from balanceai_backend.db.connection import conn
-from balanceai_backend.models.account import Account, AccountType
-from balanceai_backend.models.bank import Bank
+from balanceai_backend.db.connection import conn, create_schema
 from balanceai_backend.models.journal import (
     GeneratedJournalEntry,
     GeneratedJournalEntrySet,
@@ -14,14 +13,13 @@ from balanceai_backend.models.journal import (
     JournalEntry,
 )
 from balanceai_backend.servers.bookkeeping_server import (
+    create_journal,
+    delete_journal,
     list_journal_entries,
+    list_journals,
     sync_journal_entries_from_receipt,
+    update_journal,
 )
-
-
-@pytest.fixture
-def sample_account():
-    return Account(id="acct-1", bank=Bank.CHASE, account_type=AccountType.DEBIT)
 
 
 @pytest.fixture
@@ -49,25 +47,19 @@ def sample_entry_2():
 
 
 @pytest.fixture
-def journal_with_no_entries(sample_account):
+def journal_with_no_entries():
     return Journal(
         journal_id="journal-1",
-        account=sample_account,
-        description="January journal",
-        start_date=datetime.date(2026, 1, 1),
-        end_date=datetime.date(2026, 1, 31),
+        name="January journal",
         entries=[],
     )
 
 
 @pytest.fixture
-def journal_with_entries(sample_account, sample_entry, sample_entry_2):
+def journal_with_entries(sample_entry, sample_entry_2):
     return Journal(
         journal_id="journal-1",
-        account=sample_account,
-        description="January journal",
-        start_date=datetime.date(2026, 1, 1),
-        end_date=datetime.date(2026, 1, 31),
+        name="January journal",
         entries=[sample_entry, sample_entry_2],
     )
 
@@ -171,13 +163,10 @@ class TestListJournalEntries:
 
 
 @pytest.fixture
-def journal(sample_account):
+def journal():
     return Journal(
         journal_id="journal-1",
-        account=sample_account,
-        description="January journal",
-        start_date=datetime.date(2026, 1, 1),
-        end_date=datetime.date(2026, 1, 31),
+        name="January journal",
         entries=[],
     )
 
@@ -270,7 +259,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         assert entry_id is not None
         assert entry_id != ""
 
-    def test_updates_existing_entry_preserving_id(self, sample_account, receipt_path, ocr_result):
+    def test_updates_existing_entry_preserving_id(self, receipt_path, ocr_result):
         existing_entry = JournalEntry(
             journal_entry_id="original-id",
             date=datetime.date(2026, 1, 27),
@@ -281,10 +270,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         )
         journal = Journal(
             journal_id="journal-1",
-            account=sample_account,
-            description="January journal",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January journal",
             entries=[existing_entry],
         )
 
@@ -415,7 +401,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         assert "journal_id" in result
         assert "entries" in result
 
-    def test_mixed_new_and_updated_entries(self, sample_account, receipt_path):
+    def test_mixed_new_and_updated_entries(self, receipt_path):
         # The journal already has a GENERAL entry. OCR returns two entries:
         # one GENERAL (matches the existing entry → update, preserve ID) and
         # one CASH (no match → create, gets a new ID).
@@ -429,10 +415,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         )
         journal = Journal(
             journal_id="journal-1",
-            account=sample_account,
-            description="January journal",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January journal",
             entries=[existing_entry],
         )
         ocr_result = GeneratedJournalEntrySet(
@@ -480,3 +463,78 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         assert len(result["entries"]) == 2
         ids = {e["journal_entry_id"] for e in result["entries"]}
         assert "existing-id" in ids
+
+
+class TestJournalTools:
+    """create/update/list/delete journal tools, against an in-memory database."""
+
+    @pytest.fixture
+    def db(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        create_schema(connection)
+        with patch("balanceai_backend.servers.bookkeeping_server.conn", connection):
+            yield connection
+        connection.close()
+
+    def test_create_journal_returns_and_saves_journal(self, db):
+        result = create_journal(name="Personal", description="Household books")
+
+        assert result["name"] == "Personal"
+        assert result["description"] == "Household books"
+        assert result["entries"] == []
+        [row] = db.execute("SELECT * FROM journals").fetchall()
+        assert row["journal_id"] == result["journal_id"]
+        assert row["name"] == "Personal"
+
+    def test_create_journal_description_defaults_to_empty(self, db):
+        assert create_journal(name="Personal")["description"] == ""
+
+    def test_create_journal_rejects_duplicate_name_case_insensitively(self, db):
+        create_journal(name="Personal")
+
+        with pytest.raises(ValueError, match="already exists"):
+            create_journal(name="personal")
+
+        assert len(list_journals()) == 1
+
+    def test_update_journal_changes_only_given_fields(self, db):
+        journal_id = create_journal(name="Personal", description="Household books")["journal_id"]
+
+        result = update_journal(journal_id, name="Home")
+
+        assert result["name"] == "Home"
+        assert result["description"] == "Household books"
+
+    def test_update_journal_rejects_name_used_by_another_journal(self, db):
+        create_journal(name="Personal")
+        journal_id = create_journal(name="My LLC")["journal_id"]
+
+        with pytest.raises(ValueError, match="already exists"):
+            update_journal(journal_id, name="PERSONAL")
+
+    def test_update_journal_allows_keeping_its_own_name(self, db):
+        journal_id = create_journal(name="Personal")["journal_id"]
+
+        result = update_journal(journal_id, name="Personal", description="Household")
+
+        assert result["description"] == "Household"
+
+    def test_update_journal_raises_when_not_found(self, db):
+        with pytest.raises(ValueError, match="not found"):
+            update_journal("missing", name="Home")
+
+    def test_list_journals_returns_all_without_entries(self, db):
+        create_journal(name="Personal")
+        create_journal(name="My LLC")
+
+        result = list_journals()
+
+        assert {j["name"] for j in result} == {"Personal", "My LLC"}
+        assert all(j["entries"] == [] for j in result)
+
+    def test_delete_journal_removes_it(self, db):
+        journal_id = create_journal(name="Personal")["journal_id"]
+
+        assert delete_journal(journal_id) == {"journal_id": journal_id}
+        assert list_journals() == []

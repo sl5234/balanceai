@@ -4,11 +4,11 @@ BalanceAI MCP Server
 Provides tools for journal management.
 """
 
-import calendar
 import csv
 import json
 import logging
 import re
+import sqlite3
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -17,27 +17,27 @@ from mcp.server.fastmcp import FastMCP
 from balanceai_backend.config import settings
 from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.db.connection import conn
+from balanceai_backend.db.journal_db import (
+    delete_journal as db_delete_journal,
+)
+from balanceai_backend.db.journal_db import (
+    find_journal_entries as db_find_journal_entries,
+)
+from balanceai_backend.db.journal_db import (
+    find_journals as db_find_journals,
+)
+from balanceai_backend.db.journal_db import (
+    save_journal,
+)
+from balanceai_backend.db.journal_db import (
+    update_journal as db_update_journal,
+)
 from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_bank_statement,
     handle_sync_journal_entries_from_receipt,
     handle_sync_journal_entries_from_transactions,
 )
-from balanceai_backend.journals.journal_db import (
-    delete_journal as db_delete_journal,
-)
-from balanceai_backend.journals.journal_db import (
-    find_journal_entries as db_find_journal_entries,
-)
-from balanceai_backend.journals.journal_db import (
-    find_journals as db_find_journals,
-)
-from balanceai_backend.journals.journal_db import (
-    save_journal,
-)
-from balanceai_backend.journals.journal_db import (
-    update_journal as db_update_journal,
-)
-from balanceai_backend.models import Account, Journal
+from balanceai_backend.models import Bank, Journal
 from balanceai_backend.models.journal import JournalEntry
 from balanceai_backend.models.report import ReportDefinition
 from balanceai_backend.prompts.financial_query_prompt import financial_query_system_prompt
@@ -109,47 +109,47 @@ mcp = FastMCP(
 )
 
 
+# ---------------------------------------------------------------------------
+# Journal actions
+# ---------------------------------------------------------------------------
+
+
+def _raise_if_duplicate_journal_name(error: sqlite3.IntegrityError, name: str) -> None:
+    """Turn the journals.name UNIQUE violation into a readable ValueError."""
+    if "journals.name" in str(error):
+        raise ValueError(f"A journal named {name!r} already exists") from error
+
+
 @mcp.tool()
-def create_journal(
-    account: dict,
-    description: str,
-    start_date: date | None = None,
-    end_date: date | None = None,
-) -> dict:
+def create_journal(name: str, description: str = "") -> dict:
     """
-    Create a new journal for a bank account.
+    Create a new journal — a set of books (e.g. "Personal", "My LLC") that
+    holds journal entries across all of its bank accounts and dates.
 
     Args:
-        account: The bank account object (with id, bank, account_type, balance, categories)
-        description: Description of the journal
-        start_date: Start date for the journal. Defaults to today.
-        end_date: End date for the journal. Defaults to end of current month.
+        name: Name of the journal
+        description: Optional description of the journal
 
     Returns:
         dict with the created journal
+
+    Raises:
+        ValueError: if a journal with this name already exists (case-insensitive).
     """
-    acct = Account.from_dict(account)
-
-    today = datetime.now(UTC).date()
-    if start_date is None:
-        start_date = today
-    if end_date is None:
-        last_day = calendar.monthrange(today.year, today.month)[1]
-        end_date = date(today.year, today.month, last_day)
-
-    journal = Journal(
-        account=acct, description=description, start_date=start_date, end_date=end_date
-    )
-    save_journal(journal, conn)
+    journal = Journal(name=name, description=description)
+    try:
+        save_journal(journal, conn)
+    except sqlite3.IntegrityError as e:
+        _raise_if_duplicate_journal_name(e, name)
+        raise
     return journal.to_dict()
 
 
 @mcp.tool()
 def update_journal(
     journal_id: str,
+    name: str | None = None,
     description: str | None = None,
-    start_date: date | None = None,
-    end_date: date | None = None,
     entries: list[dict] | None = None,
 ) -> dict:
     """
@@ -157,29 +157,37 @@ def update_journal(
 
     Args:
         journal_id: The journal ID of the journal to update
+        name: New name for the journal
         description: New description for the journal
-        start_date: New start date for the journal
-        end_date: New end date for the journal
         entries: New list of journal entry objects
 
     Returns:
         dict with the updated journal
+
+    Raises:
+        ValueError: if the journal doesn't exist, or the new name is already
+            used by another journal (case-insensitive).
     """
+    # TODO: `entries` replaces every entry in the journal — a journal entry action
+    # that doesn't belong on a journal action. Remove it once entries have their
+    # own update path.
     results = db_find_journals(journal_id=journal_id, conn=conn)
     if not results:
         raise ValueError(f"Journal {journal_id} not found")
     journal = results[0]
 
+    if name is not None:
+        journal.name = name
     if description is not None:
         journal.description = description
-    if start_date is not None:
-        journal.start_date = start_date
-    if end_date is not None:
-        journal.end_date = end_date
     if entries is not None:
         journal.entries = [JournalEntry.from_dict(e) for e in entries]
 
-    db_update_journal(journal, conn)
+    try:
+        db_update_journal(journal, conn)
+    except sqlite3.IntegrityError as e:
+        _raise_if_duplicate_journal_name(e, journal.name)
+        raise
 
     return journal.to_dict()
 
@@ -200,18 +208,21 @@ def delete_journal(journal_id: str) -> dict:
 
 
 @mcp.tool()
-def list_journals(account_id: str | None = None) -> list[dict]:
+def list_journals() -> list[dict]:
     """
     List all journals.
 
-    Args:
-        account_id: Optional bank account ID to filter by.
-
     Returns:
-        List of journals with account, description, start_date, end_date, and entries.
+        List of journals with journal_id, name, description, and created_at
+        (entries are omitted — use list_journal_entries).
     """
-    journals = db_find_journals(account_id=account_id, conn=conn)
+    journals = db_find_journals(conn=conn)
     return [j.to_dict(redact_entries=True) for j in journals]
+
+
+# ---------------------------------------------------------------------------
+# Journal entry actions
+# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -270,13 +281,13 @@ def sync_journal_entries_from_transactions(
 def sync_journal_entries_from_bank_statement(
     journal_id: str,
     file_path: str,
+    bank: Bank,
 ) -> dict:
     """
     Create or update journal entries from a bank statement PDF.
 
     Parses the PDF using the bank's statement parser, then uses an LLM to map
-    each transaction to journal entries using double-entry bookkeeping. The bank
-    is inferred from the journal's linked account.
+    each transaction to journal entries using double-entry bookkeeping.
 
     If a matching entry already exists (same date, account, and similar description),
     the existing entry is updated with the latest values — preserving its original ID.
@@ -285,11 +296,12 @@ def sync_journal_entries_from_bank_statement(
     Args:
         journal_id: The journal ID to add or update entries in
         file_path: Local path to the bank statement PDF
+        bank: The bank this statement is from (selects the statement parser)
 
     Returns:
         dict with the updated journal
     """
-    return handle_sync_journal_entries_from_bank_statement(journal_id, file_path)
+    return handle_sync_journal_entries_from_bank_statement(journal_id, file_path, bank)
 
 
 # TODO: Add a tool that identifies recurring transactions over months.  And notifies.
@@ -318,8 +330,7 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
     """
     Export journal entries to a CSV file.
 
-    The filename is derived from the journal's account bank, account type,
-    start date, and end date (e.g. chase_debit_2026-01-01_2026-01-31.csv).
+    The filename is derived from the journal's name and id.
 
     Args:
         journal_id: The journal ID to export
@@ -334,7 +345,7 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
         raise ValueError(f"Journal {journal_id} not found")
     journal = results[0]
 
-    filename = f"{journal.account.bank.value}_{journal.account.account_type.value}_{journal.start_date}_{journal.end_date}_{journal_id}.csv"
+    filename = f"{journal.name}_{journal_id}.csv"
     out = Path(output_dir) / filename
     out.parent.mkdir(parents=True, exist_ok=True)
 

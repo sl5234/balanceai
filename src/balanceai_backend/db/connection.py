@@ -12,12 +12,9 @@ def create_schema(connection: sqlite3.Connection) -> None:
     connection.executescript("""
         CREATE TABLE IF NOT EXISTS journals (
             journal_id    TEXT PRIMARY KEY,
-            account_id    TEXT NOT NULL,
-            bank          TEXT NOT NULL,
-            account_type  TEXT NOT NULL,
+            name          TEXT NOT NULL UNIQUE COLLATE NOCASE,
             description   TEXT NOT NULL DEFAULT '',
-            start_date    TEXT NOT NULL,
-            end_date      TEXT NOT NULL
+            created_at    TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS journal_entries (
