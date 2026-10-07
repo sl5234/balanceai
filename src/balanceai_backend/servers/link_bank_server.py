@@ -42,6 +42,10 @@ from balanceai_backend.statements.storage import (
 
 logger = logging.getLogger(__name__)
 
+# TODO: the "after sync_bank_transactions" guideline below is a stopgap for a skill
+# that runs link bank -> sync transactions -> journal -> journal entries end to
+# end (docs/BACKLOGS.md BL-6). Extend it to ask which accounts to include and to
+# kick off the journal entry sync once that tool exists.
 mcp = FastMCP(
     "balanceai_link_bank",
     instructions="""
@@ -58,6 +62,13 @@ mcp = FastMCP(
       browser after calling it. The Plaid access token is never returned by any tool.
     - get_bank_transactions asks the user to approve sharing transaction data before
       returning it. If the user declines, do not retry unless they ask you to.
+    - After sync_bank_transactions adds transactions, ask the user which journal (set
+      of books) they belong in. Call the bookkeeping server's list_journals first:
+      offer the existing journals, or creating a new one — suggest the name
+      "Personal" if there are none. Create a new journal with the bookkeeping
+      server's create_journal only once the user has confirmed its name. Turning
+      the synced transactions into journal entries is not available yet — say so
+      rather than attempting it.
     """,
 )
 

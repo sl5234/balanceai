@@ -83,3 +83,14 @@ replace the old connection, which means reconciling three things:
 **Proposed fix:** do the three above together; Plaid's "update mode"
 (re-authenticating the same item, keeping all ids) is the alternative for the
 broken-connection case.
+
+## BL-6 — Skill for the end-to-end Plaid flow
+
+**Added:** 2026-10-06
+
+**Problem:** Going from a bank to journal entries takes several separate tool
+calls across two MCP servers, with choices in between (which journal, which
+accounts), and nothing ties them together.
+
+**Proposed fix:** a skill that runs the whole flow: link bank → sync bank
+transactions → create or pick a journal → sync journal entries.

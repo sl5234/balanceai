@@ -9,7 +9,6 @@ from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_receipt,
     handle_sync_journal_entries_from_transactions,
 )
-from balanceai_backend.models.account import Account, AccountType
 from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import (
     GeneratedJournalEntry,
@@ -26,18 +25,10 @@ from balanceai_backend.models.transaction import Transaction
 
 
 @pytest.fixture
-def sample_account():
-    return Account(id="acct-1", bank=Bank.CHASE, account_type=AccountType.DEBIT)
-
-
-@pytest.fixture
-def empty_journal(sample_account):
+def empty_journal():
     return Journal(
         journal_id="journal-1",
-        account=sample_account,
-        description="January journal",
-        start_date=datetime.date(2026, 1, 1),
-        end_date=datetime.date(2026, 1, 31),
+        name="January journal",
         entries=[],
     )
 
@@ -145,15 +136,10 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
         assert entry_id is not None
         assert entry_id != ""
 
-    def test_updates_existing_entry_preserving_id(
-        self, sample_account, receipt_path, ocr_result, existing_entry
-    ):
+    def test_updates_existing_entry_preserving_id(self, receipt_path, ocr_result, existing_entry):
         journal = Journal(
             journal_id="journal-1",
-            account=sample_account,
-            description="January journal",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January journal",
             entries=[existing_entry],
         )
 
@@ -347,15 +333,10 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
         assert len(result["entries"]) == 1
         assert result["entries"][0]["description"] == "Grocery purchase at Trader Joe's"
 
-    def test_updates_existing_entry_preserving_id(
-        self, sample_account, transactions, entry_data, existing_entry
-    ):
+    def test_updates_existing_entry_preserving_id(self, transactions, entry_data, existing_entry):
         journal = Journal(
             journal_id="journal-1",
-            account=sample_account,
-            description="January journal",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January journal",
             entries=[existing_entry],
         )
         grouped = {"upsert": [entry_data], "remove": []}
@@ -382,15 +363,10 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
         assert result["entries"][0]["description"] == "Grocery purchase at Trader Joe's"
         assert result["entries"][0]["debit"] == "32.02"
 
-    def test_removes_entry_for_removed_transaction(
-        self, sample_account, transactions, entry_data, existing_entry
-    ):
+    def test_removes_entry_for_removed_transaction(self, transactions, entry_data, existing_entry):
         journal = Journal(
             journal_id="journal-1",
-            account=sample_account,
-            description="January journal",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January journal",
             entries=[existing_entry],
         )
         grouped = {"upsert": [], "remove": [entry_data]}
@@ -414,17 +390,12 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
 
         assert result["entries"] == []
 
-    def test_skips_remove_when_entry_not_found(
-        self, sample_account, transactions, entry_data, existing_entry
-    ):
+    def test_skips_remove_when_entry_not_found(self, transactions, entry_data, existing_entry):
         # Journal has an unrelated entry. The remove target is not found by the finder,
         # so the unrelated entry must remain untouched.
         journal = Journal(
             journal_id="journal-1",
-            account=sample_account,
-            description="January journal",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January journal",
             entries=[existing_entry],
         )
         grouped = {"upsert": [], "remove": [entry_data]}
@@ -636,7 +607,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[]),
             pytest.raises(ValueError, match="journal-999"),
         ):
-            handle_sync_journal_entries_from_bank_statement("journal-999", "/path/to/statement.pdf")
+            handle_sync_journal_entries_from_bank_statement(
+                "journal-999", "/path/to/statement.pdf", Bank.CHASE
+            )
 
     def test_creates_new_entries_for_single_transaction(
         self, empty_journal, sample_transaction, expense_entry_data, cash_entry_data
@@ -663,20 +636,17 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_bank_statement(
-                "journal-1", "/path/to/statement.pdf"
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
         assert len(result["entries"]) == 2
 
     def test_updates_existing_entry_preserving_id(
-        self, sample_account, sample_transaction, expense_entry_data, bank_statement_existing_entry
+        self, sample_transaction, expense_entry_data, bank_statement_existing_entry
     ):
         journal = Journal(
             journal_id="journal-1",
-            account=sample_account,
-            description="January journal",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January journal",
             entries=[bank_statement_existing_entry],
         )
         mock_parser = self._make_parser([sample_transaction])
@@ -701,7 +671,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_bank_statement(
-                "journal-1", "/path/to/statement.pdf"
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
         assert len(result["entries"]) == 1
@@ -724,7 +694,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_bank_statement(
-                "journal-1", "/path/to/statement.pdf"
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
         assert result["entries"] == []
@@ -754,7 +724,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_bank_statement(
-                "journal-1", "/path/to/statement.pdf"
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
         assert len(result["entries"]) == 2
@@ -827,7 +797,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_bank_statement(
-                "journal-1", "/path/to/statement.pdf"
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
         assert len(result["entries"]) == 4
@@ -848,11 +818,13 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal") as mock_save,
             pytest.raises(ValueError, match="Balance mismatch"),
         ):
-            handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+            handle_sync_journal_entries_from_bank_statement(
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
+            )
 
         mock_save.assert_not_called()
 
-    def test_uses_bank_from_journal_account(self, empty_journal):
+    def test_uses_given_bank_for_parser(self, empty_journal):
         mock_parser = self._make_parser([])
 
         with (
@@ -866,7 +838,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             ) as mock_get_parser,
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
-            handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+            handle_sync_journal_entries_from_bank_statement(
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
+            )
 
         mock_get_parser.assert_called_once_with(Bank.CHASE)
 
@@ -885,7 +859,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
-            handle_sync_journal_entries_from_bank_statement("journal-1", file_path)
+            handle_sync_journal_entries_from_bank_statement("journal-1", file_path, Bank.CHASE)
 
         mock_parser.parse.assert_called_once_with(file_path)
 
@@ -929,7 +903,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
-            handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+            handle_sync_journal_entries_from_bank_statement(
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
+            )
 
         assert mock_extract.call_count == 2
         mock_extract.assert_any_call(txn1)
@@ -959,7 +935,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal") as mock_save,
         ):
-            handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+            handle_sync_journal_entries_from_bank_statement(
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
+            )
 
         mock_save.assert_called_once_with(empty_journal, conn)
 
@@ -978,7 +956,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_bank_statement(
-                "journal-1", "/path/to/statement.pdf"
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
         assert isinstance(result, dict)
@@ -1023,7 +1001,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
-            handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+            handle_sync_journal_entries_from_bank_statement(
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
+            )
 
         mock_recategorize.assert_called_once_with(null_entry)
 
@@ -1054,7 +1034,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
-            handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+            handle_sync_journal_entries_from_bank_statement(
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
+            )
 
         mock_recategorize.assert_not_called()
 
@@ -1099,7 +1081,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_bank_statement(
-                "journal-1", "/path/to/statement.pdf"
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
         assert result["entries"][0]["description"] == "Haircut at Rudy's."
@@ -1141,7 +1123,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
-            handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+            handle_sync_journal_entries_from_bank_statement(
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
+            )
 
         mock_recategorize.assert_called_once_with(null_entry)
 
@@ -1187,7 +1171,9 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
-            handle_sync_journal_entries_from_bank_statement("journal-1", "/path/to/statement.pdf")
+            handle_sync_journal_entries_from_bank_statement(
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
+            )
 
         assert mock_recategorize.call_count == 2
 
@@ -1232,7 +1218,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             mock_anthropic.RateLimitError = FakeRateLimitError
             with patch("balanceai_backend.helpers.journal_entry_helper.time.sleep"):
                 handle_sync_journal_entries_from_bank_statement(
-                    "journal-1", "/path/to/statement.pdf"
+                    "journal-1", "/path/to/statement.pdf", Bank.CHASE
                 )
 
         assert mock_extract.call_count == 1
@@ -1275,7 +1261,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_bank_statement(
-                "journal-1", "/path/to/statement.pdf"
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
         assert len(result["entries"]) == 1
@@ -1319,7 +1305,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             return handle_sync_journal_entries_from_bank_statement(
-                "journal-1", "/path/to/statement.pdf"
+                "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
     def test_redaction_returns_all_entries_when_empty(self, empty_journal):

@@ -219,8 +219,8 @@ def _make_synthetic_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     create_schema(conn)
     conn.execute(
-        "INSERT INTO journals VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ("j1", "acct-1", "chase", "debit", "October 2025 Journal", "2025-10-01", "2025-10-31"),
+        "INSERT INTO journals VALUES (?, ?, ?, ?)",
+        ("j1", "October 2025 Journal", "", "2025-10-01T00:00:00+00:00"),
     )
     conn.executemany(
         "INSERT INTO journal_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

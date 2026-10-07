@@ -4,15 +4,13 @@ from decimal import Decimal
 
 import pytest
 from balanceai_backend.db.connection import create_schema
-from balanceai_backend.journals.journal_db import (
+from balanceai_backend.db.journal_db import (
     delete_journal,
     find_journal_entries,
     find_journals,
     save_journal,
     update_journal,
 )
-from balanceai_backend.models.account import Account, AccountType
-from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import Journal, JournalAccount, JournalEntry
 
 
@@ -26,17 +24,9 @@ def db():
 
 
 @pytest.fixture
-def sample_account():
-    return Account(id="acct-1", bank=Bank.CHASE, account_type=AccountType.DEBIT)
-
-
-@pytest.fixture
-def sample_journal(sample_account):
+def sample_journal():
     return Journal(
-        account=sample_account,
-        description="January journal",
-        start_date=datetime.date(2026, 1, 1),
-        end_date=datetime.date(2026, 1, 31),
+        name="January journal",
     )
 
 
@@ -49,19 +39,16 @@ class TestSaveJournal:
         ).fetchone()
         assert row is not None
 
-    def test_all_fields_persisted(self, db, sample_account, sample_journal):
+    def test_all_fields_persisted(self, db, sample_journal):
         save_journal(sample_journal, db)
 
         row = db.execute(
             "SELECT * FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)
         ).fetchone()
         assert row["journal_id"] == sample_journal.journal_id
-        assert row["account_id"] == sample_account.id
-        assert row["bank"] == Bank.CHASE.value
-        assert row["account_type"] == AccountType.DEBIT.value
+        assert row["name"] == sample_journal.name
         assert row["description"] == sample_journal.description
-        assert row["start_date"] == sample_journal.start_date.isoformat()
-        assert row["end_date"] == sample_journal.end_date.isoformat()
+        assert row["created_at"] == sample_journal.created_at
 
     def test_duplicate_journal_id_raises(self, db, sample_journal):
         save_journal(sample_journal, db)
@@ -69,18 +56,12 @@ class TestSaveJournal:
         with pytest.raises(sqlite3.IntegrityError):
             save_journal(sample_journal, db)
 
-    def test_multiple_journals_saved(self, db, sample_account):
+    def test_multiple_journals_saved(self, db):
         j1 = Journal(
-            account=sample_account,
-            description="January",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January",
         )
         j2 = Journal(
-            account=sample_account,
-            description="February",
-            start_date=datetime.date(2026, 2, 1),
-            end_date=datetime.date(2026, 2, 28),
+            name="February",
         )
         save_journal(j1, db)
         save_journal(j2, db)
@@ -126,18 +107,12 @@ class TestFindJournals:
     def test_returns_empty_list_when_no_journals(self, db):
         assert find_journals(conn=db) == []
 
-    def test_returns_all_journals_with_no_filters(self, db, sample_account):
+    def test_returns_all_journals_with_no_filters(self, db):
         j1 = Journal(
-            account=sample_account,
-            description="January",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January",
         )
         j2 = Journal(
-            account=sample_account,
-            description="February",
-            start_date=datetime.date(2026, 2, 1),
-            end_date=datetime.date(2026, 2, 28),
+            name="February",
         )
         save_journal(j1, db)
         save_journal(j2, db)
@@ -146,18 +121,12 @@ class TestFindJournals:
 
         assert len(results) == 2
 
-    def test_filter_by_journal_id(self, db, sample_account):
+    def test_filter_by_journal_id(self, db):
         j1 = Journal(
-            account=sample_account,
-            description="January",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January",
         )
         j2 = Journal(
-            account=sample_account,
-            description="February",
-            start_date=datetime.date(2026, 2, 1),
-            end_date=datetime.date(2026, 2, 28),
+            name="February",
         )
         save_journal(j1, db)
         save_journal(j2, db)
@@ -167,92 +136,20 @@ class TestFindJournals:
         assert len(results) == 1
         assert results[0].journal_id == j1.journal_id
 
-    def test_filter_by_account_id(self, db):
-        acct_a = Account(id="acct-a", bank=Bank.CHASE, account_type=AccountType.DEBIT)
-        acct_b = Account(id="acct-b", bank=Bank.CHASE, account_type=AccountType.DEBIT)
-        j_a = Journal(
-            account=acct_a,
-            description="Account A journal",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
-        )
-        j_b = Journal(
-            account=acct_b,
-            description="Account B journal",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
-        )
-        save_journal(j_a, db)
-        save_journal(j_b, db)
-
-        results = find_journals(account_id="acct-a", conn=db)
-
-        assert len(results) == 1
-        assert results[0].account.id == "acct-a"
-
-    def test_filter_by_both_journal_id_and_account_id(self, db, sample_account):
-        j = Journal(
-            account=sample_account,
-            description="January",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
-        )
-        save_journal(j, db)
-
-        results = find_journals(journal_id=j.journal_id, account_id=sample_account.id, conn=db)
-
-        assert len(results) == 1
-        assert results[0].journal_id == j.journal_id
-
-    def test_filter_by_both_mismatched(self, db, sample_account):
-        j = Journal(
-            account=sample_account,
-            description="January",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
-        )
-        save_journal(j, db)
-
-        results = find_journals(journal_id=j.journal_id, account_id="wrong-account", conn=db)
-
-        assert results == []
-
     def test_unknown_journal_id_returns_empty(self, db):
         assert find_journals(journal_id="nonexistent", conn=db) == []
 
-    def test_unknown_account_id_returns_empty(self, db):
-        assert find_journals(account_id="nonexistent", conn=db) == []
-
-    def test_results_ordered_by_start_date(self, db, sample_account):
-        j_mar = Journal(
-            account=sample_account,
-            description="March",
-            start_date=datetime.date(2026, 3, 1),
-            end_date=datetime.date(2026, 3, 31),
-        )
-        j_jan = Journal(
-            account=sample_account,
-            description="January",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
-        )
-        j_feb = Journal(
-            account=sample_account,
-            description="February",
-            start_date=datetime.date(2026, 2, 1),
-            end_date=datetime.date(2026, 2, 28),
-        )
+    def test_results_ordered_by_created_at(self, db):
+        j_mar = Journal(name="March", created_at="2026-03-01T00:00:00+00:00")
+        j_jan = Journal(name="January", created_at="2026-01-01T00:00:00+00:00")
+        j_feb = Journal(name="February", created_at="2026-02-01T00:00:00+00:00")
         save_journal(j_mar, db)
         save_journal(j_jan, db)
         save_journal(j_feb, db)
 
         results = find_journals(conn=db)
 
-        assert [r.start_date for r in results] == [
-            datetime.date(2026, 1, 1),
-            datetime.date(2026, 2, 1),
-            datetime.date(2026, 3, 1),
-        ]
+        assert [r.name for r in results] == ["January", "February", "March"]
 
     def test_entries_are_loaded(self, db, sample_journal):
         save_journal(sample_journal, db)
@@ -266,18 +163,12 @@ class TestFindJournals:
         assert e.journal_entry_id == "entry-1"
         assert e.debit == Decimal("42.50")
 
-    def test_entries_belong_to_correct_journal(self, db, sample_account):
+    def test_entries_belong_to_correct_journal(self, db):
         j1 = Journal(
-            account=sample_account,
-            description="January",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January",
         )
         j2 = Journal(
-            account=sample_account,
-            description="February",
-            start_date=datetime.date(2026, 2, 1),
-            end_date=datetime.date(2026, 2, 28),
+            name="February",
         )
         save_journal(j1, db)
         save_journal(j2, db)
@@ -292,27 +183,6 @@ class TestFindJournals:
 
         assert len(results[0].entries) == 1
         assert results[0].entries[0].journal_entry_id == "entry-j1"
-
-    def test_multiple_journals_for_same_account(self, db, sample_account):
-        j1 = Journal(
-            account=sample_account,
-            description="January",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
-        )
-        j2 = Journal(
-            account=sample_account,
-            description="February",
-            start_date=datetime.date(2026, 2, 1),
-            end_date=datetime.date(2026, 2, 28),
-        )
-        save_journal(j1, db)
-        save_journal(j2, db)
-
-        results = find_journals(account_id=sample_account.id, conn=db)
-
-        assert len(results) == 2
-        assert {r.journal_id for r in results} == {j1.journal_id, j2.journal_id}
 
 
 class TestFindJournalEntries:
@@ -453,18 +323,12 @@ class TestFindJournalEntries:
 
         assert [e.journal_entry_id for e in results] == ["entry-1", "entry-2", "entry-3"]
 
-    def test_entries_scoped_to_journal(self, db, sample_account):
+    def test_entries_scoped_to_journal(self, db):
         j1 = Journal(
-            account=sample_account,
-            description="January",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January",
         )
         j2 = Journal(
-            account=sample_account,
-            description="February",
-            start_date=datetime.date(2026, 2, 1),
-            end_date=datetime.date(2026, 2, 28),
+            name="February",
         )
         save_journal(j1, db)
         save_journal(j2, db)
@@ -508,18 +372,12 @@ class TestDeleteJournal:
         with pytest.raises(ValueError, match="nonexistent"):
             delete_journal("nonexistent", db)
 
-    def test_does_not_delete_other_journals(self, db, sample_account):
+    def test_does_not_delete_other_journals(self, db):
         j1 = Journal(
-            account=sample_account,
-            description="January",
-            start_date=datetime.date(2026, 1, 1),
-            end_date=datetime.date(2026, 1, 31),
+            name="January",
         )
         j2 = Journal(
-            account=sample_account,
-            description="February",
-            start_date=datetime.date(2026, 2, 1),
-            end_date=datetime.date(2026, 2, 28),
+            name="February",
         )
         save_journal(j1, db)
         save_journal(j2, db)
@@ -534,16 +392,16 @@ class TestDeleteJournal:
 class TestUpdateJournal:
     def test_updates_journal_metadata(self, db, sample_journal):
         save_journal(sample_journal, db)
+        sample_journal.name = "Updated name"
         sample_journal.description = "Updated description"
-        sample_journal.end_date = datetime.date(2026, 1, 30)
 
         update_journal(sample_journal, db)
 
         row = db.execute(
             "SELECT * FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)
         ).fetchone()
+        assert row["name"] == "Updated name"
         assert row["description"] == "Updated description"
-        assert row["end_date"] == "2026-01-30"
 
     def test_replaces_entries(self, db, sample_journal):
         save_journal(sample_journal, db)
@@ -581,10 +439,7 @@ class TestUpdateJournal:
         save_journal(sample_journal, db)
         # pre-insert an entry in another journal to cause a PRIMARY KEY collision
         other = Journal(
-            account=sample_journal.account,
-            description="Other",
-            start_date=datetime.date(2026, 2, 1),
-            end_date=datetime.date(2026, 2, 28),
+            name="Other",
         )
         save_journal(other, db)
         db.execute(
@@ -604,8 +459,8 @@ class TestUpdateJournal:
         )
         db.commit()
 
-        # update sample_journal with a new description and an entry whose ID collides
-        sample_journal.description = "Should not persist"
+        # update sample_journal with a new name and an entry whose ID collides
+        sample_journal.name = "Should not persist"
         collision_entry = _make_entry(
             "entry-collision", datetime.date(2026, 1, 5), Decimal("20.00")
         )
@@ -614,8 +469,8 @@ class TestUpdateJournal:
         with pytest.raises(sqlite3.IntegrityError):
             update_journal(sample_journal, db)
 
-        # journal description must be unchanged
+        # journal name must be unchanged
         row = db.execute(
-            "SELECT description FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)
+            "SELECT name FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)
         ).fetchone()
-        assert row["description"] == "January journal"
+        assert row["name"] == "January journal"

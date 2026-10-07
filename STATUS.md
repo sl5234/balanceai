@@ -2,6 +2,10 @@
 
 <!-- INSTRUCTIONS: Add a new `## Session: YYYY-MM-DD` entry at the top of the log below with a summary of that session's status. Keep each entry short — 3-4 sentences max. Never edit or remove previous entries; they stay as a permanent history. -->
 
+## Session: 2026-10-05
+
+Phase 1 (Plaid → bank accounts + raw transactions) is done and merged to `main` (PR #3): `BankAccount` model + `bank_accounts` table, created from Plaid on link and every sync; raw transactions saved under our account id (plus Plaid's); unlinking keeps accounts and transactions; new `list_bank_accounts` tool. Verified end to end against the Plaid sandbox (Tartan Bank, First Gingham Credit Union) — no id clashes or missing masks; not yet run: modified/removed transactions, and observing `LinkExitedError` directly. Deferred work is in the new `docs/BACKLOGS.md` (BL-1 to BL-5: id changes, skipped accounts, unlink tool, re-linking). Next: add journals and journal entries from Plaid.
+
 ## Session: 2026-09-26
 
 Audited the journal MCP tools and designed how Plaid connects to accounts; logged in `docs/PLAID_INTEGRATION_DECISIONS.md` #3 (Account ID = `institution:type:last4`) and #4 (build order: Plaid → accounts + raw transactions, then journals, then receipts/statements). Next: phase 1 via a new `BankAccount` model + `bank_accounts` SQLite table, created from Plaid `/accounts/get` on link and sync, with raw transactions storing its ID; the old `Account` stays untouched until phases 2–3. Watch for duplicate IDs and missing masks in the Tartan sandbox.

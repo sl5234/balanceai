@@ -8,8 +8,6 @@ from pathlib import Path
 from appdevcommons.unique_id import UniqueIdGenerator
 from pydantic import BaseModel, Field, model_validator
 
-from balanceai_backend.models.account import Account
-
 
 class JournalAccount(str, Enum):
     CASH = "cash"
@@ -180,20 +178,22 @@ class JournalEntry(GeneratedJournalEntry):
 
 @dataclass
 class Journal:
-    account: Account
-    description: str
-    start_date: datetime.date
-    end_date: datetime.date
+    """A set of books — e.g. "Personal" or "My LLC". Holds every journal entry
+    for that entity, across all of its bank accounts and all dates; months and
+    accounts are filters on its entries rather than separate journals."""
+
+    name: str
+    description: str = ""
     journal_id: str = field(default_factory=UniqueIdGenerator.generate_id)
+    created_at: str = field(default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat())
     entries: list[JournalEntry] = field(default_factory=list)
 
     def to_dict(self, redact_entries: bool = False) -> dict:
         return {
             "journal_id": self.journal_id,
-            "account": self.account.to_dict(),
+            "name": self.name,
             "description": self.description,
-            "start_date": self.start_date.isoformat(),
-            "end_date": self.end_date.isoformat(),
+            "created_at": self.created_at,
             "entries": [] if redact_entries else [e.to_dict() for e in self.entries],
         }
 
@@ -210,11 +210,13 @@ class Journal:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Journal":
-        return cls(
-            account=Account.from_dict(d["account"]),
+        journal = cls(
+            name=d["name"],
             description=d.get("description", ""),
-            start_date=datetime.date.fromisoformat(d["start_date"]),
-            end_date=datetime.date.fromisoformat(d["end_date"]),
-            journal_id=d.get("journal_id", UniqueIdGenerator.generate_id()),
             entries=[JournalEntry.from_dict(e) for e in d.get("entries", [])],
         )
+        if "journal_id" in d:
+            journal.journal_id = d["journal_id"]
+        if "created_at" in d:
+            journal.created_at = d["created_at"]
+        return journal

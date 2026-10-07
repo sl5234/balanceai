@@ -63,7 +63,7 @@ def in_memory_conn():
 def seeded_conn(in_memory_conn):
     """In-memory DB pre-loaded with one day of activity matching the bucketing report columns."""
     in_memory_conn.executescript("""
-        INSERT INTO journals VALUES ('j1', 'acct-1', 'chase', 'debit', 'Test journal', '2025-10-01', '2025-10-31');
+        INSERT INTO journals VALUES ('j1', 'Test journal', '', '2025-10-01T00:00:00+00:00');
 
         -- Income: cash debit leg
         INSERT INTO journal_entries VALUES ('e1', 'j1', '2025-10-01', 'cash', 'Paycheck', 5000.0, 0.0, 'income', 0.0, 'Self');
