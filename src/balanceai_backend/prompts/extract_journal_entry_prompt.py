@@ -14,7 +14,7 @@ _DOUBLE_ENTRY_RULES = """\
 ## DOUBLE-ENTRY BOOKKEEPING RULES:
 1. Every transaction must produce at least two journal entries where total debits equal total credits.
 2. Each journal entry line represents ONE side of the transaction — never put both a debit and a credit amount on the same line (one must always be 0).
-3. Assign each line a single account type. Two lines in the same transaction must NOT both use an expense account (essential_expense or non_essential_expense) — one side must reflect the actual account the money moved through (e.g. cash, accounts_payable, accounts_receivable).
+3. Assign each line a single account type. Two lines in the same transaction must NOT both use an expense account (essential_expense or non_essential_expense) — one side must reflect the actual account the money moved through (e.g. cash, credit_card_payable).
 5. When the merchant is ambiguous, default to non_essential_expense (not essential_expense).
 6. Validate before returning:
    - total debits == total credits
@@ -32,13 +32,13 @@ Journal entries:
 
 Transaction: Bilt Eqr (rent) -$1,200.00
 Journal entries:
-  - debit: 1200.00, credit: 0.00, account: rent, description: "Monthly rent payment."
+  - debit: 1200.00, credit: 0.00, account: essential_expense, description: "Monthly rent payment."
   - debit: 0.00, credit: 1200.00, account: cash, description: "Monthly rent payment."
 
 Transaction: Payroll $2,500.00
 Journal entries:
   - debit: 2500.00, credit: 0.00, account: cash, description: "Payroll deposit."
-  - debit: 0.00, credit: 2500.00, account: sales, description: "Payroll deposit."
+  - debit: 0.00, credit: 2500.00, account: salary_income, description: "Payroll deposit."
 
 Transaction: Rudy's (unknown merchant) -$30.00
 Journal entries:

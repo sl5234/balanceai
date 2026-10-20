@@ -1,6 +1,7 @@
 """Keep local transaction data in sync with Plaid via /transactions/sync.
 
 Run as: python -m balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid <item_id>
+(syncs only; doesn't classify — the sync_bank_transactions tool does both).
 """
 
 import sqlite3
@@ -55,10 +56,12 @@ def _to_raw_transaction(
             "create that bank account first, then sync again."
         )
 
-    category = None
+    category = category_detailed = category_confidence = None
     pfc = getattr(txn, "personal_finance_category", None)
     if pfc is not None:
         category = getattr(pfc, "primary", None)
+        category_detailed = getattr(pfc, "detailed", None)
+        category_confidence = getattr(pfc, "confidence_level", None)
 
     description = getattr(txn, "merchant_name", None) or txn.name
 
@@ -72,6 +75,8 @@ def _to_raw_transaction(
         description=description,
         amount=-Decimal(str(txn.amount)),
         category=category,
+        category_detailed=category_detailed,
+        category_confidence=category_confidence,
         pending=txn.pending,
     )
 
@@ -115,9 +120,9 @@ def sync_raw_transactions_from_plaid(
     Loops /transactions/sync while has_more, persisting the cursor after each
     page so an interruption mid-batch doesn't lose progress — not just once at
     the end. Added and modified transactions both go through
-    raw_transaction_db.upsert_raw_transaction (SQLite's INSERT OR REPLACE
-    handles "new" and "changed" with one call); removed transactions are
-    deleted.
+    raw_transaction_db.upsert_raw_transaction (one call handles "new" and
+    "changed", and keeps, drops, or flags a changed transaction's
+    classification); removed transactions are deleted.
 
     Bank accounts are created/updated first (sync_bank_accounts_from_plaid),
     and each transaction is saved under its BankAccount id. A transaction whose

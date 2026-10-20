@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 import sqlite3
 from decimal import Decimal
@@ -5,13 +6,15 @@ from decimal import Decimal
 import pytest
 from balanceai_backend.bank_link.plaid_item_db import delete_plaid_item, save_plaid_item
 from balanceai_backend.db.bank_account_db import upsert_bank_account
-from balanceai_backend.db.connection import create_schema
+from balanceai_backend.db.connection import _apply_migrations, create_schema
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
+from balanceai_backend.models.journal import JournalAccount
 from balanceai_backend.models.plaid_item import PlaidItem
-from balanceai_backend.models.raw_transaction import RawTransaction
+from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
 from balanceai_backend.raw_transactions.raw_transaction_db import (
     delete_raw_transaction,
     find_raw_transactions,
+    update_raw_transaction_classification,
     upsert_raw_transaction,
 )
 
@@ -204,3 +207,236 @@ class TestBankAccountReference:
 
         [txn] = find_raw_transactions(conn=db)
         assert txn.account_id == "renamed-acc"
+
+
+def _classification(classified_by: ClassifiedBy = ClassifiedBy.AI) -> Classification:
+    return Classification(
+        counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+        category="dining",
+        counterparty="Starbucks",
+        classified_by=classified_by,
+    )
+
+
+class TestClassification:
+    def test_new_transaction_is_unclassified(self, db, linked_item, sample_txn):
+        upsert_raw_transaction(sample_txn, conn=db)
+        [saved] = find_raw_transactions(conn=db)
+        assert saved.classification is None
+
+    def test_update_sets_classification(self, db, linked_item, sample_txn):
+        upsert_raw_transaction(sample_txn, conn=db)
+        update_raw_transaction_classification("txn-1", _classification(), conn=db)
+        [saved] = find_raw_transactions(conn=db)
+        assert saved.classification == _classification()
+
+    def test_update_with_none_clears_classification(self, db, linked_item, sample_txn):
+        upsert_raw_transaction(sample_txn, conn=db)
+        update_raw_transaction_classification("txn-1", _classification(), conn=db)
+        update_raw_transaction_classification("txn-1", None, conn=db)
+        [saved] = find_raw_transactions(conn=db)
+        assert saved.classification is None
+
+    def test_update_raises_when_transaction_not_found(self, db):
+        with pytest.raises(ValueError, match="txn-missing"):
+            update_raw_transaction_classification("txn-missing", _classification(), conn=db)
+
+    def test_find_by_id(self, db, linked_item, sample_txn):
+        upsert_raw_transaction(sample_txn, conn=db)
+        assert [t.id for t in find_raw_transactions(id="txn-1", conn=db)] == ["txn-1"]
+        assert find_raw_transactions(id="txn-missing", conn=db) == []
+
+    def test_find_unclassified_only(self, db, linked_item, sample_txn):
+        upsert_raw_transaction(sample_txn, conn=db)
+        upsert_raw_transaction(dataclasses.replace(sample_txn, id="txn-2"), conn=db)
+        update_raw_transaction_classification("txn-1", _classification(), conn=db)
+        assert [t.id for t in find_raw_transactions(unclassified=True, conn=db)] == ["txn-2"]
+        assert len(find_raw_transactions(conn=db)) == 2
+
+
+_CLASSIFIER_INPUT_CHANGES = [
+    {"description": "Starbucks Reserve"},
+    {"amount": Decimal("-5.25")},
+    {"category": "GENERAL_MERCHANDISE"},
+    {"category_detailed": "FOOD_AND_DRINK_RESTAURANT"},
+]
+
+
+class TestUpsertKeepsClassification:
+    """What happens to a stored classification when the source sends the
+    transaction again (Plaid's `modified` bucket)."""
+
+    @staticmethod
+    def _resend(db, sample_txn, **changes) -> RawTransaction:
+        upsert_raw_transaction(dataclasses.replace(sample_txn, **changes), conn=db)
+        [saved] = find_raw_transactions(conn=db)
+        return saved
+
+    @pytest.fixture
+    def classified_by_ai(self, db, linked_item, sample_txn):
+        upsert_raw_transaction(sample_txn, conn=db)
+        update_raw_transaction_classification("txn-1", _classification(), conn=db)
+
+    @pytest.fixture
+    def classified_by_user(self, db, linked_item, sample_txn):
+        upsert_raw_transaction(sample_txn, conn=db)
+        update_raw_transaction_classification("txn-1", _classification(ClassifiedBy.USER), conn=db)
+
+    def test_unchanged_resend_keeps_ai_classification(self, db, sample_txn, classified_by_ai):
+        assert self._resend(db, sample_txn).classification == _classification()
+
+    def test_unchanged_resend_does_not_flag_user_classification(
+        self, db, sample_txn, classified_by_user
+    ):
+        saved = self._resend(db, sample_txn)
+        assert saved.classification == _classification(ClassifiedBy.USER)
+        assert saved.classification.needs_user_review is False
+
+    def test_date_or_pending_change_keeps_ai_classification(self, db, sample_txn, classified_by_ai):
+        saved = self._resend(db, sample_txn, posting_date=datetime.date(2026, 8, 20), pending=True)
+        assert saved.posting_date == datetime.date(2026, 8, 20)
+        assert saved.pending is True
+        assert saved.classification == _classification()
+
+    def test_date_or_pending_change_does_not_flag_user_classification(
+        self, db, sample_txn, classified_by_user
+    ):
+        saved = self._resend(db, sample_txn, posting_date=datetime.date(2026, 8, 20), pending=True)
+        assert saved.classification.needs_user_review is False
+
+    @pytest.mark.parametrize("changes", _CLASSIFIER_INPUT_CHANGES)
+    def test_input_change_clears_ai_classification(self, db, sample_txn, classified_by_ai, changes):
+        saved = self._resend(db, sample_txn, **changes)
+        assert saved.classification is None
+        assert find_raw_transactions(unclassified=True, conn=db) == [saved]
+
+    @pytest.mark.parametrize("changes", _CLASSIFIER_INPUT_CHANGES)
+    def test_input_change_keeps_and_flags_user_classification(
+        self, db, sample_txn, classified_by_user, changes
+    ):
+        saved = self._resend(db, sample_txn, **changes)
+        assert saved.classification == dataclasses.replace(
+            _classification(ClassifiedBy.USER), needs_user_review=True
+        )
+
+    def test_setting_classification_again_clears_the_flag(self, db, sample_txn, classified_by_user):
+        self._resend(db, sample_txn, amount=Decimal("-5.25"))
+        update_raw_transaction_classification("txn-1", _classification(ClassifiedBy.USER), conn=db)
+        [saved] = find_raw_transactions(conn=db)
+        assert saved.classification.needs_user_review is False
+
+    def test_incoming_classification_does_not_replace_stored_one(
+        self, db, sample_txn, classified_by_user
+    ):
+        saved = self._resend(db, sample_txn, classification=_classification(ClassifiedBy.AI))
+        assert saved.classification == _classification(ClassifiedBy.USER)
+
+    def test_confidence_only_change_keeps_ai_classification(self, db, sample_txn, classified_by_ai):
+        saved = self._resend(db, sample_txn, category_confidence="HIGH")
+        assert saved.category_confidence == "HIGH"
+        assert saved.classification == _classification()
+
+    def test_confidence_only_change_does_not_flag_user_classification(
+        self, db, sample_txn, classified_by_user
+    ):
+        saved = self._resend(db, sample_txn, category_confidence="HIGH")
+        assert saved.classification.needs_user_review is False
+
+    def test_same_amount_written_differently_is_not_a_change(
+        self, db, sample_txn, classified_by_ai
+    ):
+        saved = self._resend(db, sample_txn, amount=Decimal("-4.5"))
+        assert saved.classification == _classification()
+
+
+class TestCategoryDetails:
+    def test_round_trips_through_database(self, db, linked_item, sample_txn):
+        txn = dataclasses.replace(
+            sample_txn, category_detailed="FOOD_AND_DRINK_COFFEE", category_confidence="LOW"
+        )
+        upsert_raw_transaction(txn, conn=db)
+        assert find_raw_transactions(conn=db) == [txn]
+
+    def test_round_trips_through_dict(self, sample_txn):
+        txn = dataclasses.replace(
+            sample_txn, category_detailed="FOOD_AND_DRINK_COFFEE", category_confidence="LOW"
+        )
+        d = txn.to_dict()
+        assert (d["category_detailed"], d["category_confidence"]) == (
+            "FOOD_AND_DRINK_COFFEE",
+            "LOW",
+        )
+        assert RawTransaction.from_dict(d) == txn
+
+    def test_default_to_none(self, db, linked_item, sample_txn):
+        upsert_raw_transaction(sample_txn, conn=db)
+        [saved] = find_raw_transactions(conn=db)
+        assert (saved.category_detailed, saved.category_confidence) == (None, None)
+
+
+class TestClassificationDictRoundTrip:
+    def test_round_trips_through_dict(self, sample_txn):
+        txn = dataclasses.replace(sample_txn, classification=_classification())
+        d = txn.to_dict()
+        assert d["classification"] == {
+            "counter_account": "non_essential_expense",
+            "category": "dining",
+            "counterparty": "Starbucks",
+            "classified_by": "ai",
+            "needs_user_review": False,
+        }
+        assert RawTransaction.from_dict(d) == txn
+
+    def test_unclassified_round_trips_as_none(self, sample_txn):
+        d = sample_txn.to_dict()
+        assert d["classification"] is None
+        assert RawTransaction.from_dict(d).classification is None
+
+
+class TestClassificationColumnMigration:
+    def test_adds_column_to_a_database_from_before_it_existed(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        create_schema(conn)
+        conn.execute("ALTER TABLE raw_transactions DROP COLUMN classification")
+        conn.execute(
+            "INSERT INTO bank_accounts (id, institution_name, account_type, last4)"
+            " VALUES ('acc-1', 'Test Bank', 'checking', '0000')"
+        )
+        conn.execute(
+            "INSERT INTO raw_transactions (id, source, account_id, posting_date, description, amount)"
+            " VALUES ('txn-old', 'plaid', 'acc-1', '2026-08-19', 'Starbucks', '-4.50')"
+        )
+        conn.commit()
+
+        _apply_migrations(conn)
+
+        [txn] = find_raw_transactions(conn=conn)
+        assert txn.description == "Starbucks"
+        assert txn.classification is None
+        conn.close()
+
+
+class TestCategoryDetailsColumnMigration:
+    def test_adds_columns_to_a_database_from_before_they_existed(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        create_schema(conn)
+        conn.execute("ALTER TABLE raw_transactions DROP COLUMN category_detailed")
+        conn.execute("ALTER TABLE raw_transactions DROP COLUMN category_confidence")
+        conn.execute(
+            "INSERT INTO bank_accounts (id, institution_name, account_type, last4)"
+            " VALUES ('acc-1', 'Test Bank', 'checking', '0000')"
+        )
+        conn.execute(
+            "INSERT INTO raw_transactions (id, source, account_id, posting_date, description, amount)"
+            " VALUES ('txn-old', 'plaid', 'acc-1', '2026-08-19', 'Starbucks', '-4.50')"
+        )
+        conn.commit()
+
+        _apply_migrations(conn)
+
+        [txn] = find_raw_transactions(conn=conn)
+        assert txn.description == "Starbucks"
+        assert (txn.category_detailed, txn.category_confidence) == (None, None)
+        conn.close()

@@ -4,6 +4,7 @@ from typing import Literal
 import anthropic
 from anthropic.types import ImageBlockParam, TextBlock, TextBlockParam
 from balanceai_backend.config import settings
+from pydantic import BaseModel
 
 ImageMimeType = Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
 
@@ -60,3 +61,37 @@ def messages(
     if not isinstance(block, TextBlock):
         raise TypeError(f"Expected a text response block, got {type(block).__name__}")
     return block.text
+
+
+def parse[ParsedT: BaseModel](
+    model_id: str,
+    content: str,
+    output_format: type[ParsedT],
+    system_instruction: str | None = None,
+    max_output_tokens: int = 1024,
+    temperature: float = 0.7,
+    timeout: float = 60.0,
+) -> ParsedT | None:
+    """
+    Send a text request and get the reply as an instance of output_format.
+
+    Uses structured outputs, so the API guarantees the reply matches
+    output_format's schema. Doesn't retry on its own (max_retries=0) — callers
+    that want retries handle them, so they control the policy.
+
+    timeout: seconds to wait for the reply before giving up on this attempt
+    (raises anthropic.APITimeoutError).
+
+    Returns:
+        The parsed reply, or None if the model declined to answer.
+    """
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=0, timeout=timeout)
+    resp = client.messages.parse(
+        model=model_id,
+        max_tokens=max_output_tokens,
+        temperature=temperature,
+        messages=[{"role": "user", "content": content}],
+        system=system_instruction if system_instruction is not None else anthropic.omit,
+        output_format=output_format,
+    )
+    return resp.parsed_output

@@ -177,7 +177,20 @@ class TestListBankAccounts:
         mock_find.assert_called_once_with(plaid_item_id="item-1")
 
 
+_CLASSIFIED = {"classified": 2, "unclassified": 0, "errors": []}
+
+
 class TestSyncBankTransactions:
+    @pytest.fixture(autouse=True)
+    def fake_classifier(self):
+        """Never run the real classifier here: it would read the real database
+        and call the AI."""
+        with patch(
+            "balanceai_backend.servers.link_bank_server.classify_raw_transactions",
+            return_value=_CLASSIFIED,
+        ) as mock:
+            yield mock
+
     def test_delegates_to_sync_transactions_by_item_id(self):
         with patch(
             "balanceai_backend.servers.link_bank_server.sync_raw_transactions_from_plaid",
@@ -186,9 +199,38 @@ class TestSyncBankTransactions:
             result = sync_bank_transactions("item-1")
 
         mock_sync.assert_called_once_with("item-1")
-        assert result == {"added": 3, "modified": 1, "removed": 0}
+        assert result == {
+            "added": 3,
+            "modified": 1,
+            "removed": 0,
+            "classification": _CLASSIFIED,
+        }
 
-    def test_defaults_to_the_only_linked_item_when_item_id_omitted(self):
+    def test_classifies_the_synced_bank_after_pulling_from_plaid(self, fake_classifier):
+        calls = []
+        fake_classifier.side_effect = lambda item_id: calls.append("classify") or _CLASSIFIED
+        with patch(
+            "balanceai_backend.servers.link_bank_server.sync_raw_transactions_from_plaid",
+            side_effect=lambda item_id: calls.append("pull") or {"added": 1},
+        ):
+            sync_bank_transactions("item-1")
+
+        assert calls == ["pull", "classify"]
+        fake_classifier.assert_called_once_with("item-1")
+
+    def test_does_not_classify_when_the_pull_fails(self, fake_classifier):
+        with (
+            patch(
+                "balanceai_backend.servers.link_bank_server.sync_raw_transactions_from_plaid",
+                side_effect=ValueError("No bank account for Plaid account"),
+            ),
+            pytest.raises(ValueError),
+        ):
+            sync_bank_transactions("item-1")
+
+        fake_classifier.assert_not_called()
+
+    def test_defaults_to_the_only_linked_item_when_item_id_omitted(self, fake_classifier):
         item = PlaidItem(item_id="item-1", access_token="access-sandbox-abc")
         with (
             patch(
@@ -203,6 +245,7 @@ class TestSyncBankTransactions:
             sync_bank_transactions()
 
         mock_sync.assert_called_once_with("item-1")
+        fake_classifier.assert_called_once_with("item-1")
 
     def test_raises_when_no_banks_linked_and_item_id_omitted(self):
         with (
