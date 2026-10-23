@@ -10,14 +10,54 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class JournalAccount(str, Enum):
+    """Accounts a personal journal's entries post to. Finer detail (dining,
+    groceries, …) is the entry's category, not its account."""
+
+    # Assets
     CASH = "cash"
-    ACCOUNTS_PAYABLE = "accounts_payable"
-    ACCOUNTS_RECEIVABLE = "accounts_receivable"
-    RENT = "rent"
+    INVESTMENTS = "investments"
+    LOANS_RECEIVABLE = "loans_receivable"  # money you lent someone
+    # Liabilities
+    CREDIT_CARD_PAYABLE = "credit_card_payable"
+    LOANS_PAYABLE = "loans_payable"  # mortgage, car, and student loans
+    # Equity
+    OPENING_BALANCE = "opening_balance"  # balances from before history begins
+    # Income
+    SALARY_INCOME = "salary_income"
+    INTEREST_INCOME = "interest_income"
+    OTHER_INCOME = "other_income"  # gifts, things you sold, …
+    # Expenses
     ESSENTIALS_EXPENSE = "essential_expense"
     NON_ESSENTIALS_EXPENSE = "non_essential_expense"
+    INTEREST_AND_FEES = "interest_and_fees"  # card interest, bank fees
+
+
+class BusinessJournalAccount(str, Enum):
+    """Accounts a business journal's entries would post to.
+
+    Not supported yet — nothing uses this. A journal needs a type (personal or
+    business) before its entries can use these instead of JournalAccount.
+    """
+
+    # Assets
+    CASH = "cash"
+    ACCOUNTS_RECEIVABLE = "accounts_receivable"  # customers who owe you
+    EQUIPMENT = "equipment"  # things that last years — laptops, vehicles
+    # Liabilities
+    ACCOUNTS_PAYABLE = "accounts_payable"  # supplier bills
+    CREDIT_CARD_PAYABLE = "credit_card_payable"
+    LOANS_PAYABLE = "loans_payable"
+    SALES_TAX_PAYABLE = "sales_tax_payable"  # only if you collect sales tax
+    # Equity
+    OPENING_BALANCE = "opening_balance"
+    OWNER_CONTRIBUTIONS = "owner_contributions"  # the owner putting money in
+    OWNER_DRAWS = "owner_draws"  # the owner taking money out
+    # Income
     SALES = "sales"
-    INVESTMENTS = "investments"
+    OTHER_INCOME = "other_income"  # interest and the like
+    # Expenses
+    COST_OF_GOODS_SOLD = "cost_of_goods_sold"
+    OPERATING_EXPENSE = "operating_expense"  # everything else; detail in category
 
 
 RECIPIENT_SELF = "Self"
@@ -31,13 +71,17 @@ class GeneratedJournalEntry(BaseModel):
         description=(
             "The account type for this entry. "
             "Use 'cash' as the offsetting account representing the bank or cash balance (e.g. the credit side of an expense, or the debit side of income). "
-            "Use 'accounts_payable' for bills owed to vendors. "
-            "Use 'accounts_receivable' for money owed to you. "
-            "Use 'rent' for rent payments. "
-            "Use 'essential_expense' for necessary expenses like groceries (specifically, meat, vegetables, dog food), car insurance, books, gas, hospital visits, internet expenses, anthropic subscription, etc. "
+            "Use 'credit_card_payable' as the offsetting account when the payment was made by credit card. "
+            "Use 'loans_payable' for mortgage, car, or student loan balances. "
+            "Use 'loans_receivable' for money lent to someone. "
+            "Use 'essential_expense' for necessary expenses like rent, groceries (specifically, meat, vegetables, dog food), car insurance, books, gas, hospital visits, internet expenses, anthropic subscription, etc. "
             "Use 'non_essential_expense' for non-essential expenses like groceries (snacks, fruits, dog treats), dining, cigarettes, vet visits, parking, haircuts, etc. "
-            "Use 'sales' for revenue transactions like income. "
+            "Use 'interest_and_fees' for credit card interest and bank fees. "
+            "Use 'salary_income' for salary and payroll. "
+            "Use 'interest_income' for interest earned. "
+            "Use 'other_income' for any other income, such as gifts or things sold. "
             "Use 'investments' for investments. "
+            "Never use 'opening_balance'. "
             "If you cannot clearly determine the nature of the business from its name or the provided context, "
             "default to 'non_essential_expense'."
         )

@@ -95,7 +95,10 @@ def create_schema(connection: sqlite3.Connection) -> None:
             description    TEXT NOT NULL,
             amount         TEXT NOT NULL,
             category       TEXT,
-            pending        INTEGER NOT NULL DEFAULT 0
+            category_detailed   TEXT,
+            category_confidence TEXT,
+            pending        INTEGER NOT NULL DEFAULT 0,
+            classification TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_raw_transactions_plaid_item_id ON raw_transactions(plaid_item_id);
@@ -115,6 +118,11 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         # Account ids moved to bank_accounts (plaid_item_id / plaid_account_id)
         "ALTER TABLE plaid_items DROP COLUMN plaid_account_ids",
         "ALTER TABLE plaid_items DROP COLUMN our_account_ids",
+        # Our classification of a raw transaction, as JSON
+        "ALTER TABLE raw_transactions ADD COLUMN classification TEXT",
+        # The source's finer category and its confidence (Plaid's personal_finance_category)
+        "ALTER TABLE raw_transactions ADD COLUMN category_detailed TEXT",
+        "ALTER TABLE raw_transactions ADD COLUMN category_confidence TEXT",
     ]
     for sql in migrations:
         try:

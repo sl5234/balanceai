@@ -94,3 +94,29 @@ accounts), and nothing ties them together.
 
 **Proposed fix:** a skill that runs the whole flow: link bank → sync bank
 transactions → create or pick a journal → sync journal entries.
+
+## BL-7 — Classification runs inside the sync call
+
+**Added:** 2026-10-13
+**Related:** docs/DISTRIBUTION_CHANNEL_DECISIONS.md #11
+
+**Problem:** `sync_bank_transactions` classifies every unclassified
+transaction before returning. A first sync with a lot of history means one
+long tool call that a client may time out, and on a remote server work
+shouldn't outlive the request.
+
+**Proposed fix:** event-driven syncing (Plaid webhook → queue → workers) or a
+workflow engine running sync → classify → book with built-in retries. The
+classify function is already a self-contained, safe-to-repeat unit of work,
+so only its trigger changes.
+
+## BL-8 — Plaid's original transaction payload isn't kept
+
+**Added:** 2026-10-13
+
+**Problem:** A raw transaction keeps only the fields we map from Plaid; the rest
+of Plaid's response (counterparties, location, payment details, …) is dropped,
+so nothing can be re-derived from it later.
+
+**Proposed fix:** store Plaid's full transaction JSON alongside the raw
+transaction (and the file path for receipts and statements).

@@ -9,6 +9,7 @@ import json
 import logging
 import webbrowser
 from datetime import date
+from pathlib import Path
 
 from appdevcommons.hash_generator import HashGenerator
 from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
@@ -26,6 +27,9 @@ from balanceai_backend.helpers.plaid_helper import save_linked_plaid_item
 from balanceai_backend.models import Account, AccountType, Bank, Category, Transaction
 from balanceai_backend.parsers import get_parser
 from balanceai_backend.prompts.categorizer import build_categorization_prompt
+from balanceai_backend.raw_transactions.classify_raw_transactions import (
+    classify_raw_transactions,
+)
 from balanceai_backend.raw_transactions.raw_transaction_db import (
     find_raw_transactions as db_find_raw_transactions,
 )
@@ -41,6 +45,21 @@ from balanceai_backend.statements.storage import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _log_to_file() -> None:
+    """Log every balanceai_backend module the server uses (not just this file)
+    to a file next to the bookkeeping server's, so sync and classification
+    problems can be read afterwards. Called on startup only, so tests that
+    import this module don't write to the real log."""
+    log_path = Path(__file__).resolve().parents[3] / "logs" / "link_bank_server.log"
+    log_path.parent.mkdir(exist_ok=True)
+    package_logger = logging.getLogger("balanceai_backend")
+    package_logger.setLevel(logging.INFO)
+    handler = logging.FileHandler(log_path, mode="a")
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    package_logger.addHandler(handler)
+
 
 # TODO: the "after sync_bank_transactions" guideline below is a stopgap for a skill
 # that runs link bank -> sync transactions -> journal -> journal entries end to
@@ -396,7 +415,8 @@ def list_bank_accounts(item_id: str | None = None) -> list[dict]:
 @mcp.tool()
 def sync_bank_transactions(item_id: str | None = None) -> dict:
     """
-    Pull the latest transaction changes for a linked bank via Plaid's /transactions/sync.
+    Pull the latest transaction changes for a linked bank via Plaid's /transactions/sync,
+    then classify that bank's transactions that aren't classified yet.
     The access token never leaves the server — pass the item_id from list_linked_banks.
 
     Args:
@@ -407,7 +427,9 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
     Returns:
         dict with transaction counts {"added", "modified", "removed"} plus
         "bank_accounts": {"saved", "skipped"} — the bank accounts created/updated
-        from the item first.
+        from the item first — and "classification": {"classified",
+        "unclassified", "errors"}. Classification problems are reported there
+        rather than raised; the pulled transactions are saved either way.
 
     Raises:
         ValueError: if a transaction belongs to a Plaid account that has no bank
@@ -420,7 +442,12 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
         if len(items) > 1:
             raise ValueError("Multiple banks are linked — specify item_id (see list_linked_banks).")
         item_id = items[0].item_id
-    return sync_raw_transactions_from_plaid(item_id)
+    result = sync_raw_transactions_from_plaid(item_id)
+    # TODO: classifying here makes a first sync with a lot of history one long
+    # tool call. Move it to event-driven syncing or a workflow engine.
+    # See docs/BACKLOGS.md BL-7.
+    result["classification"] = classify_raw_transactions(item_id)
+    return result
 
 
 class ShareTransactionsConsent(BaseModel):
@@ -469,4 +496,5 @@ async def get_bank_transactions(
 
 
 if __name__ == "__main__":
+    _log_to_file()
     mcp.run()

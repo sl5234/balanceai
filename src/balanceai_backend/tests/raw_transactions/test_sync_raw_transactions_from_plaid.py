@@ -11,6 +11,7 @@ modules' module-level _default_conn after the fact would silently do nothing
 and these tests would otherwise hit the real data/balanceai.db.
 """
 
+import dataclasses
 import sqlite3
 from datetime import date
 from decimal import Decimal
@@ -23,8 +24,13 @@ from balanceai_backend.bank_link.plaid_sync_cursor_db import get_plaid_sync_curs
 from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import create_schema
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
+from balanceai_backend.models.journal import JournalAccount
 from balanceai_backend.models.plaid_item import PlaidItem
-from balanceai_backend.raw_transactions.raw_transaction_db import find_raw_transactions
+from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy
+from balanceai_backend.raw_transactions.raw_transaction_db import (
+    find_raw_transactions,
+    update_raw_transaction_classification,
+)
 from balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid import (
     sync_raw_transactions_from_plaid,
 )
@@ -296,6 +302,78 @@ class TestSyncTransactions:
 
         second_call_request = mock_client.transactions_sync.call_args_list[1][0][0]
         assert second_call_request.cursor == "cursor-A"
+
+
+def _sync_one_page(db, **page):
+    """Run a sync against a single Plaid page with the given added/modified/removed."""
+    mock_client = MagicMock()
+    mock_client.transactions_sync.return_value = SimpleNamespace(
+        **{"added": [], "modified": [], "removed": [], **page},
+        next_cursor="cursor",
+        has_more=False,
+    )
+    with patch(
+        "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+        return_value=mock_client,
+    ):
+        sync_raw_transactions_from_plaid("item-1", conn=db)
+
+
+class TestModifiedTransactionClassification:
+    @staticmethod
+    def _classification(classified_by: ClassifiedBy) -> Classification:
+        return Classification(
+            counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+            category="dining",
+            counterparty="Starbucks",
+            classified_by=classified_by,
+        )
+
+    def test_modified_amount_keeps_and_flags_a_users_classification(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn(amount=4.50)])
+        update_raw_transaction_classification(
+            "txn-1", self._classification(ClassifiedBy.USER), conn=db
+        )
+
+        _sync_one_page(db, modified=[_plaid_txn(amount=5.25)])
+
+        [txn] = find_raw_transactions(conn=db)
+        assert txn.amount == Decimal("-5.25")
+        assert txn.classification == dataclasses.replace(
+            self._classification(ClassifiedBy.USER), needs_user_review=True
+        )
+
+    def test_modified_amount_clears_the_ais_classification(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn(amount=4.50)])
+        update_raw_transaction_classification(
+            "txn-1", self._classification(ClassifiedBy.AI), conn=db
+        )
+
+        _sync_one_page(db, modified=[_plaid_txn(amount=5.25)])
+
+        [txn] = find_raw_transactions(conn=db)
+        assert txn.classification is None
+
+
+class TestPlaidCategoryDetails:
+    def test_saves_detailed_category_and_confidence(self, db, linked_item):
+        pfc = SimpleNamespace(
+            primary="FOOD_AND_DRINK", detailed="FOOD_AND_DRINK_COFFEE", confidence_level="LOW"
+        )
+        _sync_one_page(db, added=[_plaid_txn(personal_finance_category=pfc)])
+
+        [txn] = find_raw_transactions(conn=db)
+        assert txn.category == "FOOD_AND_DRINK"
+        assert txn.category_detailed == "FOOD_AND_DRINK_COFFEE"
+        assert txn.category_confidence == "LOW"
+
+    def test_no_plaid_category_leaves_all_three_empty(self, db, linked_item):
+        plaid_txn = _plaid_txn()
+        del plaid_txn.personal_finance_category  # unset, as Plaid's SDK model would have it
+        _sync_one_page(db, added=[plaid_txn])
+
+        [txn] = find_raw_transactions(conn=db)
+        assert (txn.category, txn.category_detailed, txn.category_confidence) == (None, None, None)
 
 
 class TestSyncBankAccounts:
