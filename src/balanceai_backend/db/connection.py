@@ -18,7 +18,7 @@ def create_schema(connection: sqlite3.Connection) -> None:
         );
 
         CREATE TABLE IF NOT EXISTS journal_entries (
-            journal_entry_id  TEXT PRIMARY KEY,
+            journal_line_id   TEXT PRIMARY KEY,
             journal_id        TEXT NOT NULL REFERENCES journals(journal_id) ON DELETE CASCADE,
             date              TEXT NOT NULL,
             account           TEXT NOT NULL,
@@ -27,7 +27,10 @@ def create_schema(connection: sqlite3.Connection) -> None:
             credit            REAL NOT NULL,
             category          TEXT,
             tax               REAL NOT NULL DEFAULT 0,
-            recipient         TEXT
+            recipient         TEXT,
+            raw_transaction_id  TEXT,
+            bank_account_id     TEXT,
+            journal_entry_id    TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_entries_journal_id ON journal_entries(journal_id);
@@ -35,6 +38,14 @@ def create_schema(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_entries_category   ON journal_entries(category);
         CREATE INDEX IF NOT EXISTS idx_entries_account    ON journal_entries(account);
         CREATE INDEX IF NOT EXISTS idx_entries_recipient  ON journal_entries(recipient);
+
+        -- Which bank accounts' transactions belong in which journal. UNIQUE keeps
+        -- each bank account in at most one journal for now.
+        CREATE TABLE IF NOT EXISTS journal_bank_accounts (
+            journal_id       TEXT NOT NULL REFERENCES journals(journal_id) ON DELETE CASCADE,
+            bank_account_id  TEXT NOT NULL UNIQUE REFERENCES bank_accounts(id),
+            PRIMARY KEY (journal_id, bank_account_id)
+        );
 
         CREATE TABLE IF NOT EXISTS report_definitions (
             report_definition_id  TEXT PRIMARY KEY,
@@ -123,6 +134,17 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         # The source's finer category and its confidence (Plaid's personal_finance_category)
         "ALTER TABLE raw_transactions ADD COLUMN category_detailed TEXT",
         "ALTER TABLE raw_transactions ADD COLUMN category_confidence TEXT",
+        # Where a journal entry line came from, when generated from a raw transaction
+        "ALTER TABLE journal_entries ADD COLUMN raw_transaction_id TEXT",
+        "ALTER TABLE journal_entries ADD COLUMN bank_account_id TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_entries_raw_txn ON journal_entries(raw_transaction_id)",
+        # A row is a line of a journal entry
+        "ALTER TABLE journal_entries RENAME COLUMN journal_entry_id TO journal_line_id",
+        # The journal entry a line belongs to
+        "ALTER TABLE journal_entries RENAME COLUMN entry_id TO journal_entry_id",
+        "ALTER TABLE journal_entries ADD COLUMN journal_entry_id TEXT",
+        "DROP INDEX IF EXISTS idx_entries_entry_id",
+        "CREATE INDEX IF NOT EXISTS idx_entries_journal_entry_id ON journal_entries(journal_entry_id)",
     ]
     for sql in migrations:
         try:

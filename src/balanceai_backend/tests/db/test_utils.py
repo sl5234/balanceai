@@ -88,7 +88,7 @@ def db_with_entries():
     connection = sqlite3.connect(":memory:")
     connection.execute("""
         CREATE TABLE journal_entries (
-            journal_entry_id TEXT PRIMARY KEY,
+            journal_line_id TEXT PRIMARY KEY,
             date TEXT,
             account TEXT,
             category TEXT,

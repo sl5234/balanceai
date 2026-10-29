@@ -43,7 +43,7 @@ from balanceai_backend.servers.bookkeeping_server import analyze_financial_quest
 # ---------------------------------------------------------------------------
 
 _JOURNAL_ENTRIES = [
-    # (journal_entry_id, journal_id, date, account, description, debit, credit, category, tax, recipient)
+    # (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient)
     # Salary income $5,000 — Oct 01
     (
         "e01",
@@ -223,7 +223,7 @@ def _make_synthetic_db() -> sqlite3.Connection:
         ("j1", "October 2025 Journal", "", "2025-10-01T00:00:00+00:00"),
     )
     conn.executemany(
-        "INSERT INTO journal_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         _JOURNAL_ENTRIES,
     )
     conn.commit()

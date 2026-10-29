@@ -21,7 +21,7 @@ def get_schema_summary(connection: sqlite3.Connection) -> str:
 
     Example output:
         journals(journal_id TEXT, account_id TEXT, ...)
-        journal_entries(journal_entry_id TEXT, journal_id TEXT, ...)
+        journal_entries(journal_line_id TEXT, journal_id TEXT, ...)
     """
     tables = [
         row[0]

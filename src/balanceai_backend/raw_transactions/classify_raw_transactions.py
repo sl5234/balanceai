@@ -347,7 +347,8 @@ def _save_classification_to_all(
 ) -> int:
     """Save the same classification on each transaction in a group, as set by
     the AI — even when copied from the user's, since the user classified that
-    transaction, not these."""
+    transaction, not these. Flagged for review when it has no category: the AI
+    couldn't tell what the money was for, so its counter account is a guess."""
     for txn in group:
         update_raw_transaction_classification(
             txn.id,
@@ -356,6 +357,7 @@ def _save_classification_to_all(
                 category=source.category,
                 counterparty=source.counterparty,
                 classified_by=ClassifiedBy.AI,
+                needs_user_review=source.category is None,
             ),
             conn=conn,
         )

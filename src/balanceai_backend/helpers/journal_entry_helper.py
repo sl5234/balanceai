@@ -40,8 +40,8 @@ def handle_sync_journal_entries_from_receipt(journal_id: str, input_local_path: 
         entry = entry_data.to_journal_entry()
         existing = finder_find_journal_entry(journal_id, entry)
         if existing is not None:
-            entry.journal_entry_id = existing.journal_entry_id
-            journal.remove_entry(existing.journal_entry_id)
+            entry.journal_line_id = existing.journal_line_id
+            journal.remove_entry(existing.journal_line_id)
         journal.add_entry(entry)
 
     db_update_journal(journal, conn)
@@ -62,14 +62,14 @@ def handle_sync_journal_entries_from_transactions(journal_id: str, transactions:
         entry = entry_data.to_journal_entry()
         existing = finder_find_journal_entry(journal_id, entry)
         if existing is not None:
-            entry.journal_entry_id = existing.journal_entry_id
-            journal.remove_entry(existing.journal_entry_id)
+            entry.journal_line_id = existing.journal_line_id
+            journal.remove_entry(existing.journal_line_id)
         journal.add_entry(entry)
 
     for entry_data in remove_entries:
         existing = finder_find_journal_entry(journal_id, entry_data.to_journal_entry())
         if existing is not None:
-            journal.remove_entry(existing.journal_entry_id)
+            journal.remove_entry(existing.journal_line_id)
 
     db_update_journal(journal, conn)
     return journal.to_dict()
@@ -128,8 +128,8 @@ def handle_sync_journal_entries_from_bank_statement(
             entry = entry_data.to_journal_entry()
             existing = finder_find_journal_entry(journal_id, entry)
             if existing is not None:
-                entry.journal_entry_id = existing.journal_entry_id
-                journal.remove_entry(existing.journal_entry_id)
+                entry.journal_line_id = existing.journal_line_id
+                journal.remove_entry(existing.journal_line_id)
             journal.add_entry(entry)
 
         db_update_journal(journal, conn)

@@ -153,7 +153,7 @@ class GeneratedJournalEntry(BaseModel):
 
     def to_journal_entry(self) -> "JournalEntry":
         return JournalEntry(
-            journal_entry_id=UniqueIdGenerator.generate_id(),
+            journal_line_id=UniqueIdGenerator.generate_id(),
             **self.model_dump(),
         )
 
@@ -187,14 +187,19 @@ class PlaidTransactionInputConfig(BaseModel):
 
 
 class JournalEntry(GeneratedJournalEntry):
-    journal_entry_id: str
+    journal_line_id: str
+    # The entry this line belongs to; an entry's lines share it.
+    journal_entry_id: str | None = None
+    # Where this line came from, when generated from a raw transaction.
+    raw_transaction_id: str | None = None
+    bank_account_id: str | None = None
 
     def __lt__(self, other: "JournalEntry") -> bool:
         return self.date < other.date
 
     def to_dict(self, redact: bool = False) -> dict:
         return {
-            "journal_entry_id": self.journal_entry_id,
+            "journal_line_id": self.journal_line_id,
             "date": self.date.isoformat(),
             "account": self.account.value,
             "description": None if redact else self.description,
@@ -203,12 +208,15 @@ class JournalEntry(GeneratedJournalEntry):
             "category": None if redact else self.category,
             "tax": str(self.tax),
             "recipient": None if redact else self.recipient,
+            "journal_entry_id": self.journal_entry_id,
+            "raw_transaction_id": self.raw_transaction_id,
+            "bank_account_id": self.bank_account_id,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "JournalEntry":
         return cls(
-            journal_entry_id=d["journal_entry_id"],
+            journal_line_id=d["journal_line_id"],
             date=datetime.date.fromisoformat(d["date"]),
             account=JournalAccount(d["account"]),
             description=d["description"],
@@ -217,6 +225,9 @@ class JournalEntry(GeneratedJournalEntry):
             category=d.get("category"),
             tax=Decimal(d.get("tax", "0")),
             recipient=d.get("recipient", RECIPIENT_SELF),
+            journal_entry_id=d.get("journal_entry_id"),
+            raw_transaction_id=d.get("raw_transaction_id"),
+            bank_account_id=d.get("bank_account_id"),
         )
 
 
@@ -231,6 +242,7 @@ class Journal:
     journal_id: str = field(default_factory=UniqueIdGenerator.generate_id)
     created_at: str = field(default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat())
     entries: list[JournalEntry] = field(default_factory=list)
+    bank_account_ids: list[str] = field(default_factory=list)  # whose transactions belong here
 
     def to_dict(self, redact_entries: bool = False) -> dict:
         return {
@@ -238,6 +250,7 @@ class Journal:
             "name": self.name,
             "description": self.description,
             "created_at": self.created_at,
+            "bank_account_ids": list(self.bank_account_ids),
             "entries": [] if redact_entries else [e.to_dict() for e in self.entries],
         }
 
@@ -245,10 +258,10 @@ class Journal:
         """Add a journal entry, maintaining sort order by date."""
         bisect.insort(self.entries, entry)
 
-    def remove_entry(self, journal_entry_id: str) -> JournalEntry | None:
-        """Remove a journal entry by its journal_entry_id. Returns the removed entry, or None if not found."""
+    def remove_entry(self, journal_line_id: str) -> JournalEntry | None:
+        """Remove a journal entry by its journal_line_id. Returns the removed entry, or None if not found."""
         for i, entry in enumerate(self.entries):
-            if entry.journal_entry_id == journal_entry_id:
+            if entry.journal_line_id == journal_line_id:
                 return self.entries.pop(i)
         return None
 
@@ -258,6 +271,7 @@ class Journal:
             name=d["name"],
             description=d.get("description", ""),
             entries=[JournalEntry.from_dict(e) for e in d.get("entries", [])],
+            bank_account_ids=list(d.get("bank_account_ids", [])),
         )
         if "journal_id" in d:
             journal.journal_id = d["journal_id"]

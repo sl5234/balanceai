@@ -62,3 +62,154 @@
 **Grounded facts:**
 - [verified] In the local sandbox data, 49 transactions have 14 distinct descriptions.
 - [verified] Plaid labels some transactions wrongly (Gusto payroll as TRANSFER_OUT), so the no-share categories are based on a label that can be wrong.
+
+## #5 — 2026-10-26 — Two raw transactions are the two sides of one transfer only under a strict rule
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #2, #6, #7, #12
+
+**Short description:** Two raw transactions match as one transfer when they're on different bank accounts, have the same amount with opposite signs, are within 5 days, and each one's counter account equals the other's bank-side account. No AI call. Why: the last check means the two classifications independently agree this is a transfer between these two kinds of account, so unrelated transactions that share an amount never match. Cost: a side the AI misclassified doesn't match, so that transfer is counted twice in balances until corrected.
+**Short example:** Checking -900 (counter credit_card_payable) and the card +900 (counter cash) a day later match; a -900 purchase and a +900 paycheck never do.
+
+**Grounded facts:**
+- [verified] The AI classified the card side of a card payment wrongly before the prompt fix, so a classification can be wrong on one side.
+- [unverified] Transfers between banks usually land within 1–3 business days.
+
+## #6 — 2026-10-26 — Matching on amount and dates alone, without the counter-account check
+
+**Category:** system (technical)
+**Status:** rejected
+**One-way door:** no
+**Related:** #5
+
+**Short description:** Match any two transfer-type transactions with opposite amounts within 5 days, without checking that their counter accounts point at each other. Rejected: a wrong match is harder to spot and undo than a missed one.
+**Short example:** Two unrelated $1,000 movements in the same week would match.
+
+**Grounded facts:**
+- [unverified] Wrongly matched transfers are harder for a user to notice than unmatched ones.
+
+## #7 — 2026-10-26 — A matched transfer is booked as one entry of the two bank-side lines
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #5, #8
+
+**Short description:** A matched transfer books only each side's bank-side line, each keeping its own date and bank account; both counter lines are dropped. An entry's lines share an entry id. Why: the transfer appears once, so totals per account are exact. Cost: for the days in between, the money looks in transit (it has left one account but not yet reached the other).
+**Short example:** Pay the card $900 from checking: credit cash (checking) 900 on 10/20, debit credit_card_payable (card) 900 on 10/21.
+
+**Grounded facts:**
+- [verified] Converting each side separately gives four lines, counting the payment twice in both cash and credit_card_payable.
+
+## #8 — 2026-10-26 — Keep all four lines of a matched transfer
+
+**Category:** system (technical)
+**Status:** rejected
+**One-way door:** no
+**Related:** #7
+
+**Short description:** Book both sides of a transfer as separate two-line entries. Rejected: account totals double the transfer (cash and the card's debt each move by twice the payment).
+**Short example:** A $900 card payment would lower cash by $1,800.
+
+**Grounded facts:**
+- [verified] Spending and income are unaffected by the extra lines; only balances are.
+
+## #9 — 2026-10-26 — A transfer with no visible other side is booked as cash to an unknown account
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #2, #5, #10, #11
+
+**Short description:** A transfer with no partner (the other account isn't linked, or a match is ambiguous) is booked from its one transaction as usual, but its counter line has no bank account: money moved to or from an account we don't track. A payment to an unlinked card stays credit_card_payable. Why: the linked account's balance matches its bank and total cash stays right, since the money is still yours. Cost: an unlinked card's purchases are never seen, so its payable can go negative and spending is understated until the card is linked. Transfers between journals are deferred until business journals are supported.
+**Short example:** Chase -2,000 to an unlinked Ally account: debit cash (unknown) 2,000, credit cash (Chase) 2,000.
+
+**Grounded facts:**
+- [verified] Tagging both lines with the transaction's own bank account makes them cancel, leaving that account's balance unchanged.
+- [verified] The business account list exists but nothing uses it yet.
+
+## #10 — 2026-10-26 — Book a payment to an unlinked card as spending
+
+**Category:** system (technical)
+**Status:** rejected
+**One-way door:** no
+**Related:** #9
+
+**Short description:** Treat a payment to an unlinked card as an expense so spending roughly includes that card. Rejected: once the card is linked its purchases arrive too, and spending double counts.
+**Short example:** A $900 Amex payment as non_essential_expense, then $900 of Amex purchases after linking: $1,800 of spending.
+
+**Grounded facts:**
+- [unverified] Users link more of their accounts over time.
+
+## #11 — 2026-10-26 — A separate account for money leaving a journal
+
+**Category:** system (technical)
+**Status:** rejected
+**One-way door:** no
+**Related:** #9
+
+**Short description:** Book transfers to an account outside the journal against a new equity account (journal_transfer) instead of cash. Rejected: in real books, money in your own untracked account is still your cash, and an untracked bank account on the counter line already keeps balances right.
+**Short example:** Chase -2,000 to Ally would have reduced total cash by 2,000.
+
+**Grounded facts:**
+- [verified] In double entry, a move between two of your own bank accounts is cash to cash.
+
+## #12 — 2026-10-26 — Among several matches, the closest date wins; a true tie isn't matched
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #5, #9
+
+**Short description:** Each transaction matches at most once, with the candidate closest in date. When two candidates on different bank accounts are equally close, none of them match; they're booked unmatched and flagged. Why: a wrong pick between identical candidates changes nothing, but between different accounts it misstates both balances. Cost: a true tie needs the user to resolve it.
+**Short example:** Checking -1,000 on 10/1, and two savings accounts each +1,000 on 10/2: all three are booked unmatched.
+
+**Grounded facts:**
+- [verified] Booked unmatched, totals and each linked account's balance stay right.
+
+## #13 — 2026-10-26 — Book transfers right away and rebook when the other side arrives
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #7, #9
+
+**Short description:** A transfer is booked unmatched as soon as it's classified. When its partner arrives later, the unmatched entry is replaced by the matched one; when a side is removed or reclassified, the matched entry is replaced by unmatched ones. Why: the books are complete at all times, and entries are generated by rule so replacing them is safe. Cost: entries change after they first appear.
+**Short example:** Chase syncs Monday (booked to cash, unknown); Ally syncs Thursday (replaced by one matched entry).
+
+**Grounded facts:**
+- [verified] Users never edit journal entries (#2), so nothing user-made is lost when one is replaced.
+
+## #14 — 2026-10-26 — Hold transfers unbooked until their other side arrives
+
+**Category:** system (technical)
+**Status:** rejected
+**One-way door:** no
+**Related:** #13
+
+**Short description:** Leave a transfer out of the books for up to 5 days waiting for its partner, then book it matched or unmatched. Rejected: balances are wrong while it waits, it needs a later run to finish, and results depend on the date the run happens.
+**Short example:** Chase would be off by $1,000 from Monday until Ally syncs.
+
+**Grounded facts:**
+- [verified] Booking runs only when a sync runs, so a waiting transfer could stay out for as long as the user doesn't sync.
+
+## #15 — 2026-10-27 — Match only unmatched transactions
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #12, #13, #16
+
+**Short description:** Matching looks only at unmatched transactions; booked matched transfers are left alone. Why: they stay stable. Cost: a late-classified transaction that would have tied doesn't undo the match.
+**Short example:** Checking −1,000 matches savings +1,000; Ally +1,000 is classified a day later and is booked unmatched.
+
+## #16 — 2026-10-27 — Re-match everything in the window
+
+**Category:** system (technical)
+**Status:** deprioritized
+**One-way door:** no
+**Related:** #15
+
+**Short description:** Re-run matching over booked matched transfers too, so the result doesn't depend on arrival order. Deprioritized: it's rare, and it changes entries the user has already seen. A TODO marks the spot in the booking code.

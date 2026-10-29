@@ -64,8 +64,8 @@ class TestToJournalEntry:
         entry = base_entry.model_copy(update={"tax": Decimal("2.25")})
         assert entry.to_journal_entry().tax == Decimal("2.25")
 
-    def test_generates_nonempty_journal_entry_id(self, base_entry):
-        assert base_entry.to_journal_entry().journal_entry_id != ""
+    def test_generates_nonempty_journal_line_id(self, base_entry):
+        assert base_entry.to_journal_entry().journal_line_id != ""
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ class TestToJournalEntry:
 @pytest.fixture
 def journal_entry():
     return JournalEntry(
-        journal_entry_id="entry-1",
+        journal_line_id="entry-1",
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Haircut at Rudy's.",
@@ -111,7 +111,7 @@ class TestJournalEntryToDict:
 @pytest.fixture
 def entry_dict():
     return {
-        "journal_entry_id": "entry-1",
+        "journal_line_id": "entry-1",
         "date": "2026-01-25",
         "account": "non_essential_expense",
         "description": "Haircut at Rudy's.",

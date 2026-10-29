@@ -11,7 +11,7 @@ from balanceai_backend.models.journal import JournalAccount, JournalEntry
 @pytest.fixture
 def candidate():
     return JournalEntry(
-        journal_entry_id="candidate-1",
+        journal_line_id="candidate-1",
         date=datetime.date(2026, 1, 27),
         account=JournalAccount.CASH,
         description="Trader Joe's purchase",
@@ -23,7 +23,7 @@ def candidate():
 @pytest.fixture
 def existing():
     return JournalEntry(
-        journal_entry_id="existing-1",
+        journal_line_id="existing-1",
         date=datetime.date(2026, 1, 27),
         account=JournalAccount.CASH,
         description="TRADER JOES #132",
@@ -32,8 +32,8 @@ def existing():
     )
 
 
-def _llm_response(match: bool, journal_entry_id: str | None) -> str:
-    return json.dumps({"match": match, "journal_entry_id": journal_entry_id})
+def _llm_response(match: bool, journal_line_id: str | None) -> str:
+    return json.dumps({"match": match, "journal_line_id": journal_line_id})
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ class TestFindJournalEntryNoLlm:
 
     def test_returns_none_when_no_entries_match_account(self, candidate):
         different_account_entry = JournalEntry(
-            journal_entry_id="other-1",
+            journal_line_id="other-1",
             date=candidate.date,
             account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Some equipment",
@@ -85,7 +85,7 @@ class TestFindJournalEntryWithLlm:
             ),
             patch("balanceai_backend.services.anthropic.messages") as mock_llm,
         ):
-            mock_llm.return_value = _llm_response(True, existing.journal_entry_id)
+            mock_llm.return_value = _llm_response(True, existing.journal_line_id)
             result = find_journal_entry("journal-1", candidate)
         assert result is existing
 
@@ -124,7 +124,7 @@ class TestFindJournalEntryWithLlm:
         assert mock_llm.call_args.kwargs["temperature"] == 0.0
 
     def test_llm_response_with_code_fences_is_handled(self, candidate, existing):
-        fenced = f"```json\n{_llm_response(True, existing.journal_entry_id)}\n```"
+        fenced = f"```json\n{_llm_response(True, existing.journal_line_id)}\n```"
         with (
             patch(
                 "balanceai_backend.journals.finder.find_journal_entries", return_value=[existing]
@@ -137,7 +137,7 @@ class TestFindJournalEntryWithLlm:
 
     def test_llm_response_with_trailing_text_is_handled(self, candidate, existing):
         trailing = (
-            f"{_llm_response(True, existing.journal_entry_id)}\nSome explanation from the model."
+            f"{_llm_response(True, existing.journal_line_id)}\nSome explanation from the model."
         )
         with (
             patch(

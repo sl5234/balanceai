@@ -47,7 +47,7 @@ def entry_data():
 @pytest.fixture
 def existing_entry():
     return JournalEntry(
-        journal_entry_id="original-id",
+        journal_line_id="original-id",
         date=datetime.date(2026, 1, 27),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Old description",
@@ -132,9 +132,9 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
         ):
             result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
-        entry_id = result["entries"][0]["journal_entry_id"]
-        assert entry_id is not None
-        assert entry_id != ""
+        line_id = result["entries"][0]["journal_line_id"]
+        assert line_id is not None
+        assert line_id != ""
 
     def test_updates_existing_entry_preserving_id(self, receipt_path, ocr_result, existing_entry):
         journal = Journal(
@@ -166,7 +166,7 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
             for e in result["entries"]
             if e["account"] == JournalAccount.NON_ESSENTIALS_EXPENSE.value
         )
-        assert expense["journal_entry_id"] == "original-id"
+        assert expense["journal_line_id"] == "original-id"
         assert expense["description"] == "Grocery purchase at Trader Joe's"
         assert expense["debit"] == "32.02"
 
@@ -359,7 +359,7 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
             result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
         assert len(result["entries"]) == 1
-        assert result["entries"][0]["journal_entry_id"] == "original-id"
+        assert result["entries"][0]["journal_line_id"] == "original-id"
         assert result["entries"][0]["description"] == "Grocery purchase at Trader Joe's"
         assert result["entries"][0]["debit"] == "32.02"
 
@@ -418,7 +418,7 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
             result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
         assert len(result["entries"]) == 1
-        assert result["entries"][0]["journal_entry_id"] == existing_entry.journal_entry_id
+        assert result["entries"][0]["journal_line_id"] == existing_entry.journal_line_id
 
     def test_empty_transactions_leaves_journal_unchanged(self, empty_journal):
         grouped = {"upsert": [], "remove": []}
@@ -587,7 +587,7 @@ def cash_entry_data():
 @pytest.fixture
 def bank_statement_existing_entry():
     return JournalEntry(
-        journal_entry_id="original-id",
+        journal_line_id="original-id",
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Old description",
@@ -675,7 +675,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             )
 
         assert len(result["entries"]) == 1
-        assert result["entries"][0]["journal_entry_id"] == "original-id"
+        assert result["entries"][0]["journal_line_id"] == "original-id"
         assert result["entries"][0]["description"] == "Lyft ride purchase."
         assert result["entries"][0]["debit"] == "12.00"
 

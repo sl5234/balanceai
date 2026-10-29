@@ -27,8 +27,8 @@ from balanceai_backend.helpers.plaid_helper import save_linked_plaid_item
 from balanceai_backend.models import Account, AccountType, Bank, Category, Transaction
 from balanceai_backend.parsers import get_parser
 from balanceai_backend.prompts.categorizer import build_categorization_prompt
-from balanceai_backend.raw_transactions.classify_raw_transactions import (
-    classify_raw_transactions,
+from balanceai_backend.raw_transactions.process_raw_transactions import (
+    classify_and_book_raw_transactions,
 )
 from balanceai_backend.raw_transactions.raw_transaction_db import (
     find_raw_transactions as db_find_raw_transactions,
@@ -63,8 +63,7 @@ def _log_to_file() -> None:
 
 # TODO: the "after sync_bank_transactions" guideline below is a stopgap for a skill
 # that runs link bank -> sync transactions -> journal -> journal entries end to
-# end (docs/BACKLOGS.md BL-6). Extend it to ask which accounts to include and to
-# kick off the journal entry sync once that tool exists.
+# end (docs/BACKLOGS.md BL-6). Extend it to ask which accounts to include.
 mcp = FastMCP(
     "balanceai_link_bank",
     instructions="""
@@ -81,13 +80,17 @@ mcp = FastMCP(
       browser after calling it. The Plaid access token is never returned by any tool.
     - get_bank_transactions asks the user to approve sharing transaction data before
       returning it. If the user declines, do not retry unless they ask you to.
-    - After sync_bank_transactions adds transactions, ask the user which journal (set
-      of books) they belong in. Call the bookkeeping server's list_journals first:
-      offer the existing journals, or creating a new one — suggest the name
-      "Personal" if there are none. Create a new journal with the bookkeeping
-      server's create_journal only once the user has confirmed its name. Turning
-      the synced transactions into journal entries is not available yet — say so
-      rather than attempting it.
+    - After sync_bank_transactions, check whether the synced bank's accounts are in a
+      journal (set of books): call the bookkeeping server's list_journals and look at
+      each journal's bank_account_ids. For accounts in no journal, ask the user which
+      journal they belong in, or whether to leave any out. Offer the existing
+      journals, or creating a new one — suggest the name "Personal" if there are
+      none. Create a journal (create_journal) only once the user has confirmed its
+      name, and add accounts with create_journal or update_journal's
+      bank_account_ids — update_journal replaces the whole list, so include the
+      accounts already there. Transactions in a journal's accounts are booked
+      automatically, on every sync and when accounts are added with create_journal
+      or update_journal.
     """,
 )
 
@@ -416,7 +419,8 @@ def list_bank_accounts(item_id: str | None = None) -> list[dict]:
 def sync_bank_transactions(item_id: str | None = None) -> dict:
     """
     Pull the latest transaction changes for a linked bank via Plaid's /transactions/sync,
-    then classify that bank's transactions that aren't classified yet.
+    classify that bank's transactions that aren't classified yet, then book every
+    journal holding one of its accounts.
     The access token never leaves the server — pass the item_id from list_linked_banks.
 
     Args:
@@ -427,9 +431,11 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
     Returns:
         dict with transaction counts {"added", "modified", "removed"} plus
         "bank_accounts": {"saved", "skipped"} — the bank accounts created/updated
-        from the item first — and "classification": {"classified",
-        "unclassified", "errors"}. Classification problems are reported there
-        rather than raised; the pulled transactions are saved either way.
+        from the item first — "classification": {"classified",
+        "unclassified", "errors"}, and "booking": {journal_id: {"booked",
+        "matched"} or {"error"}}. Classification and booking problems are
+        reported there rather than raised; the pulled transactions are saved
+        either way.
 
     Raises:
         ValueError: if a transaction belongs to a Plaid account that has no bank
@@ -443,10 +449,10 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
             raise ValueError("Multiple banks are linked — specify item_id (see list_linked_banks).")
         item_id = items[0].item_id
     result = sync_raw_transactions_from_plaid(item_id)
-    # TODO: classifying here makes a first sync with a lot of history one long
+    # TODO: classifying and booking here makes a first sync with a lot of history one long
     # tool call. Move it to event-driven syncing or a workflow engine.
     # See docs/BACKLOGS.md BL-7.
-    result["classification"] = classify_raw_transactions(item_id)
+    result.update(classify_and_book_raw_transactions(item_id))
     return result
 
 

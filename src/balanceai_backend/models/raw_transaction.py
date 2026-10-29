@@ -23,9 +23,10 @@ class Classification:
     classified_by: who set this. A classification set by the user is never
     replaced by the AI.
 
-    needs_user_review: the source changed something about the transaction
-    after the user classified it, so the user should check it still holds.
-    Cleared when the classification is set again.
+    needs_user_review: a person should check this classification — the source
+    changed the transaction after the user classified it, or the AI couldn't
+    tell what it was for (no category). Cleared when the classification is
+    set again.
     """
 
     counter_account: JournalAccount
