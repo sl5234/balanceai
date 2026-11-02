@@ -12,7 +12,8 @@ import sqlite3
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from pydantic import BaseModel
 
 from balanceai_backend.config import settings
 from balanceai_backend.dagger.aws import AWSClients
@@ -327,10 +328,19 @@ def sync_journal_entries_from_bank_statement(
 # TODO: Add a tool that identifies a payment that needs to be made.  And proactively check debit account for sufficient funds.  And notifies.
 
 
+class ShareJournalEntriesConsent(BaseModel):
+    """Empty schema: the prompt is a plain accept/decline."""
+
+
 @mcp.tool()
-def list_journal_entries(journal_id: str, date: date | None = None) -> list[dict]:
+async def list_journal_entries(
+    ctx: Context, journal_id: str, date: date | None = None
+) -> list[dict]:
     """
     List a journal's entries, optionally only those with a line on a date.
+
+    Entries are private, so the user is asked to approve sharing them before
+    any are returned.
 
     Args:
         journal_id: The journal ID to retrieve entries for
@@ -340,12 +350,29 @@ def list_journal_entries(journal_id: str, date: date | None = None) -> list[dict
         List of entries in date order, each {"journal_entry_id", "date",
         "lines": [...]}. "date" is its earliest line's. A line written by the
         old entry tools has no journal_entry_id, so it's listed as its own entry.
+
+    Raises:
+        PermissionError: if the user declines or cancels the approval prompt.
     """
     lines = db_find_journal_lines(journal_id, conn=conn)
     entries = _group_into_entries(lines)
     if date is not None:
         entries = [e for e in entries if any(line.date == date for line in e)]
+    if not entries:
+        return []
+
+    result = await ctx.elicit(
+        message=f"Share {len(entries)} journal entries ({_date_range(entries)}) with the assistant?",
+        schema=ShareJournalEntriesConsent,
+    )
+    if result.action != "accept":
+        raise PermissionError("User declined to share journal entries.")
     return [_entry_to_dict(e) for e in entries]
+
+
+def _date_range(entries: list[list[JournalLine]]) -> str:
+    dates = [line.date for lines in entries for line in lines]
+    return f"{min(dates).isoformat()} to {max(dates).isoformat()}"
 
 
 def _group_into_entries(lines: list[JournalLine]) -> list[list[JournalLine]]:

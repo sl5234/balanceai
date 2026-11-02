@@ -5,6 +5,10 @@ This document lists all commands for building, linting, formatting, and testing 
 
 **All commands below are run from within this directory (`src/balanceai_backend/`).**
 
+Secrets and local data live in `src/balanceai_backend_secrets/` (git-ignored), outside
+this package so tools that scan it never touch them: `.env` (copy `.env.example`) and
+`data/` (the SQLite database). Tests use a temp data folder and no `.env`.
+
 ## Setup
 
 ```bash

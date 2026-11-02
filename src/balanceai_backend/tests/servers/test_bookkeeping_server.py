@@ -1,7 +1,8 @@
+import asyncio
 import datetime
 import sqlite3
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from balanceai_backend.db.bank_account_db import upsert_bank_account
@@ -18,12 +19,18 @@ from balanceai_backend.models.journal import (
 from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
 from balanceai_backend.raw_transactions.raw_transaction_db import upsert_raw_transaction
 from balanceai_backend.servers.bookkeeping_server import (
+    ShareJournalEntriesConsent,
     create_journal,
     delete_journal,
     list_journal_entries,
     list_journals,
     sync_journal_entries_from_receipt,
     update_journal,
+)
+from mcp.server.elicitation import (
+    AcceptedElicitation,
+    CancelledElicitation,
+    DeclinedElicitation,
 )
 
 
@@ -69,12 +76,78 @@ def journal_with_entries(sample_entry, sample_entry_2):
     )
 
 
+def _make_ctx(elicit_result) -> MagicMock:
+    ctx = MagicMock()
+    ctx.elicit = AsyncMock(return_value=elicit_result)
+    return ctx
+
+
+def _list(journal_id: str, ctx: MagicMock | None = None, **kwargs) -> list[dict]:
+    """Call list_journal_entries; the user approves sharing unless ctx says otherwise."""
+    ctx = ctx or _make_ctx(AcceptedElicitation(data=ShareJournalEntriesConsent()))
+    return asyncio.run(list_journal_entries(ctx, journal_id, **kwargs))
+
+
+class TestListJournalEntriesConsent:
+    def test_asks_before_returning_entries(self, sample_entry, sample_entry_2):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareJournalEntriesConsent()))
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
+            return_value=[sample_entry, sample_entry_2],
+        ):
+            result = _list("journal-1", ctx=ctx)
+
+        ctx.elicit.assert_awaited_once()
+        message = ctx.elicit.await_args.kwargs["message"]
+        assert "2 journal entries" in message
+        assert "2026-01-27 to 2026-01-28" in message
+        assert len(result) == 2
+
+    @pytest.mark.parametrize(
+        "elicit_result",
+        [DeclinedElicitation(), CancelledElicitation()],
+        ids=["declined", "cancelled"],
+    )
+    def test_raises_and_returns_nothing_when_user_does_not_approve(
+        self, sample_entry, elicit_result
+    ):
+        with (
+            patch(
+                "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
+                return_value=[sample_entry],
+            ),
+            pytest.raises(PermissionError, match="declined"),
+        ):
+            _list("journal-1", ctx=_make_ctx(elicit_result))
+
+    def test_propagates_error_when_client_does_not_support_elicitation(self, sample_entry):
+        ctx = MagicMock()
+        ctx.elicit = AsyncMock(side_effect=RuntimeError("elicitation not supported"))
+        with (
+            patch(
+                "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
+                return_value=[sample_entry],
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            _list("journal-1", ctx=ctx)
+
+    def test_returns_empty_list_without_asking_when_no_entries(self):
+        ctx = _make_ctx(DeclinedElicitation())
+        with patch(
+            "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines", return_value=[]
+        ):
+            assert _list("journal-1", ctx=ctx) == []
+
+        ctx.elicit.assert_not_called()
+
+
 class TestListJournalEntries:
     def test_returns_empty_list_when_journal_has_no_entries(self):
         with patch(
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines", return_value=[]
         ):
-            result = list_journal_entries("journal-1")
+            result = _list("journal-1")
         assert result == []
 
     def test_returns_all_entries(self, sample_entry, sample_entry_2):
@@ -82,7 +155,7 @@ class TestListJournalEntries:
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
             return_value=[sample_entry, sample_entry_2],
         ):
-            result = list_journal_entries("journal-1")
+            result = _list("journal-1")
         assert len(result) == 2
 
     def test_returns_entries_in_order(self, sample_entry, sample_entry_2):
@@ -90,7 +163,7 @@ class TestListJournalEntries:
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
             return_value=[sample_entry, sample_entry_2],
         ):
-            result = list_journal_entries("journal-1")
+            result = _list("journal-1")
         assert result[0]["lines"][0]["journal_line_id"] == sample_entry.journal_line_id
         assert result[1]["lines"][0]["journal_line_id"] == sample_entry_2.journal_line_id
 
@@ -99,7 +172,7 @@ class TestListJournalEntries:
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
             return_value=[sample_entry, sample_entry_2],
         ):
-            result = list_journal_entries("journal-1")
+            result = _list("journal-1")
         for entry in result:
             assert isinstance(entry, dict)
 
@@ -108,7 +181,7 @@ class TestListJournalEntries:
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
             return_value=[sample_entry],
         ):
-            result = list_journal_entries("journal-1")
+            result = _list("journal-1")
         assert result[0]["date"] == sample_entry.date.isoformat()
         line = result[0]["lines"][0]
         assert line["journal_line_id"] == sample_entry.journal_line_id
@@ -122,7 +195,7 @@ class TestListJournalEntries:
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
             return_value=[sample_entry],
         ):
-            result = list_journal_entries("journal-1")
+            result = _list("journal-1")
         line = result[0]["lines"][0]
         assert line["tax"] == "0"
 
@@ -134,14 +207,14 @@ class TestListJournalEntries:
             ),
             pytest.raises(ValueError, match="journal-999"),
         ):
-            list_journal_entries("journal-999")
+            _list("journal-999")
 
     def test_filters_entries_by_date(self, sample_entry, sample_entry_2):
         with patch(
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
             return_value=[sample_entry, sample_entry_2],
         ):
-            result = list_journal_entries("journal-1", date=sample_entry.date)
+            result = _list("journal-1", date=sample_entry.date)
         assert [e["lines"][0]["journal_line_id"] for e in result] == [sample_entry.journal_line_id]
 
     def test_returns_empty_list_when_no_entries_match_date(self, sample_entry):
@@ -149,7 +222,7 @@ class TestListJournalEntries:
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
             return_value=[sample_entry],
         ):
-            result = list_journal_entries("journal-1", date=datetime.date(2020, 1, 1))
+            result = _list("journal-1", date=datetime.date(2020, 1, 1))
         assert result == []
 
     def test_lines_of_one_entry_are_grouped(self, sample_entry, sample_entry_2):
@@ -158,7 +231,7 @@ class TestListJournalEntries:
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
             return_value=[sample_entry, sample_entry_2],
         ):
-            result = list_journal_entries("journal-1")
+            result = _list("journal-1")
         assert len(result) == 1
         assert result[0]["journal_entry_id"] == "e-1"
         assert [line["journal_line_id"] for line in result[0]["lines"]] == ["entry-1", "entry-2"]
@@ -170,7 +243,7 @@ class TestListJournalEntries:
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
             return_value=[sample_entry, sample_entry_2],
         ):
-            result = list_journal_entries("journal-1", date=sample_entry_2.date)
+            result = _list("journal-1", date=sample_entry_2.date)
         assert len(result) == 1
         assert len(result[0]["lines"]) == 2
 
@@ -179,7 +252,7 @@ class TestListJournalEntries:
             "balanceai_backend.servers.bookkeeping_server.db_find_journal_lines",
             return_value=[sample_entry, sample_entry_2],
         ):
-            result = list_journal_entries("journal-1")
+            result = _list("journal-1")
         assert len(result) == 2
 
 

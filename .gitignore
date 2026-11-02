@@ -50,6 +50,7 @@ data/
 logs/
 
 # Secrets — never commit real env files
+src/balanceai_backend_secrets/
 .env
 .env.*
 !.env.example
