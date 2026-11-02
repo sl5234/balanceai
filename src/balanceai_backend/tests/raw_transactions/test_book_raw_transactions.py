@@ -10,7 +10,7 @@ from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import create_schema
 from balanceai_backend.db.journal_db import (
     find_booked_raw_transactions,
-    find_journal_entries,
+    find_journal_lines,
     save_journal,
 )
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
@@ -101,7 +101,7 @@ def _purchase(txn_id: str = "coffee", account_id: str = CHECKING) -> RawTransact
 def _entries(db, journal_id: str) -> dict[str, set[str]]:
     """Each entry's id mapped to the raw transactions on its lines."""
     entries: dict[str, set[str]] = {}
-    for line in find_journal_entries(journal_id, conn=db):
+    for line in find_journal_lines(journal_id, conn=db):
         entries.setdefault(line.journal_entry_id, set()).add(line.raw_transaction_id)
     return entries
 
@@ -116,7 +116,7 @@ class TestBookRawTransactions:
 
         assert book_raw_transactions(journal_id, db) == {"booked": 1, "matched": 0}
 
-        lines = find_journal_entries(journal_id, conn=db)
+        lines = find_journal_lines(journal_id, conn=db)
         assert [(e.account, e.debit, e.credit) for e in lines] == [
             (JournalAccount.CASH, Decimal(0), Decimal("4.33")),
             (JournalAccount.NON_ESSENTIALS_EXPENSE, Decimal("4.33"), Decimal(0)),
@@ -127,7 +127,7 @@ class TestBookRawTransactions:
         book_raw_transactions(journal_id, db)
 
         assert book_raw_transactions(journal_id, db) == {"booked": 0, "matched": 0}
-        assert len(find_journal_entries(journal_id, conn=db)) == 2
+        assert len(find_journal_lines(journal_id, conn=db)) == 2
 
     def test_skips_unclassified_and_other_accounts(self, db, journal_id):
         _add(
@@ -138,7 +138,7 @@ class TestBookRawTransactions:
         )
 
         assert book_raw_transactions(journal_id, db) == {"booked": 0, "matched": 0}
-        assert find_journal_entries(journal_id, conn=db) == []
+        assert find_journal_lines(journal_id, conn=db) == []
 
     def test_zero_amount_is_not_booked(self, db, journal_id):
         _add(db, _txn("zero", CHECKING, "0.00"))
@@ -186,7 +186,7 @@ class TestBookRawTransactions:
         assert find_booked_raw_transactions(journal_id, db) == {}
 
         assert book_raw_transactions(journal_id, db) == {"booked": 1, "matched": 0}
-        assert {e.date for e in find_journal_entries(journal_id, conn=db)} == {
+        assert {e.date for e in find_journal_lines(journal_id, conn=db)} == {
             datetime.date(2026, 10, 2)
         }
 

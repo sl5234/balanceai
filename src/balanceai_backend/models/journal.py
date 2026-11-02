@@ -63,8 +63,8 @@ class BusinessJournalAccount(str, Enum):
 RECIPIENT_SELF = "Self"
 
 
-class GeneratedJournalEntry(BaseModel):
-    """JournalEntry fields without the entry ID. Used as the output format for OCR extraction."""
+class GeneratedJournalLine(BaseModel):
+    """JournalLine fields without the entry ID. Used as the output format for OCR extraction."""
 
     date: datetime.date
     account: JournalAccount = Field(
@@ -151,15 +151,15 @@ class GeneratedJournalEntry(BaseModel):
         ),
     )
 
-    def to_journal_entry(self) -> "JournalEntry":
-        return JournalEntry(
+    def to_journal_line(self) -> "JournalLine":
+        return JournalLine(
             journal_line_id=UniqueIdGenerator.generate_id(),
             **self.model_dump(),
         )
 
 
 class GeneratedJournalEntrySet(BaseModel):
-    entries: list[GeneratedJournalEntry] = Field(
+    lines: list[GeneratedJournalLine] = Field(
         description=(
             "The journal entries for this transaction. "
             "Use double-entry bookkeeping: each transaction should have at least two entries "
@@ -169,8 +169,8 @@ class GeneratedJournalEntrySet(BaseModel):
 
     @model_validator(mode="after")
     def validate_balanced(self) -> "GeneratedJournalEntrySet":
-        total_debit = sum(e.debit for e in self.entries)
-        total_credit = sum(e.credit for e in self.entries)
+        total_debit = sum(e.debit for e in self.lines)
+        total_credit = sum(e.credit for e in self.lines)
         if total_debit != total_credit:
             raise ValueError(
                 f"Journal entries are not balanced: total debit {total_debit} != total credit {total_credit}"
@@ -186,7 +186,7 @@ class PlaidTransactionInputConfig(BaseModel):
     transactions: dict
 
 
-class JournalEntry(GeneratedJournalEntry):
+class JournalLine(GeneratedJournalLine):
     journal_line_id: str
     # The entry this line belongs to; an entry's lines share it.
     journal_entry_id: str | None = None
@@ -194,7 +194,7 @@ class JournalEntry(GeneratedJournalEntry):
     raw_transaction_id: str | None = None
     bank_account_id: str | None = None
 
-    def __lt__(self, other: "JournalEntry") -> bool:
+    def __lt__(self, other: "JournalLine") -> bool:
         return self.date < other.date
 
     def to_dict(self, redact: bool = False) -> dict:
@@ -214,7 +214,7 @@ class JournalEntry(GeneratedJournalEntry):
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "JournalEntry":
+    def from_dict(cls, d: dict) -> "JournalLine":
         return cls(
             journal_line_id=d["journal_line_id"],
             date=datetime.date.fromisoformat(d["date"]),
@@ -241,28 +241,28 @@ class Journal:
     description: str = ""
     journal_id: str = field(default_factory=UniqueIdGenerator.generate_id)
     created_at: str = field(default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat())
-    entries: list[JournalEntry] = field(default_factory=list)
+    lines: list[JournalLine] = field(default_factory=list)
     bank_account_ids: list[str] = field(default_factory=list)  # whose transactions belong here
 
-    def to_dict(self, redact_entries: bool = False) -> dict:
+    def to_dict(self, redact_lines: bool = False) -> dict:
         return {
             "journal_id": self.journal_id,
             "name": self.name,
             "description": self.description,
             "created_at": self.created_at,
             "bank_account_ids": list(self.bank_account_ids),
-            "entries": [] if redact_entries else [e.to_dict() for e in self.entries],
+            "lines": [] if redact_lines else [e.to_dict() for e in self.lines],
         }
 
-    def add_entry(self, entry: JournalEntry) -> None:
-        """Add a journal entry, maintaining sort order by date."""
-        bisect.insort(self.entries, entry)
+    def add_line(self, line: JournalLine) -> None:
+        """Add a journal line, maintaining sort order by date."""
+        bisect.insort(self.lines, line)
 
-    def remove_entry(self, journal_line_id: str) -> JournalEntry | None:
-        """Remove a journal entry by its journal_line_id. Returns the removed entry, or None if not found."""
-        for i, entry in enumerate(self.entries):
-            if entry.journal_line_id == journal_line_id:
-                return self.entries.pop(i)
+    def remove_line(self, journal_line_id: str) -> JournalLine | None:
+        """Remove a journal line by its journal_line_id. Returns the removed line, or None if not found."""
+        for i, line in enumerate(self.lines):
+            if line.journal_line_id == journal_line_id:
+                return self.lines.pop(i)
         return None
 
     @classmethod
@@ -270,7 +270,7 @@ class Journal:
         journal = cls(
             name=d["name"],
             description=d.get("description", ""),
-            entries=[JournalEntry.from_dict(e) for e in d.get("entries", [])],
+            lines=[JournalLine.from_dict(e) for e in d.get("lines", [])],
             bank_account_ids=list(d.get("bank_account_ids", [])),
         )
         if "journal_id" in d:

@@ -213,3 +213,13 @@
 **Related:** #15
 
 **Short description:** Re-run matching over booked matched transfers too, so the result doesn't depend on arrival order. Deprioritized: it's rare, and it changes entries the user has already seen. A TODO marks the spot in the booking code.
+
+## #17 — 2026-11-02 — Users don't edit entries; only booking writes them
+
+**Category:** product
+**Status:** accepted
+**One-way door:** no
+**Related:** #2
+
+**Short description:** Entries are written only by booking, from classifications. A user corrects a transaction's classification, never an entry. So `update_journal` takes no `entries`.
+**Short example:** Uber booked as `non_essential_expense`; the user changes the classification to `essential_expense`, and the entry is rebooked.

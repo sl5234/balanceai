@@ -2,9 +2,9 @@ import json
 import logging
 
 from balanceai_backend.db.connection import conn
-from balanceai_backend.db.journal_db import find_journal_entries
-from balanceai_backend.models.journal import JournalEntry
-from balanceai_backend.prompts.journal_entry_finder import SYSTEM_PROMPT
+from balanceai_backend.db.journal_db import find_journal_lines
+from balanceai_backend.models.journal import JournalLine
+from balanceai_backend.prompts.journal_line_finder import SYSTEM_PROMPT
 from balanceai_backend.utils.ocr_util import _extract_json
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 _MODEL_ID = "claude-haiku-4-5-20251001"
 
 
-def find_journal_entry(journal_id: str, candidate: JournalEntry) -> JournalEntry | None:
+def find_journal_line(journal_id: str, candidate: JournalLine) -> JournalLine | None:
     """
     Find an existing journal entry that matches the candidate.
 
@@ -24,9 +24,9 @@ def find_journal_entry(journal_id: str, candidate: JournalEntry) -> JournalEntry
         candidate: The entry to match against.
 
     Returns:
-        The matching JournalEntry if found, otherwise None.
+        The matching JournalLine if found, otherwise None.
     """
-    entries = find_journal_entries(journal_id, date=candidate.date, conn=conn)
+    entries = find_journal_lines(journal_id, date=candidate.date, conn=conn)
     entries = [e for e in entries if e.account == candidate.account]
 
     if not entries:

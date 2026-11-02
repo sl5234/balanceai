@@ -9,7 +9,7 @@ from balanceai_backend.db.utils import (
 
 _DOUBLE_ENTRY_SEMANTICS = """\
 Double-entry bookkeeping semantics — critical rules for correct queries:
-- Every transaction creates exactly TWO journal_entries (a debit leg and a credit leg).
+- Every transaction creates exactly TWO rows in journal_lines (a debit line and a credit line).
 - SPENDING: debit leg has recipient='Self'; credit leg has recipient=<merchant name>.
     To find spending at a merchant: WHERE je.account = 'cash' AND je.credit > 0 AND je.recipient = '<merchant>'
     To find all spending: WHERE je.account = 'cash' AND je.credit > 0 AND je.recipient != 'Self'
@@ -17,10 +17,10 @@ Double-entry bookkeeping semantics — critical rules for correct queries:
     To find income: WHERE je.account = 'income' AND je.debit > 0 AND je.recipient = 'Self'
 - NEVER filter by description to identify a merchant — both legs share the same description.
 - Always filter to ONE leg to avoid double-counting.
-- Column 'account' (bookkeeping type: 'cash', 'income', etc.) lives in journal_entries ONLY.
+- Column 'account' (bookkeeping type: 'cash', 'income', etc.) lives in journal_lines ONLY.
   The journals table has 'account_id' (bank account UUID) and 'account_type' — NOT 'account'.
 - When filtering by Account ID, JOIN journals j ON j.journal_id = je.journal_id and filter j.account_id = '<id>'.
-  Example: SELECT SUM(je.credit) FROM journal_entries je JOIN journals j ON je.journal_id = j.journal_id
+  Example: SELECT SUM(je.credit) FROM journal_lines je JOIN journals j ON je.journal_id = j.journal_id
            WHERE j.account_id = '<id>' AND je.account = 'cash' AND je.credit > 0 AND je.recipient != 'Self'
 Dates are ISO 8601 strings (e.g. '2025-10-22'). Monetary amounts (debit, credit) are in USD.
 """

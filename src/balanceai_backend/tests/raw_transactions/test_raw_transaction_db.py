@@ -16,7 +16,7 @@ from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.journal import Journal, JournalAccount
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
-from balanceai_backend.raw_transactions.generate_journal_entries import generate_journal_entries
+from balanceai_backend.raw_transactions.generate_journal_entry import generate_journal_entry
 from balanceai_backend.raw_transactions.raw_transaction_db import (
     delete_raw_transaction,
     find_raw_transactions,
@@ -367,7 +367,7 @@ class TestChangesDeleteTheEntry:
         [txn] = find_raw_transactions(conn=db)
         with db:
             add_journal_entry(
-                journal.journal_id, generate_journal_entries(txn, BankAccountType.CHECKING), db
+                journal.journal_id, generate_journal_entry(txn, BankAccountType.CHECKING), db
             )
         return journal.journal_id
 

@@ -1,4 +1,4 @@
-"""Tests for generate_journal_entries: a classified raw transaction -> two lines."""
+"""Tests for generate_journal_entry: a classified raw transaction -> two lines."""
 
 import datetime
 from decimal import Decimal
@@ -7,9 +7,9 @@ import pytest
 from balanceai_backend.models.bank_account import BankAccountType
 from balanceai_backend.models.journal import JournalAccount
 from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
-from balanceai_backend.raw_transactions.generate_journal_entries import (
+from balanceai_backend.raw_transactions.generate_journal_entry import (
     bank_side_account,
-    generate_journal_entries,
+    generate_journal_entry,
 )
 
 
@@ -58,11 +58,11 @@ class TestBankSideAccount:
         assert bank_side_account(account_type) == expected
 
 
-class TestGenerateJournalEntries:
+class TestGenerateJournalEntry:
     def test_money_out_of_checking(self):
         txn = _txn("-4.33", JournalAccount.NON_ESSENTIALS_EXPENSE)
 
-        entries = generate_journal_entries(txn, BankAccountType.CHECKING)
+        entries = generate_journal_entry(txn, BankAccountType.CHECKING)
 
         assert _lines(entries) == [
             (JournalAccount.CASH, Decimal(0), Decimal("4.33")),
@@ -72,7 +72,7 @@ class TestGenerateJournalEntries:
     def test_money_into_checking(self):
         txn = _txn("3200.00", JournalAccount.SALARY_INCOME, counterparty="Globex")
 
-        entries = generate_journal_entries(txn, BankAccountType.CHECKING)
+        entries = generate_journal_entry(txn, BankAccountType.CHECKING)
 
         assert _lines(entries) == [
             (JournalAccount.CASH, Decimal("3200.00"), Decimal(0)),
@@ -82,7 +82,7 @@ class TestGenerateJournalEntries:
     def test_refund_reduces_the_expense(self):
         txn = _txn("500.00", JournalAccount.NON_ESSENTIALS_EXPENSE, counterparty="United")
 
-        entries = generate_journal_entries(txn, BankAccountType.CHECKING)
+        entries = generate_journal_entry(txn, BankAccountType.CHECKING)
 
         assert _lines(entries) == [
             (JournalAccount.CASH, Decimal("500.00"), Decimal(0)),
@@ -92,7 +92,7 @@ class TestGenerateJournalEntries:
     def test_card_purchase_raises_what_you_owe(self):
         txn = _txn("-60.00", JournalAccount.NON_ESSENTIALS_EXPENSE)
 
-        entries = generate_journal_entries(txn, BankAccountType.CREDIT_CARD)
+        entries = generate_journal_entry(txn, BankAccountType.CREDIT_CARD)
 
         assert _lines(entries) == [
             (JournalAccount.CREDIT_CARD_PAYABLE, Decimal(0), Decimal("60.00")),
@@ -103,8 +103,8 @@ class TestGenerateJournalEntries:
         from_checking = _txn("-900.00", JournalAccount.CREDIT_CARD_PAYABLE, counterparty="Self")
         on_the_card = _txn("900.00", JournalAccount.CASH, counterparty="Self")
 
-        checking_lines = generate_journal_entries(from_checking, BankAccountType.CHECKING)
-        card_lines = generate_journal_entries(on_the_card, BankAccountType.CREDIT_CARD)
+        checking_lines = generate_journal_entry(from_checking, BankAccountType.CHECKING)
+        card_lines = generate_journal_entry(on_the_card, BankAccountType.CREDIT_CARD)
 
         # debit credit_card_payable, credit cash — either way round
         assert sorted(_lines(checking_lines)) == sorted(_lines(card_lines))
@@ -112,7 +112,7 @@ class TestGenerateJournalEntries:
     def test_loan_payment(self):
         txn = _txn("-1500.00", JournalAccount.LOANS_PAYABLE, counterparty="Mortgage Co")
 
-        entries = generate_journal_entries(txn, BankAccountType.CHECKING)
+        entries = generate_journal_entry(txn, BankAccountType.CHECKING)
 
         assert _lines(entries) == [
             (JournalAccount.CASH, Decimal(0), Decimal("1500.00")),
@@ -121,7 +121,7 @@ class TestGenerateJournalEntries:
 
     @pytest.mark.parametrize("amount", ["-4.33", "3200.00", "0.01"])
     def test_lines_always_balance(self, amount):
-        entries = generate_journal_entries(
+        entries = generate_journal_entry(
             _txn(amount, JournalAccount.OTHER_INCOME), BankAccountType.SAVINGS
         )
 
@@ -130,7 +130,7 @@ class TestGenerateJournalEntries:
     def test_both_lines_carry_the_transactions_details(self):
         txn = _txn("-4.33", JournalAccount.NON_ESSENTIALS_EXPENSE)
 
-        entries = generate_journal_entries(txn, BankAccountType.CHECKING)
+        entries = generate_journal_entry(txn, BankAccountType.CHECKING)
 
         for e in entries:
             assert e.date == datetime.date(2026, 9, 8)
@@ -142,10 +142,10 @@ class TestGenerateJournalEntries:
         assert entries[0].journal_line_id != entries[1].journal_line_id
 
     def test_both_lines_share_one_entry_id(self):
-        first = generate_journal_entries(
+        first = generate_journal_entry(
             _txn("-4.33", JournalAccount.NON_ESSENTIALS_EXPENSE), BankAccountType.CHECKING
         )
-        second = generate_journal_entries(
+        second = generate_journal_entry(
             _txn("-4.33", JournalAccount.NON_ESSENTIALS_EXPENSE), BankAccountType.CHECKING
         )
 
@@ -156,7 +156,7 @@ class TestGenerateJournalEntries:
     def test_only_the_bank_side_names_the_bank_account(self):
         txn = _txn("-2000.00", JournalAccount.CASH, counterparty="Self")
 
-        bank_side, counter = generate_journal_entries(txn, BankAccountType.CHECKING)
+        bank_side, counter = generate_journal_entry(txn, BankAccountType.CHECKING)
 
         assert bank_side.bank_account_id == "test_bank:checking:0000"
         assert counter.bank_account_id is None
@@ -164,18 +164,18 @@ class TestGenerateJournalEntries:
     def test_no_counterparty_uses_the_description(self):
         txn = _txn("-4.33", JournalAccount.NON_ESSENTIALS_EXPENSE, counterparty=None)
 
-        entries = generate_journal_entries(txn, BankAccountType.CHECKING)
+        entries = generate_journal_entry(txn, BankAccountType.CHECKING)
 
         assert {e.recipient for e in entries} == {"STARBUCKS #123"}
 
     def test_zero_amount_has_no_lines(self):
         txn = _txn("0.00", JournalAccount.NON_ESSENTIALS_EXPENSE)
 
-        assert generate_journal_entries(txn, BankAccountType.CHECKING) == []
+        assert generate_journal_entry(txn, BankAccountType.CHECKING) == []
 
     def test_unclassified_raises(self):
         txn = _txn("-4.33", JournalAccount.NON_ESSENTIALS_EXPENSE)
         txn.classification = None
 
         with pytest.raises(ValueError, match="txn-1 isn't classified"):
-            generate_journal_entries(txn, BankAccountType.CHECKING)
+            generate_journal_entry(txn, BankAccountType.CHECKING)

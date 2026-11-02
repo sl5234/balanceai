@@ -9,13 +9,13 @@ import pytest
 sys.modules.setdefault("tavily", MagicMock())
 
 from balanceai_backend.models.journal import (
-    GeneratedJournalEntry,
     GeneratedJournalEntrySet,
+    GeneratedJournalLine,
     JournalAccount,
 )
 from balanceai_backend.models.transaction import Transaction
 from balanceai_backend.utils.journal_entry_util import (
-    extract_journal_entries_from_bank_statement_transaction,
+    extract_journal_lines_from_bank_statement_transaction,
     generate_transaction_category,
 )
 
@@ -26,7 +26,7 @@ from balanceai_backend.utils.journal_entry_util import (
 
 @pytest.fixture
 def uncategorized_entry():
-    return GeneratedJournalEntry(
+    return GeneratedJournalLine(
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Uncategorized transaction from Rudy's.",
@@ -231,7 +231,7 @@ class TestGenerateTransactionCategory:
 
 
 # ---------------------------------------------------------------------------
-# extract_journal_entries_from_bank_statement_transaction
+# extract_journal_lines_from_bank_statement_transaction
 # ---------------------------------------------------------------------------
 
 
@@ -250,7 +250,7 @@ def sample_transaction():
 
 @pytest.fixture
 def sample_entry():
-    return GeneratedJournalEntry(
+    return GeneratedJournalLine(
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.ESSENTIALS_EXPENSE,
         description="Gas purchase at Shell.",
@@ -263,9 +263,9 @@ def sample_entry():
 @pytest.fixture
 def sample_entry_set(sample_entry):
     return GeneratedJournalEntrySet(
-        entries=[
+        lines=[
             sample_entry,
-            GeneratedJournalEntry(
+            GeneratedJournalLine(
                 date=datetime.date(2026, 1, 25),
                 account=JournalAccount.CASH,
                 description="Gas purchase at Shell.",
@@ -294,7 +294,7 @@ class TestExtractJournalEntriesFromBankStatementTransaction:
                 return_value=llm_response,
             ),
         ):
-            extract_journal_entries_from_bank_statement_transaction(sample_transaction)
+            extract_journal_lines_from_bank_statement_transaction(sample_transaction)
 
         call_kwargs = mock_llm.call_args.kwargs
         assert json.loads(call_kwargs["content"]) == sample_transaction.to_dict()
@@ -316,7 +316,7 @@ class TestExtractJournalEntriesFromBankStatementTransaction:
                 return_value=llm_response,
             ),
         ):
-            extract_journal_entries_from_bank_statement_transaction(sample_transaction)
+            extract_journal_lines_from_bank_statement_transaction(sample_transaction)
 
         call_kwargs = mock_llm.call_args.kwargs
         assert json.dumps(cache) in call_kwargs["system_instruction"]
@@ -337,7 +337,7 @@ class TestExtractJournalEntriesFromBankStatementTransaction:
                 return_value=llm_response,
             ),
         ):
-            result = extract_journal_entries_from_bank_statement_transaction(sample_transaction)
+            result = extract_journal_lines_from_bank_statement_transaction(sample_transaction)
 
         assert len(result) == 2
         expense = next(e for e in result if e.account == JournalAccount.ESSENTIALS_EXPENSE)

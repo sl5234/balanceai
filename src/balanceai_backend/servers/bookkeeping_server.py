@@ -21,7 +21,7 @@ from balanceai_backend.db.journal_db import (
     delete_journal as db_delete_journal,
 )
 from balanceai_backend.db.journal_db import (
-    find_journal_entries as db_find_journal_entries,
+    find_journal_lines as db_find_journal_lines,
 )
 from balanceai_backend.db.journal_db import (
     find_journals as db_find_journals,
@@ -38,7 +38,7 @@ from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_transactions,
 )
 from balanceai_backend.models import Bank, Journal
-from balanceai_backend.models.journal import JournalEntry
+from balanceai_backend.models.journal import JournalLine
 from balanceai_backend.models.report import ReportDefinition
 from balanceai_backend.prompts.financial_query_prompt import financial_query_system_prompt
 from balanceai_backend.prompts.report_definition_prompt import (
@@ -137,7 +137,7 @@ def create_journal(
             can be in only one journal.
 
     Returns:
-        dict with the created journal (entries are omitted — use
+        dict with the created journal (lines are omitted — use
         list_journal_entries), plus "booking": {"booked", "matched"} for its
         bank accounts' classified transactions, which are booked right away
 
@@ -152,7 +152,7 @@ def create_journal(
         _raise_if_duplicate_journal_name(e, name)
         raise
     return {
-        **journal.to_dict(redact_entries=True),
+        **journal.to_dict(redact_lines=True),
         "booking": book_raw_transactions(journal.journal_id, conn),
     }
 
@@ -163,10 +163,11 @@ def update_journal(
     name: str | None = None,
     description: str | None = None,
     bank_account_ids: list[str] | None = None,
-    entries: list[dict] | None = None,
 ) -> dict:
     """
-    Update a journal's properties by journal ID. Only provided fields are updated.
+    Update a journal's properties by journal ID. Only provided fields are
+    updated. Entries can't be edited here: they're booked from bank
+    transactions.
 
     Args:
         journal_id: The journal ID of the journal to update
@@ -174,10 +175,9 @@ def update_journal(
         description: New description for the journal
         bank_account_ids: Replaces the journal's whole list of bank accounts —
             pass every account to keep, not just ones to add. [] removes all.
-        entries: New list of journal entry objects
 
     Returns:
-        dict with the updated journal (entries are omitted — use
+        dict with the updated journal (lines are omitted — use
         list_journal_entries), plus "booking": {"booked", "matched"} for its
         bank accounts' classified transactions not booked yet (e.g. an account
         just added). Entries of removed accounts are deleted.
@@ -187,9 +187,6 @@ def update_journal(
             by another journal (case-insensitive), or a bank account doesn't
             exist or is already in another journal.
     """
-    # TODO: `entries` replaces every entry in the journal — a journal entry action
-    # that doesn't belong on a journal action. Remove it once entries have their
-    # own update path.
     results = db_find_journals(journal_id=journal_id, conn=conn)
     if not results:
         raise ValueError(f"Journal {journal_id} not found")
@@ -201,8 +198,6 @@ def update_journal(
         journal.description = description
     if bank_account_ids is not None:
         journal.bank_account_ids = bank_account_ids
-    if entries is not None:
-        journal.entries = [JournalEntry.from_dict(e) for e in entries]
 
     try:
         db_update_journal(journal, conn)
@@ -211,7 +206,7 @@ def update_journal(
         raise
 
     return {
-        **journal.to_dict(redact_entries=True),
+        **journal.to_dict(redact_lines=True),
         "booking": book_raw_transactions(journal.journal_id, conn),
     }
 
@@ -238,10 +233,10 @@ def list_journals() -> list[dict]:
 
     Returns:
         List of journals with journal_id, name, description, created_at, and
-        bank_account_ids (entries are omitted — use list_journal_entries).
+        bank_account_ids (lines are omitted — use list_journal_entries).
     """
     journals = db_find_journals(conn=conn)
-    return [j.to_dict(redact_entries=True) for j in journals]
+    return [j.to_dict(redact_lines=True) for j in journals]
 
 
 # ---------------------------------------------------------------------------
@@ -335,18 +330,38 @@ def sync_journal_entries_from_bank_statement(
 @mcp.tool()
 def list_journal_entries(journal_id: str, date: date | None = None) -> list[dict]:
     """
-    List entries for a given journal, optionally filtered by date.
+    List a journal's entries, optionally only those with a line on a date.
 
     Args:
         journal_id: The journal ID to retrieve entries for
-        date: Optional date to filter entries by
+        date: Optional date; an entry is listed if any of its lines is on it
 
     Returns:
-        List of journal entries
+        List of entries in date order, each {"journal_entry_id", "date",
+        "lines": [...]}. "date" is its earliest line's. A line written by the
+        old entry tools has no journal_entry_id, so it's listed as its own entry.
     """
-    return [
-        e.to_dict(redact=True) for e in db_find_journal_entries(journal_id, date=date, conn=conn)
-    ]
+    lines = db_find_journal_lines(journal_id, conn=conn)
+    entries = _group_into_entries(lines)
+    if date is not None:
+        entries = [e for e in entries if any(line.date == date for line in e)]
+    return [_entry_to_dict(e) for e in entries]
+
+
+def _group_into_entries(lines: list[JournalLine]) -> list[list[JournalLine]]:
+    """Group lines by journal_entry_id, keeping date order."""
+    entries: dict[str, list[JournalLine]] = {}
+    for line in lines:
+        entries.setdefault(line.journal_entry_id or line.journal_line_id, []).append(line)
+    return list(entries.values())
+
+
+def _entry_to_dict(lines: list[JournalLine]) -> dict:
+    return {
+        "journal_entry_id": lines[0].journal_entry_id,
+        "date": lines[0].date.isoformat(),
+        "lines": [line.to_dict(redact=True) for line in lines],
+    }
 
 
 @mcp.tool()
@@ -387,10 +402,10 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
     with out.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        for entry in journal.entries:
+        for entry in journal.lines:
             writer.writerow(entry.to_dict())
 
-    return {"output_path": str(out), "rows_written": len(journal.entries)}
+    return {"output_path": str(out), "rows_written": len(journal.lines)}
 
 
 @mcp.tool()

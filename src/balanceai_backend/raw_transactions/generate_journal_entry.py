@@ -10,7 +10,7 @@ from decimal import Decimal
 from appdevcommons.unique_id import UniqueIdGenerator
 
 from balanceai_backend.models.bank_account import BankAccountType
-from balanceai_backend.models.journal import JournalAccount, JournalEntry
+from balanceai_backend.models.journal import JournalAccount, JournalLine
 from balanceai_backend.models.raw_transaction import RawTransaction
 
 _BANK_SIDE_ACCOUNT = {
@@ -48,9 +48,7 @@ def bank_side_account(account_type: BankAccountType) -> JournalAccount:
     return _BANK_SIDE_ACCOUNT[account_type]
 
 
-def generate_journal_entries(
-    txn: RawTransaction, account_type: BankAccountType
-) -> list[JournalEntry]:
+def generate_journal_entry(txn: RawTransaction, account_type: BankAccountType) -> list[JournalLine]:
     """
     The two lines of the journal entry for a classified raw transaction: the
     bank side (from account_type) and the counter account (from the
@@ -86,12 +84,12 @@ def generate_journal_entries(
     ]
 
 
-def generate_matched_transfer_entries(
+def generate_matched_transfer_entry(
     out_side: RawTransaction,
     out_type: BankAccountType,
     in_side: RawTransaction,
     in_type: BankAccountType,
-) -> list[JournalEntry]:
+) -> list[JournalLine]:
     """
     The journal entry for a matched transfer, whose two sides were found: just the two
     bank-side lines (decision #7). The money-out side's account is credited and
@@ -128,10 +126,10 @@ def _line(
     is_debit: bool,
     journal_entry_id: str,
     bank_account_id: str | None,
-) -> JournalEntry:
+) -> JournalLine:
     """One line of an entry, with the transaction's details."""
     assert txn.classification is not None
-    return JournalEntry(
+    return JournalLine(
         journal_line_id=UniqueIdGenerator.generate_id(),
         date=txn.posting_date,
         account=account,

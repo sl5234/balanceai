@@ -12,7 +12,7 @@
 **Grounded facts:**
 - [verified, resolved 2026-08-21] `servers/link_bank_server.py`'s old `list_transactions` tool passed the raw Plaid `access_token` as a direct MCP tool parameter — visible in tool-call arguments to any LLM client invoking it. Replaced with `list_linked_banks` / `sync_bank_transactions` / `get_bank_transactions`, all scoped to `item_id`; the access token is looked up server-side from `bank_link/plaid_item_db.py` and never crosses the tool boundary.
 - [verified] `servers/bookkeeping_server.py:410-437` logs the full `user_message`, `system_prompt`, and LLM-generated `sql` for every `analyze_financial_question` call to a local DEBUG-level file handler (`logs/bookkeeping_server.log`) — recipient names, categories, and amounts land in plaintext on disk regardless of the model provider's own data handling.
-- [verified] Existing partial redaction already exists in the codebase (`redact` / `redact_entries` flags on `list_journals` / `list_journal_entries` in `models/journal.py`), but it's inconsistently applied — `analyze_financial_question`, `get_transactions`, and `list_transactions` return unredacted data today.
+- [verified] Existing partial redaction already exists in the codebase (`redact` / `redact_lines` flags on `list_journals` / `list_journal_entries` in `models/journal.py`), but it's inconsistently applied — `analyze_financial_question`, `get_transactions`, and `list_transactions` return unredacted data today.
 
 ## #2 — 2026-08-19 — Self-hosted/dedicated inference (local vLLM, own-purchased GPUs) rejected
 

@@ -25,7 +25,7 @@ def sample_definition():
     return ReportDefinition(
         name="Monthly Budget",
         prompt="Show monthly income and expenses",
-        sql_template="SELECT je.date FROM journal_entries je WHERE je.date BETWEEN :start_date AND :end_date",
+        sql_template="SELECT je.date FROM journal_lines je WHERE je.date BETWEEN :start_date AND :end_date",
         description="Daily activity for a date range.",
     )
 
@@ -61,7 +61,7 @@ class TestSaveReportDefinition:
             prompt="",
             sql_template="SELECT 1",
             description="",
-            unparameterized_sql="SELECT SUM(je.debit) FROM journal_entries je WHERE je.date = '2025-10-01'",
+            unparameterized_sql="SELECT SUM(je.debit) FROM journal_lines je WHERE je.date = '2025-10-01'",
         )
         save_report_definition(defn, db)
 
@@ -175,7 +175,7 @@ class TestUpdateReportDefinition:
 
     def test_updates_sql_template(self, db, sample_definition):
         save_report_definition(sample_definition, db)
-        sample_definition.sql_template = "SELECT je.date, je.debit FROM journal_entries je WHERE je.date BETWEEN :start_date AND :end_date"
+        sample_definition.sql_template = "SELECT je.date, je.debit FROM journal_lines je WHERE je.date BETWEEN :start_date AND :end_date"
 
         update_report_definition(sample_definition, db)
 
@@ -207,7 +207,7 @@ class TestUpdateReportDefinition:
     def test_updates_unparameterized_sql(self, db, sample_definition):
         save_report_definition(sample_definition, db)
         sample_definition.unparameterized_sql = (
-            "SELECT SUM(je.debit) FROM journal_entries je WHERE je.date = '2025-10-01'"
+            "SELECT SUM(je.debit) FROM journal_lines je WHERE je.date = '2025-10-01'"
         )
 
         update_report_definition(sample_definition, db)

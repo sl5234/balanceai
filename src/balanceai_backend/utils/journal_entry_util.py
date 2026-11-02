@@ -12,7 +12,7 @@ from balanceai_backend.journals.merchant_cache import (
     load_merchant_context_cache,
     save_merchant_context_cache,
 )
-from balanceai_backend.models.journal import GeneratedJournalEntry, GeneratedJournalEntrySet
+from balanceai_backend.models.journal import GeneratedJournalEntrySet, GeneratedJournalLine
 from balanceai_backend.models.transaction import Transaction
 from balanceai_backend.prompts.extract_journal_entry_prompt import (
     categorize_journal_entry_prompt,
@@ -25,7 +25,7 @@ from balanceai_backend.utils.ocr_util import _extract_json
 DEFAULT_MODEL_ID = "claude-sonnet-4-6"
 
 
-def generate_transaction_category(entry: GeneratedJournalEntry) -> GeneratedJournalEntry:
+def generate_transaction_category(entry: GeneratedJournalLine) -> GeneratedJournalLine:
     """
     For a journal entry with null category, look up cached categorization or fall back to
     Tavily + LLM. Caches recipient → category for future lookups.
@@ -42,14 +42,14 @@ def generate_transaction_category(entry: GeneratedJournalEntry) -> GeneratedJour
         logger.warning("Tavily returned no context for recipient: %s", entry.recipient)
         return entry
 
-    schema = json.dumps(GeneratedJournalEntry.model_json_schema(), indent=2)
+    schema = json.dumps(GeneratedJournalLine.model_json_schema(), indent=2)
     response = anthropic_service.messages(
         model_id=DEFAULT_MODEL_ID,
         content=entry.model_dump_json(),
         system_instruction=categorize_journal_entry_prompt(schema, context),
     )
     logger.info("generate_transaction_category LLM raw response: %s", response)
-    result = GeneratedJournalEntry.model_validate_json(_extract_json(response))
+    result = GeneratedJournalLine.model_validate_json(_extract_json(response))
 
     if result.category:
         cache[key] = result.category
@@ -58,7 +58,7 @@ def generate_transaction_category(entry: GeneratedJournalEntry) -> GeneratedJour
     return result
 
 
-def extract_journal_entries_from_bank_statement_transaction(transaction: Transaction) -> list:
+def extract_journal_lines_from_bank_statement_transaction(transaction: Transaction) -> list:
     """
     Extract journal entries from a single parsed bank statement transaction using Claude.
 
@@ -66,7 +66,7 @@ def extract_journal_entries_from_bank_statement_transaction(transaction: Transac
         transaction: A Transaction parsed from a bank statement
 
     Returns:
-        List of GeneratedJournalEntry objects
+        List of GeneratedJournalLine objects
     """
     schema = json.dumps(GeneratedJournalEntrySet.model_json_schema(), indent=2)
     merchant_context = load_merchant_context_cache()
@@ -78,13 +78,13 @@ def extract_journal_entries_from_bank_statement_transaction(transaction: Transac
         ),
     )
     logger.info(
-        "extract_journal_entries_from_bank_statement_transaction LLM raw response: %s", response
+        "extract_journal_lines_from_bank_statement_transaction LLM raw response: %s", response
     )
     result = GeneratedJournalEntrySet.model_validate_json(_extract_json(response))
-    return result.entries
+    return result.lines
 
 
-def extract_journal_entries_from_plaid_transaction(transaction: dict) -> list:
+def extract_journal_lines_from_plaid_transaction(transaction: dict) -> list:
     """
     Extract journal entries from a single Plaid transaction using Claude.
 
@@ -95,10 +95,10 @@ def extract_journal_entries_from_plaid_transaction(transaction: dict) -> list:
         transaction: A single Plaid transaction dict
 
     Returns:
-        List of GeneratedJournalEntry objects
+        List of GeneratedJournalLine objects
 
     # TODO: Model the input transaction type.
-    # TODO: Model the return type instead of returning raw GeneratedJournalEntry list.
+    # TODO: Model the return type instead of returning raw GeneratedJournalLine list.
     """
     schema = json.dumps(GeneratedJournalEntrySet.model_json_schema(), indent=2)
     response = anthropic_service.messages(
@@ -107,4 +107,4 @@ def extract_journal_entries_from_plaid_transaction(transaction: dict) -> list:
         system_instruction=extract_journal_entries_prompt(schema),
     )
     result = GeneratedJournalEntrySet.model_validate_json(_extract_json(response))
-    return result.entries
+    return result.lines

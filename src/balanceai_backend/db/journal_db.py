@@ -4,11 +4,11 @@ from decimal import Decimal
 
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.models import Journal
-from balanceai_backend.models.journal import RECIPIENT_SELF, JournalAccount, JournalEntry
+from balanceai_backend.models.journal import RECIPIENT_SELF, JournalAccount, JournalLine
 
 
-def _build_entry(r) -> JournalEntry:
-    return JournalEntry(
+def _build_line(r) -> JournalLine:
+    return JournalLine(
         journal_line_id=r["journal_line_id"],
         date=datetime.date.fromisoformat(r["date"]),
         account=JournalAccount(r["account"]),
@@ -30,7 +30,7 @@ def _build_journal(row, entry_rows, bank_account_ids: list[str]) -> Journal:
         name=row["name"],
         description=row["description"],
         created_at=row["created_at"],
-        entries=[_build_entry(r) for r in entry_rows],
+        lines=[_build_line(r) for r in entry_rows],
         bank_account_ids=bank_account_ids,
     )
 
@@ -51,7 +51,7 @@ def find_journals(
     journals = []
     for row in rows:
         entry_rows = conn.execute(
-            "SELECT * FROM journal_entries WHERE journal_id = ? ORDER BY date", (row["journal_id"],)
+            "SELECT * FROM journal_lines WHERE journal_id = ? ORDER BY date", (row["journal_id"],)
         ).fetchall()
         bank_account_ids = [
             r["bank_account_id"]
@@ -65,29 +65,29 @@ def find_journals(
     return journals
 
 
-def find_journal_entries(
+def find_journal_lines(
     journal_id: str,
     date: datetime.date | None = None,
     conn: sqlite3.Connection = _default_conn,
-) -> list[JournalEntry]:
+) -> list[JournalLine]:
     """Find entries for a journal, optionally filtered by date. Raises ValueError if journal not found."""
     if not find_journals(journal_id=journal_id, conn=conn):
         raise ValueError(f"Journal {journal_id} not found")
-    query = "SELECT * FROM journal_entries WHERE journal_id = ?"
+    query = "SELECT * FROM journal_lines WHERE journal_id = ?"
     params: list = [journal_id]
     if date is not None:
         query += " AND date = ?"
         params.append(date.isoformat())
     query += " ORDER BY date"
     rows = conn.execute(query, params).fetchall()
-    return [_build_entry(r) for r in rows]
+    return [_build_line(r) for r in rows]
 
 
-def _insert_journal_entries(
-    journal_id: str, entries: list[JournalEntry], conn: sqlite3.Connection
+def _insert_journal_lines(
+    journal_id: str, entries: list[JournalLine], conn: sqlite3.Connection
 ) -> None:
     conn.executemany(
-        "INSERT INTO journal_entries (journal_line_id, journal_id, date, account,"
+        "INSERT INTO journal_lines (journal_line_id, journal_id, date, account,"
         " description, debit, credit, category, tax, recipient, journal_entry_id,"
         " raw_transaction_id, bank_account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
@@ -116,7 +116,7 @@ def find_booked_raw_transactions(
 ) -> dict[str, str]:
     """The raw transactions booked in a journal, each mapped to its entry's journal_entry_id."""
     rows = conn.execute(
-        "SELECT DISTINCT raw_transaction_id, journal_entry_id FROM journal_entries"
+        "SELECT DISTINCT raw_transaction_id, journal_entry_id FROM journal_lines"
         " WHERE journal_id = ? AND raw_transaction_id IS NOT NULL",
         (journal_id,),
     ).fetchall()
@@ -124,15 +124,15 @@ def find_booked_raw_transactions(
 
 
 def add_journal_entry(
-    journal_id: str, lines: list[JournalEntry], conn: sqlite3.Connection = _default_conn
+    journal_id: str, lines: list[JournalLine], conn: sqlite3.Connection = _default_conn
 ) -> None:
     """Add one entry's lines to a journal. Doesn't commit; call inside the
     caller's transaction."""
-    _insert_journal_entries(journal_id, lines, conn)
+    _insert_journal_lines(journal_id, lines, conn)
 
 
 def add_journal_entries(
-    journal_id: str, entries: list[list[JournalEntry]], conn: sqlite3.Connection = _default_conn
+    journal_id: str, entries: list[list[JournalLine]], conn: sqlite3.Connection = _default_conn
 ) -> None:
     """Add several entries, each a list of its lines. Doesn't commit; call
     inside the caller's transaction."""
@@ -143,7 +143,7 @@ def add_journal_entries(
 def delete_journal_entry(journal_entry_id: str, conn: sqlite3.Connection = _default_conn) -> None:
     """Delete every line of an entry. Doesn't commit; call inside the caller's
     transaction."""
-    conn.execute("DELETE FROM journal_entries WHERE journal_entry_id = ?", (journal_entry_id,))
+    conn.execute("DELETE FROM journal_lines WHERE journal_entry_id = ?", (journal_entry_id,))
 
 
 def delete_journal_entries(
@@ -162,8 +162,8 @@ def delete_journal_entries_for_raw_transaction(
     each, so a matched transfer's other side is left unbooked. Doesn't commit; call inside
     the caller's transaction."""
     conn.execute(
-        "DELETE FROM journal_entries WHERE journal_entry_id IN"
-        " (SELECT journal_entry_id FROM journal_entries WHERE raw_transaction_id = ?)",
+        "DELETE FROM journal_lines WHERE journal_entry_id IN"
+        " (SELECT journal_entry_id FROM journal_lines WHERE raw_transaction_id = ?)",
         (raw_transaction_id,),
     )
 
@@ -175,8 +175,8 @@ def delete_journal_entries_for_bank_account(
     lines of each. Doesn't commit; call inside the caller's transaction."""
     # Only the bank-side line names the account, so match the entry through it.
     conn.execute(
-        "DELETE FROM journal_entries WHERE journal_entry_id IN"
-        " (SELECT journal_entry_id FROM journal_entries"
+        "DELETE FROM journal_lines WHERE journal_entry_id IN"
+        " (SELECT journal_entry_id FROM journal_lines"
         "  WHERE journal_id = ? AND bank_account_id = ?)",
         (journal_id, bank_account_id),
     )
@@ -263,10 +263,12 @@ def update_journal(updated: Journal, conn: sqlite3.Connection = _default_conn) -
         )
         _save_bank_accounts(updated, conn)
 
-        # TODO: replacing every entry goes away with update_journal's `entries`
-        # (docs/BACKLOGS.md BL-9). Until then the removed accounts' entries are
-        # deleted after it, or they'd be reinserted.
-        conn.execute("DELETE FROM journal_entries WHERE journal_id = ?", (updated.journal_id,))
-        _insert_journal_entries(updated.journal_id, updated.entries, conn)
+        # TODO: replacing every entry is only for the old AI entry tools
+        # (sync_journal_entries_from_*, helpers/journal_entry_helper.py), which
+        # save through here. Remove it when they're retired (docs/BACKLOGS.md
+        # BL-9). Until then the removed accounts' entries are deleted after it,
+        # or they'd be reinserted.
+        conn.execute("DELETE FROM journal_lines WHERE journal_id = ?", (updated.journal_id,))
+        _insert_journal_lines(updated.journal_id, updated.lines, conn)
         for bank_account_id in removed:
             delete_journal_entries_for_bank_account(updated.journal_id, bank_account_id, conn)

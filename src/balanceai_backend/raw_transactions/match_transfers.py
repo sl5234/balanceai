@@ -3,7 +3,7 @@ docs/BACKEND_IMPLEMENTATION_DECISIONS.md #5 and #12."""
 
 from balanceai_backend.models.bank_account import BankAccountType
 from balanceai_backend.models.raw_transaction import RawTransaction
-from balanceai_backend.raw_transactions.generate_journal_entries import bank_side_account
+from balanceai_backend.raw_transactions.generate_journal_entry import bank_side_account
 
 _MAX_DAYS_APART = 5
 

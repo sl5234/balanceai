@@ -4,10 +4,10 @@ from decimal import Decimal
 import pytest
 from balanceai_backend.models.journal import (
     RECIPIENT_SELF,
-    GeneratedJournalEntry,
     GeneratedJournalEntrySet,
+    GeneratedJournalLine,
     JournalAccount,
-    JournalEntry,
+    JournalLine,
 )
 
 # ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ from balanceai_backend.models.journal import (
 
 @pytest.fixture
 def base_entry():
-    return GeneratedJournalEntry(
+    return GeneratedJournalLine(
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Haircut at Rudy's.",
@@ -27,11 +27,11 @@ def base_entry():
 
 
 # ---------------------------------------------------------------------------
-# GeneratedJournalEntry
+# GeneratedJournalLine
 # ---------------------------------------------------------------------------
 
 
-class TestGeneratedJournalEntry:
+class TestGeneratedJournalLine:
     def test_category_defaults_to_none(self, base_entry):
         assert base_entry.category is None
 
@@ -48,34 +48,34 @@ class TestGeneratedJournalEntry:
 
 
 # ---------------------------------------------------------------------------
-# GeneratedJournalEntry.to_journal_entry
+# GeneratedJournalLine.to_journal_line
 # ---------------------------------------------------------------------------
 
 
-class TestToJournalEntry:
+class TestToJournalLine:
     def test_carries_category_through(self, base_entry):
         entry = base_entry.model_copy(update={"category": "haircut"})
-        assert entry.to_journal_entry().category == "haircut"
+        assert entry.to_journal_line().category == "haircut"
 
     def test_carries_null_category_through(self, base_entry):
-        assert base_entry.to_journal_entry().category is None
+        assert base_entry.to_journal_line().category is None
 
     def test_carries_tax_through(self, base_entry):
         entry = base_entry.model_copy(update={"tax": Decimal("2.25")})
-        assert entry.to_journal_entry().tax == Decimal("2.25")
+        assert entry.to_journal_line().tax == Decimal("2.25")
 
     def test_generates_nonempty_journal_line_id(self, base_entry):
-        assert base_entry.to_journal_entry().journal_line_id != ""
+        assert base_entry.to_journal_line().journal_line_id != ""
 
 
 # ---------------------------------------------------------------------------
-# JournalEntry.to_dict
+# JournalLine.to_dict
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def journal_entry():
-    return JournalEntry(
+    return JournalLine(
         journal_line_id="entry-1",
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
@@ -87,7 +87,7 @@ def journal_entry():
     )
 
 
-class TestJournalEntryToDict:
+class TestJournalLineToDict:
     def test_includes_category_when_set(self, journal_entry):
         assert journal_entry.to_dict()["category"] == "haircut"
 
@@ -104,7 +104,7 @@ class TestJournalEntryToDict:
 
 
 # ---------------------------------------------------------------------------
-# JournalEntry.from_dict
+# JournalLine.from_dict
 # ---------------------------------------------------------------------------
 
 
@@ -137,34 +137,34 @@ class TestGeneratedJournalEntrySet:
                 "credit": Decimal("25.00"),
             }
         )
-        result = GeneratedJournalEntrySet(entries=[base_entry, cash])
-        assert len(result.entries) == 2
+        result = GeneratedJournalEntrySet(lines=[base_entry, cash])
+        assert len(result.lines) == 2
 
     def test_accepts_empty_entries(self):
-        result = GeneratedJournalEntrySet(entries=[])
-        assert result.entries == []
+        result = GeneratedJournalEntrySet(lines=[])
+        assert result.lines == []
 
     def test_rejects_unbalanced_entries(self, base_entry):
         with pytest.raises(ValueError, match="not balanced"):
-            GeneratedJournalEntrySet(entries=[base_entry])
+            GeneratedJournalEntrySet(lines=[base_entry])
 
 
 # ---------------------------------------------------------------------------
-# JournalEntry.from_dict
+# JournalLine.from_dict
 # ---------------------------------------------------------------------------
 
 
-class TestJournalEntryFromDict:
+class TestJournalLineFromDict:
     def test_restores_category(self, entry_dict):
-        assert JournalEntry.from_dict(entry_dict).category == "haircut"
+        assert JournalLine.from_dict(entry_dict).category == "haircut"
 
     def test_defaults_category_to_none_when_missing(self, entry_dict):
         del entry_dict["category"]
-        assert JournalEntry.from_dict(entry_dict).category is None
+        assert JournalLine.from_dict(entry_dict).category is None
 
     def test_restores_tax(self, entry_dict):
-        assert JournalEntry.from_dict(entry_dict).tax == Decimal("2.25")
+        assert JournalLine.from_dict(entry_dict).tax == Decimal("2.25")
 
     def test_defaults_tax_to_zero_when_missing(self, entry_dict):
         del entry_dict["tax"]
-        assert JournalEntry.from_dict(entry_dict).tax == Decimal(0)
+        assert JournalLine.from_dict(entry_dict).tax == Decimal(0)

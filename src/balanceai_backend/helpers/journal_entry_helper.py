@@ -8,14 +8,14 @@ import balanceai_backend.parsers.chase  # noqa: F401 - register parsers
 from balanceai_backend.db.connection import conn
 from balanceai_backend.db.journal_db import find_journals
 from balanceai_backend.db.journal_db import update_journal as db_update_journal
-from balanceai_backend.helpers.plaid_helper import extract_journal_entries_from_transactions
-from balanceai_backend.journals.finder import find_journal_entry as finder_find_journal_entry
+from balanceai_backend.helpers.plaid_helper import extract_journal_lines_from_transactions
+from balanceai_backend.journals.finder import find_journal_line as finder_find_journal_line
 from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import GeneratedJournalEntrySet
 from balanceai_backend.parsers import get_parser
 from balanceai_backend.utils.general_util import get_mime_type
 from balanceai_backend.utils.journal_entry_util import (
-    extract_journal_entries_from_bank_statement_transaction,
+    extract_journal_lines_from_bank_statement_transaction,
     generate_transaction_category,
 )
 from balanceai_backend.utils.ocr_util import OcrUtil
@@ -36,13 +36,13 @@ def handle_sync_journal_entries_from_receipt(journal_id: str, input_local_path: 
         mime_type=get_mime_type(input_local_path.suffix),
     )
 
-    for entry_data in ocr_result.entries:
-        entry = entry_data.to_journal_entry()
-        existing = finder_find_journal_entry(journal_id, entry)
+    for entry_data in ocr_result.lines:
+        entry = entry_data.to_journal_line()
+        existing = finder_find_journal_line(journal_id, entry)
         if existing is not None:
             entry.journal_line_id = existing.journal_line_id
-            journal.remove_entry(existing.journal_line_id)
-        journal.add_entry(entry)
+            journal.remove_line(existing.journal_line_id)
+        journal.add_line(entry)
 
     db_update_journal(journal, conn)
     return journal.to_dict()
@@ -54,22 +54,22 @@ def handle_sync_journal_entries_from_transactions(journal_id: str, transactions:
         raise ValueError(f"Journal {journal_id} not found")
     journal = results[0]
 
-    grouped = extract_journal_entries_from_transactions(transactions)
+    grouped = extract_journal_lines_from_transactions(transactions)
     upsert_entries = grouped["upsert"]
     remove_entries = grouped["remove"]
 
     for entry_data in upsert_entries:
-        entry = entry_data.to_journal_entry()
-        existing = finder_find_journal_entry(journal_id, entry)
+        entry = entry_data.to_journal_line()
+        existing = finder_find_journal_line(journal_id, entry)
         if existing is not None:
             entry.journal_line_id = existing.journal_line_id
-            journal.remove_entry(existing.journal_line_id)
-        journal.add_entry(entry)
+            journal.remove_line(existing.journal_line_id)
+        journal.add_line(entry)
 
     for entry_data in remove_entries:
-        existing = finder_find_journal_entry(journal_id, entry_data.to_journal_entry())
+        existing = finder_find_journal_line(journal_id, entry_data.to_journal_line())
         if existing is not None:
-            journal.remove_entry(existing.journal_line_id)
+            journal.remove_line(existing.journal_line_id)
 
     db_update_journal(journal, conn)
     return journal.to_dict()
@@ -94,7 +94,7 @@ def handle_sync_journal_entries_from_bank_statement(
                 with ThreadPoolExecutor(max_workers=len(batch)) as executor:
                     futures = {
                         executor.submit(
-                            extract_journal_entries_from_bank_statement_transaction, txn
+                            extract_journal_lines_from_bank_statement_transaction, txn
                         ): txn
                         for txn in batch
                     }
@@ -125,18 +125,18 @@ def handle_sync_journal_entries_from_bank_statement(
 
         # Step 3: upsert into journal
         for entry_data in all_entries:
-            entry = entry_data.to_journal_entry()
-            existing = finder_find_journal_entry(journal_id, entry)
+            entry = entry_data.to_journal_line()
+            existing = finder_find_journal_line(journal_id, entry)
             if existing is not None:
                 entry.journal_line_id = existing.journal_line_id
-                journal.remove_entry(existing.journal_line_id)
-            journal.add_entry(entry)
+                journal.remove_line(existing.journal_line_id)
+            journal.add_line(entry)
 
         db_update_journal(journal, conn)
 
     result = journal.to_dict()
-    entries = result.get("entries", [])
-    if len(entries) > 5:
-        result["entries"] = entries[:5]
-        result["entries_redacted"] = len(entries) - 5
+    lines = result.get("lines", [])
+    if len(lines) > 5:
+        result["lines"] = lines[:5]
+        result["lines_redacted"] = len(lines) - 5
     return result
