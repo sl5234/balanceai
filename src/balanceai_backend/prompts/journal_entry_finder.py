@@ -6,6 +6,6 @@ SYSTEM_PROMPT = (
     "capitalisation) should still be considered a match if the date, account, and "
     "amounts refer to the same transaction. "
     "Respond with JSON only — no extra text:\n"
-    '  match found:    {"match": true,  "journal_entry_id": "<id>"}\n'
-    '  no match:       {"match": false, "journal_entry_id": null}'
+    '  match found:    {"match": true,  "journal_line_id": "<id>"}\n'
+    '  no match:       {"match": false, "journal_line_id": null}'
 )

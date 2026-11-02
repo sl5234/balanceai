@@ -177,17 +177,20 @@ class TestListBankAccounts:
         mock_find.assert_called_once_with(plaid_item_id="item-1")
 
 
-_CLASSIFIED = {"classified": 2, "unclassified": 0, "errors": []}
+_CLASSIFIED_AND_BOOKED = {
+    "classification": {"classified": 2, "unclassified": 0, "errors": []},
+    "booking": {"journal-1": {"booked": 2, "matched": 0}},
+}
 
 
 class TestSyncBankTransactions:
     @pytest.fixture(autouse=True)
     def fake_classifier(self):
-        """Never run the real classifier here: it would read the real database
-        and call the AI."""
+        """Never run the real classifier and booking here: they would use the
+        real database and call the AI."""
         with patch(
-            "balanceai_backend.servers.link_bank_server.classify_raw_transactions",
-            return_value=_CLASSIFIED,
+            "balanceai_backend.servers.link_bank_server.classify_and_book_raw_transactions",
+            return_value=_CLASSIFIED_AND_BOOKED,
         ) as mock:
             yield mock
 
@@ -203,12 +206,14 @@ class TestSyncBankTransactions:
             "added": 3,
             "modified": 1,
             "removed": 0,
-            "classification": _CLASSIFIED,
+            **_CLASSIFIED_AND_BOOKED,
         }
 
-    def test_classifies_the_synced_bank_after_pulling_from_plaid(self, fake_classifier):
+    def test_classifies_and_books_the_synced_bank_after_pulling_from_plaid(self, fake_classifier):
         calls = []
-        fake_classifier.side_effect = lambda item_id: calls.append("classify") or _CLASSIFIED
+        fake_classifier.side_effect = (
+            lambda item_id: calls.append("classify") or _CLASSIFIED_AND_BOOKED
+        )
         with patch(
             "balanceai_backend.servers.link_bank_server.sync_raw_transactions_from_plaid",
             side_effect=lambda item_id: calls.append("pull") or {"added": 1},

@@ -45,6 +45,7 @@ from balanceai_backend.prompts.report_definition_prompt import (
     report_definition_system_prompt,
     report_definition_user_message,
 )
+from balanceai_backend.raw_transactions.book_raw_transactions import book_raw_transactions
 from balanceai_backend.reports.report_definition_db import (
     delete_report_definition as _delete_report_definition,
 )
@@ -121,7 +122,9 @@ def _raise_if_duplicate_journal_name(error: sqlite3.IntegrityError, name: str) -
 
 
 @mcp.tool()
-def create_journal(name: str, description: str = "") -> dict:
+def create_journal(
+    name: str, description: str = "", bank_account_ids: list[str] | None = None
+) -> dict:
     """
     Create a new journal — a set of books (e.g. "Personal", "My LLC") that
     holds journal entries across all of its bank accounts and dates.
@@ -129,20 +132,29 @@ def create_journal(name: str, description: str = "") -> dict:
     Args:
         name: Name of the journal
         description: Optional description of the journal
+        bank_account_ids: Bank accounts whose transactions belong in this journal
+            (ids from the link-bank server's list_bank_accounts). A bank account
+            can be in only one journal.
 
     Returns:
-        dict with the created journal
+        dict with the created journal (entries are omitted — use
+        list_journal_entries), plus "booking": {"booked", "matched"} for its
+        bank accounts' classified transactions, which are booked right away
 
     Raises:
-        ValueError: if a journal with this name already exists (case-insensitive).
+        ValueError: if a journal with this name already exists (case-insensitive),
+            or a bank account doesn't exist or is already in another journal.
     """
-    journal = Journal(name=name, description=description)
+    journal = Journal(name=name, description=description, bank_account_ids=bank_account_ids or [])
     try:
         save_journal(journal, conn)
     except sqlite3.IntegrityError as e:
         _raise_if_duplicate_journal_name(e, name)
         raise
-    return journal.to_dict()
+    return {
+        **journal.to_dict(redact_entries=True),
+        "booking": book_raw_transactions(journal.journal_id, conn),
+    }
 
 
 @mcp.tool()
@@ -150,6 +162,7 @@ def update_journal(
     journal_id: str,
     name: str | None = None,
     description: str | None = None,
+    bank_account_ids: list[str] | None = None,
     entries: list[dict] | None = None,
 ) -> dict:
     """
@@ -159,14 +172,20 @@ def update_journal(
         journal_id: The journal ID of the journal to update
         name: New name for the journal
         description: New description for the journal
+        bank_account_ids: Replaces the journal's whole list of bank accounts —
+            pass every account to keep, not just ones to add. [] removes all.
         entries: New list of journal entry objects
 
     Returns:
-        dict with the updated journal
+        dict with the updated journal (entries are omitted — use
+        list_journal_entries), plus "booking": {"booked", "matched"} for its
+        bank accounts' classified transactions not booked yet (e.g. an account
+        just added). Entries of removed accounts are deleted.
 
     Raises:
-        ValueError: if the journal doesn't exist, or the new name is already
-            used by another journal (case-insensitive).
+        ValueError: if the journal doesn't exist, the new name is already used
+            by another journal (case-insensitive), or a bank account doesn't
+            exist or is already in another journal.
     """
     # TODO: `entries` replaces every entry in the journal — a journal entry action
     # that doesn't belong on a journal action. Remove it once entries have their
@@ -180,6 +199,8 @@ def update_journal(
         journal.name = name
     if description is not None:
         journal.description = description
+    if bank_account_ids is not None:
+        journal.bank_account_ids = bank_account_ids
     if entries is not None:
         journal.entries = [JournalEntry.from_dict(e) for e in entries]
 
@@ -189,7 +210,10 @@ def update_journal(
         _raise_if_duplicate_journal_name(e, journal.name)
         raise
 
-    return journal.to_dict()
+    return {
+        **journal.to_dict(redact_entries=True),
+        "booking": book_raw_transactions(journal.journal_id, conn),
+    }
 
 
 @mcp.tool()
@@ -213,8 +237,8 @@ def list_journals() -> list[dict]:
     List all journals.
 
     Returns:
-        List of journals with journal_id, name, description, and created_at
-        (entries are omitted — use list_journal_entries).
+        List of journals with journal_id, name, description, created_at, and
+        bank_account_ids (entries are omitted — use list_journal_entries).
     """
     journals = db_find_journals(conn=conn)
     return [j.to_dict(redact_entries=True) for j in journals]
@@ -350,7 +374,7 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     fieldnames = [
-        "journal_entry_id",
+        "journal_line_id",
         "date",
         "account",
         "description",

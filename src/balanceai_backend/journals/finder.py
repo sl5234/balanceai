@@ -53,5 +53,5 @@ def find_journal_entry(journal_id: str, candidate: JournalEntry) -> JournalEntry
     if not result.get("match"):
         return None
 
-    matched_id = result.get("journal_entry_id")
-    return next((e for e in entries if e.journal_entry_id == matched_id), None)
+    matched_id = result.get("journal_line_id")
+    return next((e for e in entries if e.journal_line_id == matched_id), None)

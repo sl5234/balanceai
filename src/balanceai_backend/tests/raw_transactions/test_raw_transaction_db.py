@@ -7,10 +7,16 @@ import pytest
 from balanceai_backend.bank_link.plaid_item_db import delete_plaid_item, save_plaid_item
 from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import _apply_migrations, create_schema
+from balanceai_backend.db.journal_db import (
+    add_journal_entry,
+    find_booked_raw_transactions,
+    save_journal,
+)
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
-from balanceai_backend.models.journal import JournalAccount
+from balanceai_backend.models.journal import Journal, JournalAccount
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
+from balanceai_backend.raw_transactions.generate_journal_entries import generate_journal_entries
 from balanceai_backend.raw_transactions.raw_transaction_db import (
     delete_raw_transaction,
     find_raw_transactions,
@@ -347,6 +353,63 @@ class TestUpsertKeepsClassification:
     ):
         saved = self._resend(db, sample_txn, amount=Decimal("-4.5"))
         assert saved.classification == _classification()
+
+
+class TestChangesDeleteTheEntry:
+    """A change to a booked transaction deletes its entry so it's booked again."""
+
+    @pytest.fixture
+    def journal_id(self, db, linked_item, sample_txn):
+        journal = Journal(name="Personal", bank_account_ids=["plaid-acc-1"])
+        save_journal(journal, db)
+        upsert_raw_transaction(sample_txn, conn=db)
+        update_raw_transaction_classification("txn-1", _classification(), conn=db)
+        [txn] = find_raw_transactions(conn=db)
+        with db:
+            add_journal_entry(
+                journal.journal_id, generate_journal_entries(txn, BankAccountType.CHECKING), db
+            )
+        return journal.journal_id
+
+    @staticmethod
+    def _booked(db, journal_id: str) -> dict[str, str]:
+        return find_booked_raw_transactions(journal_id, db)
+
+    def test_unchanged_resend_keeps_it(self, db, sample_txn, journal_id):
+        upsert_raw_transaction(sample_txn, conn=db)
+
+        assert "txn-1" in self._booked(db, journal_id)
+
+    def test_resend_with_another_confidence_keeps_it(self, db, sample_txn, journal_id):
+        upsert_raw_transaction(dataclasses.replace(sample_txn, category_confidence="LOW"), conn=db)
+
+        assert "txn-1" in self._booked(db, journal_id)
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"amount": Decimal("-5.00")},
+            {"posting_date": datetime.date(2026, 8, 20)},
+            {"description": "Starbucks #2"},
+            {"account_id": "acc-1"},
+            {"category": "GENERAL_MERCHANDISE"},  # drops the AI's classification
+        ],
+        ids=["amount", "date", "description", "bank_account", "classification_dropped"],
+    )
+    def test_resend_with_a_change_deletes_it(self, db, sample_txn, journal_id, changes):
+        upsert_raw_transaction(dataclasses.replace(sample_txn, **changes), conn=db)
+
+        assert self._booked(db, journal_id) == {}
+
+    def test_reclassifying_deletes_it(self, db, journal_id):
+        update_raw_transaction_classification("txn-1", _classification(ClassifiedBy.USER), conn=db)
+
+        assert self._booked(db, journal_id) == {}
+
+    def test_deleting_the_transaction_deletes_it(self, db, journal_id):
+        delete_raw_transaction("txn-1", conn=db)
+
+        assert self._booked(db, journal_id) == {}
 
 
 class TestCategoryDetails:

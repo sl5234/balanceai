@@ -4,7 +4,10 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
+from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import conn, create_schema
+from balanceai_backend.db.journal_db import find_booked_raw_transactions
+from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.journal import (
     GeneratedJournalEntry,
     GeneratedJournalEntrySet,
@@ -12,6 +15,8 @@ from balanceai_backend.models.journal import (
     JournalAccount,
     JournalEntry,
 )
+from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
+from balanceai_backend.raw_transactions.raw_transaction_db import upsert_raw_transaction
 from balanceai_backend.servers.bookkeeping_server import (
     create_journal,
     delete_journal,
@@ -25,7 +30,7 @@ from balanceai_backend.servers.bookkeeping_server import (
 @pytest.fixture
 def sample_entry():
     return JournalEntry(
-        journal_entry_id="entry-1",
+        journal_line_id="entry-1",
         date=datetime.date(2026, 1, 27),
         account=JournalAccount.CASH,
         description="Trader Joe's purchase",
@@ -37,7 +42,7 @@ def sample_entry():
 @pytest.fixture
 def sample_entry_2():
     return JournalEntry(
-        journal_entry_id="entry-2",
+        journal_line_id="entry-2",
         date=datetime.date(2026, 1, 28),
         account=JournalAccount.CASH,
         description="Whole Foods purchase",
@@ -86,8 +91,8 @@ class TestListJournalEntries:
             return_value=[sample_entry, sample_entry_2],
         ):
             result = list_journal_entries("journal-1")
-        assert result[0]["journal_entry_id"] == sample_entry.journal_entry_id
-        assert result[1]["journal_entry_id"] == sample_entry_2.journal_entry_id
+        assert result[0]["journal_line_id"] == sample_entry.journal_line_id
+        assert result[1]["journal_line_id"] == sample_entry_2.journal_line_id
 
     def test_entries_are_returned_as_dicts(self, sample_entry, sample_entry_2):
         with patch(
@@ -105,7 +110,7 @@ class TestListJournalEntries:
         ):
             result = list_journal_entries("journal-1")
         entry = result[0]
-        assert entry["journal_entry_id"] == sample_entry.journal_entry_id
+        assert entry["journal_line_id"] == sample_entry.journal_line_id
         assert entry["date"] == sample_entry.date.isoformat()
         assert entry["description"] is None
         assert entry["debit"] == str(sample_entry.debit)
@@ -139,7 +144,7 @@ class TestListJournalEntries:
             result = list_journal_entries("journal-1", date=sample_entry.date)
         mock.assert_called_once_with("journal-1", date=sample_entry.date, conn=conn)
         assert len(result) == 1
-        assert result[0]["journal_entry_id"] == sample_entry.journal_entry_id
+        assert result[0]["journal_line_id"] == sample_entry.journal_line_id
 
     def test_returns_empty_list_when_no_entries_match_date(self):
         with patch(
@@ -255,13 +260,13 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         ):
             result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
-        entry_id = result["entries"][0]["journal_entry_id"]
-        assert entry_id is not None
-        assert entry_id != ""
+        line_id = result["entries"][0]["journal_line_id"]
+        assert line_id is not None
+        assert line_id != ""
 
     def test_updates_existing_entry_preserving_id(self, receipt_path, ocr_result):
         existing_entry = JournalEntry(
-            journal_entry_id="original-id",
+            journal_line_id="original-id",
             date=datetime.date(2026, 1, 27),
             account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Old description",
@@ -297,7 +302,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
             for e in result["entries"]
             if e["account"] == JournalAccount.NON_ESSENTIALS_EXPENSE.value
         )
-        assert expense["journal_entry_id"] == "original-id"
+        assert expense["journal_line_id"] == "original-id"
         assert expense["description"] == "Grocery purchase at Trader Joe's"
         assert expense["debit"] == "32.02"
 
@@ -406,7 +411,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
         # one GENERAL (matches the existing entry → update, preserve ID) and
         # one CASH (no match → create, gets a new ID).
         existing_entry = JournalEntry(
-            journal_entry_id="existing-id",
+            journal_line_id="existing-id",
             date=datetime.date(2026, 1, 27),
             account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Old grocery description",
@@ -461,7 +466,7 @@ class TestCreateOrUpdateJournalEntriesForReceipt:
             result = sync_journal_entries_from_receipt("journal-1", receipt_path)
 
         assert len(result["entries"]) == 2
-        ids = {e["journal_entry_id"] for e in result["entries"]}
+        ids = {e["journal_line_id"] for e in result["entries"]}
         assert "existing-id" in ids
 
 
@@ -538,3 +543,126 @@ class TestJournalTools:
 
         assert delete_journal(journal_id) == {"journal_id": journal_id}
         assert list_journals() == []
+
+    @pytest.fixture
+    def bank_accounts(self, db):
+        ids = ["test_bank:checking:0000", "test_bank:savings:1111", "test_bank:credit_card:2222"]
+        for account_id in ids:
+            upsert_bank_account(
+                BankAccount(
+                    id=account_id,
+                    institution_name="Test Bank",
+                    account_type=BankAccountType(account_id.split(":")[1]),
+                    last4=account_id[-4:],
+                ),
+                conn=db,
+            )
+        return ids
+
+    def test_create_journal_with_bank_accounts(self, db, bank_accounts):
+        checking, savings, _ = bank_accounts
+
+        result = create_journal(name="Personal", bank_account_ids=[checking, savings])
+
+        assert result["bank_account_ids"] == [checking, savings]
+        [listed] = list_journals()
+        assert listed["bank_account_ids"] == [checking, savings]
+
+    def test_update_journal_without_bank_accounts_keeps_them(self, db, bank_accounts):
+        checking, _, _ = bank_accounts
+        journal_id = create_journal(name="Personal", bank_account_ids=[checking])["journal_id"]
+
+        update_journal(journal_id, name="Home")
+
+        [listed] = list_journals()
+        assert listed["bank_account_ids"] == [checking]
+
+    def test_update_journal_replaces_bank_accounts(self, db, bank_accounts):
+        checking, savings, card = bank_accounts
+        journal_id = create_journal(name="Personal", bank_account_ids=[checking, savings])[
+            "journal_id"
+        ]
+
+        update_journal(journal_id, bank_account_ids=[card])
+
+        [listed] = list_journals()
+        assert listed["bank_account_ids"] == [card]
+
+    def test_create_journal_with_taken_account_raises(self, db, bank_accounts):
+        checking, _, _ = bank_accounts
+        create_journal(name="Personal", bank_account_ids=[checking])
+
+        with pytest.raises(ValueError, match="already in journal 'Personal'"):
+            create_journal(name="My LLC", bank_account_ids=[checking])
+
+        assert [j["name"] for j in list_journals()] == ["Personal"]
+
+    @staticmethod
+    def _add_purchase(db, txn_id: str, account_id: str) -> None:
+        upsert_raw_transaction(
+            RawTransaction(
+                id=txn_id,
+                source="plaid",
+                account_id=account_id,
+                posting_date=datetime.date(2026, 10, 1),
+                description="STARBUCKS",
+                amount=Decimal("-4.33"),
+                classification=Classification(
+                    counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+                    category="dining",
+                    counterparty="Starbucks",
+                    classified_by=ClassifiedBy.AI,
+                ),
+            ),
+            conn=db,
+        )
+
+    @staticmethod
+    def _booked_txns(db, journal_id: str) -> set[str]:
+        return set(find_booked_raw_transactions(journal_id, db))
+
+    def test_create_journal_books_its_accounts(self, db, bank_accounts):
+        checking, _, card = bank_accounts
+        self._add_purchase(db, "on-checking", checking)
+        self._add_purchase(db, "on-card", card)
+
+        result = create_journal(name="Personal", bank_account_ids=[checking])
+
+        assert result["booking"] == {"booked": 1, "matched": 0}
+        assert self._booked_txns(db, result["journal_id"]) == {"on-checking"}
+
+    def test_update_journal_books_an_added_account(self, db, bank_accounts):
+        checking, savings, _ = bank_accounts
+        self._add_purchase(db, "on-checking", checking)
+        self._add_purchase(db, "on-savings", savings)
+        journal_id = create_journal(name="Personal", bank_account_ids=[checking])["journal_id"]
+
+        result = update_journal(journal_id, bank_account_ids=[checking, savings])
+
+        assert result["booking"] == {"booked": 1, "matched": 0}
+        assert self._booked_txns(db, journal_id) == {"on-checking", "on-savings"}
+
+    def test_update_journal_removing_an_account_deletes_its_entries(self, db, bank_accounts):
+        checking, savings, _ = bank_accounts
+        self._add_purchase(db, "on-checking", checking)
+        self._add_purchase(db, "on-savings", savings)
+        journal_id = create_journal(name="Personal", bank_account_ids=[checking, savings])[
+            "journal_id"
+        ]
+
+        update_journal(journal_id, bank_account_ids=[savings])
+
+        assert self._booked_txns(db, journal_id) == {"on-savings"}
+
+    def test_update_journal_result_omits_entries(self, db, bank_accounts):
+        """The journal is loaded before the update, so its entries would be stale."""
+        checking, savings, _ = bank_accounts
+        self._add_purchase(db, "on-checking", checking)
+        journal_id = create_journal(name="Personal", bank_account_ids=[checking, savings])[
+            "journal_id"
+        ]
+
+        result = update_journal(journal_id, bank_account_ids=[savings])
+
+        assert result["entries"] == []
+        assert result["bank_account_ids"] == [savings]

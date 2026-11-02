@@ -3,14 +3,23 @@ import sqlite3
 from decimal import Decimal
 
 import pytest
+from balanceai_backend.db.bank_account_db import find_bank_accounts, upsert_bank_account
 from balanceai_backend.db.connection import create_schema
 from balanceai_backend.db.journal_db import (
+    add_journal_entries,
+    add_journal_entry,
     delete_journal,
+    delete_journal_entries,
+    delete_journal_entries_for_bank_account,
+    delete_journal_entries_for_raw_transaction,
+    delete_journal_entry,
+    find_booked_raw_transactions,
     find_journal_entries,
     find_journals,
     save_journal,
     update_journal,
 )
+from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.journal import Journal, JournalAccount, JournalEntry
 
 
@@ -70,9 +79,9 @@ class TestSaveJournal:
         assert count == 2
 
 
-def _make_entry(entry_id: str, date: datetime.date, amount: Decimal) -> JournalEntry:
+def _make_entry(line_id: str, date: datetime.date, amount: Decimal) -> JournalEntry:
     return JournalEntry(
-        journal_entry_id=entry_id,
+        journal_line_id=line_id,
         date=date,
         account=JournalAccount.CASH,
         description="Test transaction",
@@ -86,9 +95,9 @@ def _make_entry(entry_id: str, date: datetime.date, amount: Decimal) -> JournalE
 
 def _insert_entry(db, entry: JournalEntry, journal_id: str) -> None:
     db.execute(
-        "INSERT INTO journal_entries VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (
-            entry.journal_entry_id,
+            entry.journal_line_id,
             journal_id,
             entry.date.isoformat(),
             entry.account.value,
@@ -160,7 +169,7 @@ class TestFindJournals:
 
         assert len(results[0].entries) == 1
         e = results[0].entries[0]
-        assert e.journal_entry_id == "entry-1"
+        assert e.journal_line_id == "entry-1"
         assert e.debit == Decimal("42.50")
 
     def test_entries_belong_to_correct_journal(self, db):
@@ -182,7 +191,7 @@ class TestFindJournals:
         results = find_journals(journal_id=j1.journal_id, conn=db)
 
         assert len(results[0].entries) == 1
-        assert results[0].entries[0].journal_entry_id == "entry-j1"
+        assert results[0].entries[0].journal_line_id == "entry-j1"
 
 
 class TestFindJournalEntries:
@@ -204,7 +213,7 @@ class TestFindJournalEntries:
 
         results = find_journal_entries(sample_journal.journal_id, conn=db)
 
-        assert {e.journal_entry_id for e in results} == {"entry-1", "entry-2"}
+        assert {e.journal_line_id for e in results} == {"entry-1", "entry-2"}
 
     def test_filter_by_date_returns_matching_entries(self, db, sample_journal):
         save_journal(sample_journal, db)
@@ -218,7 +227,7 @@ class TestFindJournalEntries:
         )
 
         assert len(results) == 1
-        assert results[0].journal_entry_id == "entry-1"
+        assert results[0].journal_line_id == "entry-1"
 
     def test_filter_by_date_returns_empty_when_no_match(self, db, sample_journal):
         save_journal(sample_journal, db)
@@ -245,12 +254,12 @@ class TestFindJournalEntries:
             sample_journal.journal_id, date=datetime.date(2026, 1, 10), conn=db
         )
 
-        assert {e.journal_entry_id for e in results} == {"entry-1", "entry-2"}
+        assert {e.journal_line_id for e in results} == {"entry-1", "entry-2"}
 
     def test_entry_fields_are_correctly_mapped(self, db, sample_journal):
         save_journal(sample_journal, db)
         entry = JournalEntry(
-            journal_entry_id="entry-full",
+            journal_line_id="entry-full",
             date=datetime.date(2026, 1, 15),
             account=JournalAccount.CASH,
             description="Full field test",
@@ -266,7 +275,7 @@ class TestFindJournalEntries:
 
         assert len(results) == 1
         e = results[0]
-        assert e.journal_entry_id == "entry-full"
+        assert e.journal_line_id == "entry-full"
         assert e.date == datetime.date(2026, 1, 15)
         assert e.account == JournalAccount.CASH
         assert e.description == "Full field test"
@@ -281,7 +290,7 @@ class TestFindJournalEntries:
 
         save_journal(sample_journal, db)
         db.execute(
-            "INSERT INTO journal_entries VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 "entry-null-recip",
                 sample_journal.journal_id,
@@ -321,7 +330,7 @@ class TestFindJournalEntries:
 
         results = find_journal_entries(sample_journal.journal_id, conn=db)
 
-        assert [e.journal_entry_id for e in results] == ["entry-1", "entry-2", "entry-3"]
+        assert [e.journal_line_id for e in results] == ["entry-1", "entry-2", "entry-3"]
 
     def test_entries_scoped_to_journal(self, db):
         j1 = Journal(
@@ -342,7 +351,7 @@ class TestFindJournalEntries:
         results = find_journal_entries(j1.journal_id, conn=db)
 
         assert len(results) == 1
-        assert results[0].journal_entry_id == "entry-j1"
+        assert results[0].journal_line_id == "entry-j1"
 
 
 class TestDeleteJournal:
@@ -406,7 +415,7 @@ class TestUpdateJournal:
     def test_replaces_entries(self, db, sample_journal):
         save_journal(sample_journal, db)
         db.execute(
-            "INSERT INTO journal_entries VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 "entry-1",
                 sample_journal.journal_id,
@@ -429,7 +438,7 @@ class TestUpdateJournal:
             "SELECT * FROM journal_entries WHERE journal_id = ?", (sample_journal.journal_id,)
         ).fetchall()
         assert len(rows) == 1
-        assert rows[0]["journal_entry_id"] == "entry-2"
+        assert rows[0]["journal_line_id"] == "entry-2"
 
     def test_raises_when_journal_not_found(self, db, sample_journal):
         with pytest.raises(ValueError, match=sample_journal.journal_id):
@@ -443,7 +452,7 @@ class TestUpdateJournal:
         )
         save_journal(other, db)
         db.execute(
-            "INSERT INTO journal_entries VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 "entry-collision",
                 other.journal_id,
@@ -474,3 +483,310 @@ class TestUpdateJournal:
             "SELECT name FROM journals WHERE journal_id = ?", (sample_journal.journal_id,)
         ).fetchone()
         assert row["name"] == "January journal"
+
+
+CHECKING = "test_bank:checking:0000"
+SAVINGS = "test_bank:savings:1111"
+CARD = "test_bank:credit_card:2222"
+
+
+@pytest.fixture
+def bank_accounts(db):
+    for account_id, account_type in (
+        (CHECKING, BankAccountType.CHECKING),
+        (SAVINGS, BankAccountType.SAVINGS),
+        (CARD, BankAccountType.CREDIT_CARD),
+    ):
+        upsert_bank_account(
+            BankAccount(
+                id=account_id,
+                institution_name="Test Bank",
+                account_type=account_type,
+                last4=account_id[-4:],
+            ),
+            conn=db,
+        )
+
+
+def _bank_account_ids(db, journal: Journal) -> list[str]:
+    [found] = find_journals(journal_id=journal.journal_id, conn=db)
+    return found.bank_account_ids
+
+
+class TestJournalBankAccounts:
+    def test_saved_and_loaded(self, db, bank_accounts):
+        journal = Journal(name="Personal", bank_account_ids=[SAVINGS, CHECKING])
+
+        save_journal(journal, db)
+
+        assert _bank_account_ids(db, journal) == [CHECKING, SAVINGS]
+
+    def test_duplicates_collapsed(self, db, bank_accounts):
+        journal = Journal(name="Personal", bank_account_ids=[CHECKING, CHECKING])
+
+        save_journal(journal, db)
+
+        assert _bank_account_ids(db, journal) == [CHECKING]
+
+    def test_unknown_account_raises_and_saves_nothing(self, db, bank_accounts):
+        journal = Journal(name="Personal", bank_account_ids=[CHECKING, "no_such_account"])
+
+        with pytest.raises(ValueError, match="no_such_account not found"):
+            save_journal(journal, db)
+
+        assert find_journals(conn=db) == []
+
+    def test_account_in_another_journal_raises(self, db, bank_accounts):
+        save_journal(Journal(name="Personal", bank_account_ids=[CHECKING]), db)
+        llc = Journal(name="My LLC", bank_account_ids=[CHECKING])
+
+        with pytest.raises(ValueError, match="already in journal 'Personal'"):
+            save_journal(llc, db)
+
+        assert [j.name for j in find_journals(conn=db)] == ["Personal"]
+
+    def test_update_replaces_the_list(self, db, bank_accounts):
+        journal = Journal(name="Personal", bank_account_ids=[CHECKING, SAVINGS])
+        save_journal(journal, db)
+
+        journal.bank_account_ids = [SAVINGS, CARD]
+        update_journal(journal, db)
+
+        assert _bank_account_ids(db, journal) == [CARD, SAVINGS]
+
+    def test_update_with_empty_list_removes_all(self, db, bank_accounts):
+        journal = Journal(name="Personal", bank_account_ids=[CHECKING, SAVINGS])
+        save_journal(journal, db)
+
+        journal.bank_account_ids = []
+        update_journal(journal, db)
+
+        assert _bank_account_ids(db, journal) == []
+
+    def test_keeping_own_accounts_is_fine(self, db, bank_accounts):
+        journal = Journal(name="Personal", bank_account_ids=[CHECKING])
+        save_journal(journal, db)
+
+        journal.name = "Home"
+        update_journal(journal, db)
+
+        assert _bank_account_ids(db, journal) == [CHECKING]
+
+    def test_failed_update_changes_nothing(self, db, bank_accounts):
+        journal = Journal(name="Personal", bank_account_ids=[CHECKING])
+        save_journal(journal, db)
+
+        journal.name = "Should not persist"
+        journal.bank_account_ids = [SAVINGS, "no_such_account"]
+        with pytest.raises(ValueError):
+            update_journal(journal, db)
+
+        [found] = find_journals(journal_id=journal.journal_id, conn=db)
+        assert (found.name, found.bank_account_ids) == ("Personal", [CHECKING])
+
+    def test_deleting_journal_frees_its_accounts(self, db, bank_accounts):
+        personal = Journal(name="Personal", bank_account_ids=[CHECKING])
+        save_journal(personal, db)
+
+        delete_journal(personal.journal_id, db)
+        llc = Journal(name="My LLC", bank_account_ids=[CHECKING])
+        save_journal(llc, db)
+
+        assert _bank_account_ids(db, llc) == [CHECKING]
+        assert CHECKING in {a.id for a in find_bank_accounts(conn=db)}
+
+
+class TestEntrySource:
+    def test_entry_raw_transaction_and_bank_account_ids_round_trip(self, db, sample_journal):
+        save_journal(sample_journal, db)
+        entry = _make_entry("entry-1", datetime.date(2026, 9, 8), Decimal("4.33"))
+        entry.journal_entry_id = "e-1"
+        entry.raw_transaction_id = "txn-1"
+        entry.bank_account_id = CHECKING
+        sample_journal.entries = [entry]
+
+        update_journal(sample_journal, db)
+
+        [found] = find_journal_entries(sample_journal.journal_id, conn=db)
+        assert (found.journal_entry_id, found.raw_transaction_id, found.bank_account_id) == (
+            "e-1",
+            "txn-1",
+            CHECKING,
+        )
+
+    def test_entries_without_a_source_read_as_none(self, db, sample_journal):
+        save_journal(sample_journal, db)
+        sample_journal.entries = [
+            _make_entry("entry-1", datetime.date(2026, 9, 8), Decimal("4.33"))
+        ]
+
+        update_journal(sample_journal, db)
+
+        [found] = find_journal_entries(sample_journal.journal_id, conn=db)
+        assert (found.journal_entry_id, found.raw_transaction_id, found.bank_account_id) == (
+            None,
+            None,
+            None,
+        )
+
+
+def _lines(journal_entry_id: str, *raw_transaction_ids: str | None) -> list[JournalEntry]:
+    """One entry's lines, one per raw transaction id."""
+    lines = []
+    for n, raw_transaction_id in enumerate(raw_transaction_ids):
+        line = _make_entry(f"{journal_entry_id}-{n}", datetime.date(2026, 9, 8), Decimal("4.33"))
+        line.journal_entry_id = journal_entry_id
+        line.raw_transaction_id = raw_transaction_id
+        lines.append(line)
+    return lines
+
+
+def _entry_ids(db, journal: Journal) -> list[str | None]:
+    return sorted(
+        {e.journal_entry_id for e in find_journal_entries(journal.journal_id, conn=db)},
+        key=lambda e: e or "",
+    )
+
+
+class TestBookedEntries:
+    def test_add_journal_entry_round_trips(self, db, sample_journal):
+        save_journal(sample_journal, db)
+
+        with db:
+            add_journal_entry(sample_journal.journal_id, _lines("e-1", "txn-1", "txn-1"), db)
+
+        found = find_journal_entries(sample_journal.journal_id, conn=db)
+        assert sorted(e.journal_line_id for e in found) == ["e-1-0", "e-1-1"]
+        assert {e.journal_entry_id for e in found} == {"e-1"}
+
+    def test_add_journal_entries_adds_each(self, db, sample_journal):
+        save_journal(sample_journal, db)
+
+        with db:
+            add_journal_entries(
+                sample_journal.journal_id,
+                [_lines("e-1", "txn-1", "txn-1"), _lines("e-2", "txn-2", "txn-2")],
+                db,
+            )
+
+        assert _entry_ids(db, sample_journal) == ["e-1", "e-2"]
+
+    def test_find_booked_raw_transactions(self, db, sample_journal):
+        other = Journal(name="Other")
+        save_journal(sample_journal, db)
+        save_journal(other, db)
+        with db:
+            add_journal_entries(
+                sample_journal.journal_id,
+                [
+                    _lines("e-1", "txn-1", "txn-1"),
+                    _lines("match", "out", "in"),
+                    _lines("manual", None, None),
+                ],
+                db,
+            )
+            add_journal_entry(other.journal_id, _lines("e-9", "txn-9", "txn-9"), db)
+
+        assert find_booked_raw_transactions(sample_journal.journal_id, db) == {
+            "txn-1": "e-1",
+            "out": "match",
+            "in": "match",
+        }
+
+    def test_delete_journal_entry_removes_only_that_entry(self, db, sample_journal):
+        save_journal(sample_journal, db)
+        with db:
+            add_journal_entries(
+                sample_journal.journal_id,
+                [_lines("e-1", "txn-1", "txn-1"), _lines("e-2", "txn-2", "txn-2")],
+                db,
+            )
+
+        with db:
+            delete_journal_entry("e-1", db)
+
+        assert _entry_ids(db, sample_journal) == ["e-2"]
+
+    def test_delete_journal_entries_removes_each(self, db, sample_journal):
+        save_journal(sample_journal, db)
+        with db:
+            add_journal_entries(
+                sample_journal.journal_id,
+                [
+                    _lines("e-1", "txn-1", "txn-1"),
+                    _lines("e-2", "txn-2", "txn-2"),
+                    _lines("e-3", "txn-3", "txn-3"),
+                ],
+                db,
+            )
+
+        with db:
+            delete_journal_entries(["e-1", "e-3"], db)
+
+        assert _entry_ids(db, sample_journal) == ["e-2"]
+
+    def test_deleting_for_a_raw_transaction_removes_the_whole_match(self, db, sample_journal):
+        save_journal(sample_journal, db)
+        with db:
+            add_journal_entries(
+                sample_journal.journal_id,
+                [_lines("match", "out", "in"), _lines("e-2", "txn-2", "txn-2")],
+                db,
+            )
+
+        with db:
+            delete_journal_entries_for_raw_transaction("in", db)
+
+        assert _entry_ids(db, sample_journal) == ["e-2"]
+
+
+def _booked_on(journal_entry_id: str, bank_account_id: str) -> list[JournalEntry]:
+    """An entry whose bank-side line is on bank_account_id; the counter line has none."""
+    bank_side, counter = _lines(journal_entry_id, journal_entry_id, journal_entry_id)
+    bank_side.bank_account_id = bank_account_id
+    return [bank_side, counter]
+
+
+class TestRemovingBankAccountsDeletesTheirEntries:
+    @pytest.fixture
+    def personal(self, db, bank_accounts):
+        journal = Journal(name="Personal", bank_account_ids=[CHECKING, SAVINGS])
+        save_journal(journal, db)
+        with db:
+            add_journal_entries(
+                journal.journal_id,
+                [
+                    _booked_on("on-checking", CHECKING),
+                    _booked_on("on-savings", SAVINGS),
+                    _lines("manual", None, None),
+                ],
+                db,
+            )
+        return journal
+
+    @staticmethod
+    def _set_bank_accounts(db, journal: Journal, bank_account_ids: list[str]) -> None:
+        [found] = find_journals(journal_id=journal.journal_id, conn=db)
+        found.bank_account_ids = bank_account_ids
+        update_journal(found, db)
+
+    def test_deleting_for_a_bank_account_removes_its_whole_entries(self, db, personal):
+        with db:
+            delete_journal_entries_for_bank_account(personal.journal_id, CHECKING, db)
+
+        assert _entry_ids(db, personal) == ["manual", "on-savings"]
+
+    def test_removed_accounts_entries_go_others_stay(self, db, personal):
+        self._set_bank_accounts(db, personal, [SAVINGS])
+
+        assert _entry_ids(db, personal) == ["manual", "on-savings"]
+
+    def test_removing_all_keeps_only_manual_entries(self, db, personal):
+        self._set_bank_accounts(db, personal, [])
+
+        assert _entry_ids(db, personal) == ["manual"]
+
+    def test_unchanged_accounts_keep_every_entry(self, db, personal):
+        self._set_bank_accounts(db, personal, [CHECKING, SAVINGS])
+
+        assert _entry_ids(db, personal) == ["manual", "on-checking", "on-savings"]

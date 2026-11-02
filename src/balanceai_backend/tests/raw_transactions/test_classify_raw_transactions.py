@@ -114,6 +114,24 @@ class TestClassifyRawTransactions:
             classified_by=ClassifiedBy.AI,
         )
 
+    def test_flags_for_review_when_the_ai_has_no_category(self, db, fake_ai):
+        fake_ai.side_effect = lambda **call: _ClassifierAnswer(
+            classifications=[
+                _ClassifiedTransaction(
+                    index=0,
+                    counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+                    category=None,
+                    counterparty="Fun",
+                )
+            ]
+        )
+        upsert_raw_transaction(_txn("t1"), conn=db)
+
+        classify_raw_transactions(conn=db)
+
+        [txn] = find_raw_transactions(conn=db)
+        assert txn.classification.needs_user_review is True
+
     def test_skips_pending_transactions(self, db, fake_ai):
         upsert_raw_transaction(_txn("posted"), conn=db)
         upsert_raw_transaction(_txn("pending", pending=True), conn=db)

@@ -36,7 +36,7 @@
 # @pytest.fixture
 # def sample_entry():
 #     return JournalEntry(
-#         journal_entry_id="j1",
+#         journal_line_id="j1",
 #         date=datetime.date(2026, 1, 15),
 #         account=JournalAccount.ESSENTIALS_EXPENSE,
 #         description="Office supplies",
@@ -48,7 +48,7 @@
 # @pytest.fixture
 # def sample_entry_2():
 #     return JournalEntry(
-#         journal_entry_id="j2",
+#         journal_line_id="j2",
 #         date=datetime.date(2026, 1, 20),
 #         account=JournalAccount.CASH,
 #         description="Grocery run",
@@ -120,7 +120,7 @@
 #         loaded = load_journals()[0]
 #         entry = loaded.entries[0]
 #
-#         assert entry.journal_entry_id == sample_entry.journal_entry_id
+#         assert entry.journal_line_id == sample_entry.journal_line_id
 #         assert entry.date == sample_entry.date
 #         assert entry.account == sample_entry.account
 #         assert entry.description == sample_entry.description
@@ -367,7 +367,7 @@
 #         entries = load_journal_entries(sample_journal.journal_id)
 #
 #         assert len(entries) == 1
-#         assert entries[0].journal_entry_id == sample_entry.journal_entry_id
+#         assert entries[0].journal_line_id == sample_entry.journal_line_id
 #
 #     def test_returns_empty_list_when_journal_has_no_entries(self, sample_account):
 #         journal = Journal(
@@ -400,7 +400,7 @@
 #         entries = load_journal_entries(journal.journal_id, date=sample_entry.date)
 #
 #         assert len(entries) == 1
-#         assert entries[0].journal_entry_id == sample_entry.journal_entry_id
+#         assert entries[0].journal_line_id == sample_entry.journal_line_id
 #
 #     def test_returns_empty_list_when_no_entries_match_date(self, sample_journal):
 #         save_journal(sample_journal)
@@ -444,4 +444,4 @@
 #         entries = load_journal_entries(journal_1.journal_id)
 #
 #         assert len(entries) == 1
-#         assert entries[0].journal_entry_id == sample_entry.journal_entry_id
+#         assert entries[0].journal_line_id == sample_entry.journal_line_id

@@ -5,6 +5,7 @@ import sqlite3
 from decimal import Decimal
 
 from balanceai_backend.db.connection import conn as _default_conn
+from balanceai_backend.db.journal_db import delete_journal_entries_for_raw_transaction
 from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
 
 
@@ -105,12 +106,24 @@ def upsert_raw_transaction(txn: RawTransaction, conn: sqlite3.Connection = _defa
     ours, so the stored one is kept, dropped, or flagged per
     _classification_to_keep, and txn.classification is ignored — use
     update_raw_transaction_classification to change it.
+
+    If a booked transaction changes in a way its entry depends on (date,
+    amount, description, bank account, or classification), the entry is
+    deleted so the next booking run books it again.
     """
     with conn:
         existing = find_raw_transactions(id=txn.id, conn=conn)
         classification = (
             _classification_to_keep(existing[0], txn) if existing else txn.classification
         )
+        if existing and (
+            existing[0].posting_date,
+            existing[0].amount,
+            existing[0].description,
+            existing[0].account_id,
+            existing[0].classification,
+        ) != (txn.posting_date, txn.amount, txn.description, txn.account_id, classification):
+            delete_journal_entries_for_raw_transaction(txn.id, conn)
         conn.execute(
             "INSERT INTO raw_transactions"
             " (id, source, plaid_item_id, account_id, plaid_account_id,"
@@ -148,9 +161,11 @@ def update_raw_transaction_classification(
     classification: Classification | None,
     conn: sqlite3.Connection = _default_conn,
 ) -> None:
-    """Set a raw transaction's classification, or clear it with None. Raises
+    """Set a raw transaction's classification, or clear it with None, and
+    delete its entry so the next booking run books it again. Raises
     ValueError if the transaction doesn't exist."""
     with conn:
+        delete_journal_entries_for_raw_transaction(transaction_id, conn)
         cursor = conn.execute(
             "UPDATE raw_transactions SET classification = ? WHERE id = ?",
             (_serialize_classification(classification), transaction_id),
@@ -160,7 +175,7 @@ def update_raw_transaction_classification(
 
 
 def delete_raw_transaction(transaction_id: str, conn: sqlite3.Connection = _default_conn) -> None:
-    """Delete a raw transaction by id.
+    """Delete a raw transaction by id, and its entry.
 
     Silently no-ops if it doesn't exist — Plaid's `removed` bucket is a
     "make sure this is gone" signal from a bulk sync loop, not a targeted
@@ -168,4 +183,5 @@ def delete_raw_transaction(transaction_id: str, conn: sqlite3.Connection = _defa
     is for delete_plaid_item.
     """
     with conn:
+        delete_journal_entries_for_raw_transaction(transaction_id, conn)
         conn.execute("DELETE FROM raw_transactions WHERE id = ?", (transaction_id,))
