@@ -14,7 +14,7 @@
 # from typing import Optional
 #
 # from balanceai_backend.models import Journal
-# from balanceai_backend.models.journal import JournalEntry
+# from balanceai_backend.models.journal import JournalLine
 #
 # logger = logging.getLogger(__name__)
 #
@@ -69,12 +69,12 @@
 #     return None
 #
 #
-# def load_journal_entries(journal_id: str, date: Optional[datetime.date] = None) -> list[JournalEntry]:
+# def load_journal_entries(journal_id: str, date: Optional[datetime.date] = None) -> list[JournalLine]:
 #     """Load entries for a journal, optionally filtered by date."""
 #     journal = find_journal_by_id(journal_id)
 #     if journal is None:
 #         raise ValueError(f"Journal {journal_id} not found")
-#     entries = journal.entries
+#     entries = journal.lines
 #     if date is not None:
 #         entries = [e for e in entries if e.date == date]
 #     return entries

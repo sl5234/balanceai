@@ -66,12 +66,12 @@ class TestGetSchemaSummary:
         assert "ON DELETE CASCADE" not in result
 
     def test_real_schema_tables_present(self):
-        """Smoke test against the real DB — journals and journal_entries must appear."""
+        """Smoke test against the real DB — journals and journal_lines must appear."""
         from balanceai_backend.db.connection import conn
 
         result = get_schema_summary(conn)
         assert "journals(" in result
-        assert "journal_entries(" in result
+        assert "journal_lines(" in result
 
     def test_real_schema_key_columns_present(self):
         """Key columns used in queries must be present in the summary."""
@@ -84,10 +84,10 @@ class TestGetSchemaSummary:
 
 @pytest.fixture
 def db_with_entries():
-    """In-memory DB with a journal_entries table seeded with test rows."""
+    """In-memory DB with a journal_lines table seeded with test rows."""
     connection = sqlite3.connect(":memory:")
     connection.execute("""
-        CREATE TABLE journal_entries (
+        CREATE TABLE journal_lines (
             journal_line_id TEXT PRIMARY KEY,
             date TEXT,
             account TEXT,
@@ -97,7 +97,7 @@ def db_with_entries():
         )
     """)
     connection.executemany(
-        "INSERT INTO journal_entries VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO journal_lines VALUES (?, ?, ?, ?, ?, ?)",
         [
             ("1", "2025-10-01", "checking", "dining", 0, 50.0),
             ("2", "2025-10-02", "checking", "groceries", 0, 20.0),
@@ -120,7 +120,7 @@ class TestGetDistinctCategories:
         assert None in result
 
     def test_empty_table_returns_empty_list(self, db_with_entries):
-        db_with_entries.execute("DELETE FROM journal_entries")
+        db_with_entries.execute("DELETE FROM journal_lines")
         assert get_distinct_categories(db_with_entries) == []
 
     def test_no_duplicates(self, db_with_entries):
@@ -138,13 +138,13 @@ class TestGetDistinctAccounts:
         assert len(result) == len(set(result))
 
     def test_empty_table_returns_empty_list(self, db_with_entries):
-        db_with_entries.execute("DELETE FROM journal_entries")
+        db_with_entries.execute("DELETE FROM journal_lines")
         assert get_distinct_accounts(db_with_entries) == []
 
     def test_includes_null(self):
         connection = sqlite3.connect(":memory:")
-        connection.execute("CREATE TABLE journal_entries (account TEXT)")
-        connection.execute("INSERT INTO journal_entries VALUES (NULL)")
+        connection.execute("CREATE TABLE journal_lines (account TEXT)")
+        connection.execute("INSERT INTO journal_lines VALUES (NULL)")
         result = get_distinct_accounts(connection)
         assert None in result
         connection.close()

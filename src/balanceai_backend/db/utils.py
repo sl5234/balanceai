@@ -2,14 +2,14 @@ import sqlite3
 
 
 def get_distinct_categories(connection: sqlite3.Connection) -> list[str | None]:
-    """Return all distinct category values from journal_entries, including NULL."""
-    rows = connection.execute("SELECT DISTINCT category FROM journal_entries").fetchall()
+    """Return all distinct category values from journal_lines, including NULL."""
+    rows = connection.execute("SELECT DISTINCT category FROM journal_lines").fetchall()
     return [row[0] for row in rows]
 
 
 def get_distinct_accounts(connection: sqlite3.Connection) -> list[str | None]:
-    """Return all distinct account values from journal_entries, including NULL."""
-    rows = connection.execute("SELECT DISTINCT account FROM journal_entries").fetchall()
+    """Return all distinct account values from journal_lines, including NULL."""
+    rows = connection.execute("SELECT DISTINCT account FROM journal_lines").fetchall()
     return [row[0] for row in rows]
 
 
@@ -21,7 +21,7 @@ def get_schema_summary(connection: sqlite3.Connection) -> str:
 
     Example output:
         journals(journal_id TEXT, account_id TEXT, ...)
-        journal_entries(journal_line_id TEXT, journal_id TEXT, ...)
+        journal_lines(journal_line_id TEXT, journal_id TEXT, ...)
     """
     tables = [
         row[0]

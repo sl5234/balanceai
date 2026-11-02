@@ -11,11 +11,11 @@ from balanceai_backend.helpers.journal_entry_helper import (
 )
 from balanceai_backend.models.bank import Bank
 from balanceai_backend.models.journal import (
-    GeneratedJournalEntry,
     GeneratedJournalEntrySet,
+    GeneratedJournalLine,
     Journal,
     JournalAccount,
-    JournalEntry,
+    JournalLine,
 )
 from balanceai_backend.models.transaction import Transaction
 
@@ -29,13 +29,13 @@ def empty_journal():
     return Journal(
         journal_id="journal-1",
         name="January journal",
-        entries=[],
+        lines=[],
     )
 
 
 @pytest.fixture
 def entry_data():
-    return GeneratedJournalEntry(
+    return GeneratedJournalLine(
         date=datetime.date(2026, 1, 27),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Grocery purchase at Trader Joe's",
@@ -46,7 +46,7 @@ def entry_data():
 
 @pytest.fixture
 def existing_entry():
-    return JournalEntry(
+    return JournalLine(
         journal_line_id="original-id",
         date=datetime.date(2026, 1, 27),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
@@ -71,9 +71,9 @@ def receipt_path(tmp_path):
 @pytest.fixture
 def ocr_result(entry_data):
     return GeneratedJournalEntrySet(
-        entries=[
+        lines=[
             entry_data,
-            GeneratedJournalEntry(
+            GeneratedJournalLine(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.CASH,
                 description="Grocery purchase at Trader Joe's",
@@ -103,15 +103,15 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
                 return_value=ocr_result,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
-        assert len(result["entries"]) == 2
-        descriptions = {e["description"] for e in result["entries"]}
+        assert len(result["lines"]) == 2
+        descriptions = {e["description"] for e in result["lines"]}
         assert "Grocery purchase at Trader Joe's" in descriptions
 
     def test_new_entry_gets_fresh_id(self, empty_journal, receipt_path, ocr_result):
@@ -125,14 +125,14 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
                 return_value=ocr_result,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
-        line_id = result["entries"][0]["journal_line_id"]
+        line_id = result["lines"][0]["journal_line_id"]
         assert line_id is not None
         assert line_id != ""
 
@@ -140,7 +140,7 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
         journal = Journal(
             journal_id="journal-1",
             name="January journal",
-            entries=[existing_entry],
+            lines=[existing_entry],
         )
 
         with (
@@ -153,17 +153,17 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
                 return_value=ocr_result,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 side_effect=[existing_entry, None],
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
-        assert len(result["entries"]) == 2
+        assert len(result["lines"]) == 2
         expense = next(
             e
-            for e in result["entries"]
+            for e in result["lines"]
             if e["account"] == JournalAccount.NON_ESSENTIALS_EXPENSE.value
         )
         assert expense["journal_line_id"] == "original-id"
@@ -172,15 +172,15 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
 
     def test_adds_multiple_entries(self, empty_journal, receipt_path):
         double_entry_result = GeneratedJournalEntrySet(
-            entries=[
-                GeneratedJournalEntry(
+            lines=[
+                GeneratedJournalLine(
                     date=datetime.date(2026, 1, 27),
                     account=JournalAccount.NON_ESSENTIALS_EXPENSE,
                     description="Grocery purchase at Trader Joe's",
                     debit=Decimal("32.02"),
                     credit=Decimal("0.00"),
                 ),
-                GeneratedJournalEntry(
+                GeneratedJournalLine(
                     date=datetime.date(2026, 1, 27),
                     account=JournalAccount.CASH,
                     description="Payment via Visa",
@@ -200,14 +200,14 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
                 return_value=double_entry_result,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
-        assert len(result["entries"]) == 2
+        assert len(result["lines"]) == 2
 
     def test_no_entries_from_ocr_leaves_journal_unchanged(self, empty_journal, receipt_path):
         with (
@@ -217,13 +217,13 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
             ),
             patch(
                 "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
-                return_value=GeneratedJournalEntrySet(entries=[]),
+                return_value=GeneratedJournalEntrySet(lines=[]),
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_receipt("journal-1", receipt_path)
 
-        assert result["entries"] == []
+        assert result["lines"] == []
 
     def test_storage_update_called_once(self, empty_journal, receipt_path, ocr_result):
         with (
@@ -236,7 +236,7 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
                 return_value=ocr_result,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal") as mock_save,
@@ -256,7 +256,7 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
                 return_value=ocr_result,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -265,7 +265,7 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
 
         assert isinstance(result, dict)
         assert "journal_id" in result
-        assert "entries" in result
+        assert "lines" in result
 
     def test_passes_file_bytes_and_mime_type_to_ocr(self, empty_journal, receipt_path, ocr_result):
         with (
@@ -278,7 +278,7 @@ class TestHandleCreateOrUpdateJournalEntriesForReceipt:
                 return_value=ocr_result,
             ) as mock_ocr,
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -319,25 +319,25 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
                 return_value=[empty_journal],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_transactions",
                 return_value=grouped,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
-        assert len(result["entries"]) == 1
-        assert result["entries"][0]["description"] == "Grocery purchase at Trader Joe's"
+        assert len(result["lines"]) == 1
+        assert result["lines"][0]["description"] == "Grocery purchase at Trader Joe's"
 
     def test_updates_existing_entry_preserving_id(self, transactions, entry_data, existing_entry):
         journal = Journal(
             journal_id="journal-1",
             name="January journal",
-            entries=[existing_entry],
+            lines=[existing_entry],
         )
         grouped = {"upsert": [entry_data], "remove": []}
 
@@ -347,27 +347,27 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
                 return_value=[journal],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_transactions",
                 return_value=grouped,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=existing_entry,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
-        assert len(result["entries"]) == 1
-        assert result["entries"][0]["journal_line_id"] == "original-id"
-        assert result["entries"][0]["description"] == "Grocery purchase at Trader Joe's"
-        assert result["entries"][0]["debit"] == "32.02"
+        assert len(result["lines"]) == 1
+        assert result["lines"][0]["journal_line_id"] == "original-id"
+        assert result["lines"][0]["description"] == "Grocery purchase at Trader Joe's"
+        assert result["lines"][0]["debit"] == "32.02"
 
     def test_removes_entry_for_removed_transaction(self, transactions, entry_data, existing_entry):
         journal = Journal(
             journal_id="journal-1",
             name="January journal",
-            entries=[existing_entry],
+            lines=[existing_entry],
         )
         grouped = {"upsert": [], "remove": [entry_data]}
 
@@ -377,18 +377,18 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
                 return_value=[journal],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_transactions",
                 return_value=grouped,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=existing_entry,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
-        assert result["entries"] == []
+        assert result["lines"] == []
 
     def test_skips_remove_when_entry_not_found(self, transactions, entry_data, existing_entry):
         # Journal has an unrelated entry. The remove target is not found by the finder,
@@ -396,7 +396,7 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
         journal = Journal(
             journal_id="journal-1",
             name="January journal",
-            entries=[existing_entry],
+            lines=[existing_entry],
         )
         grouped = {"upsert": [], "remove": [entry_data]}
 
@@ -406,19 +406,19 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
                 return_value=[journal],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_transactions",
                 return_value=grouped,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
-        assert len(result["entries"]) == 1
-        assert result["entries"][0]["journal_line_id"] == existing_entry.journal_line_id
+        assert len(result["lines"]) == 1
+        assert result["lines"][0]["journal_line_id"] == existing_entry.journal_line_id
 
     def test_empty_transactions_leaves_journal_unchanged(self, empty_journal):
         grouped = {"upsert": [], "remove": []}
@@ -429,25 +429,25 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
                 return_value=[empty_journal],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_transactions",
                 return_value=grouped,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_transactions("journal-1", {})
 
-        assert result["entries"] == []
+        assert result["lines"] == []
 
     def test_upserts_multiple_entries(self, empty_journal, transactions):
         two_entries = [
-            GeneratedJournalEntry(
+            GeneratedJournalLine(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.NON_ESSENTIALS_EXPENSE,
                 description="Grocery purchase",
                 debit=Decimal("32.02"),
                 credit=Decimal("0.00"),
             ),
-            GeneratedJournalEntry(
+            GeneratedJournalLine(
                 date=datetime.date(2026, 1, 27),
                 account=JournalAccount.CASH,
                 description="Payment via Visa",
@@ -463,18 +463,18 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
                 return_value=[empty_journal],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_transactions",
                 return_value=grouped,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
         ):
             result = handle_sync_journal_entries_from_transactions("journal-1", transactions)
 
-        assert len(result["entries"]) == 2
+        assert len(result["lines"]) == 2
 
     def test_storage_update_called_once(self, empty_journal, transactions, entry_data):
         grouped = {"upsert": [entry_data], "remove": []}
@@ -485,11 +485,11 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
                 return_value=[empty_journal],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_transactions",
                 return_value=grouped,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal") as mock_save,
@@ -507,11 +507,11 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
                 return_value=[empty_journal],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_transactions",
                 return_value=grouped,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -520,7 +520,7 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
 
         assert isinstance(result, dict)
         assert "journal_id" in result
-        assert "entries" in result
+        assert "lines" in result
 
     def test_passes_transactions_to_extractor(self, empty_journal):
         grouped = {"upsert": [], "remove": []}
@@ -532,7 +532,7 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
                 return_value=[empty_journal],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_transactions",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_transactions",
                 return_value=grouped,
             ) as mock_extract,
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -562,7 +562,7 @@ def sample_transaction():
 
 @pytest.fixture
 def expense_entry_data():
-    return GeneratedJournalEntry(
+    return GeneratedJournalLine(
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
         description="Lyft ride purchase.",
@@ -574,7 +574,7 @@ def expense_entry_data():
 
 @pytest.fixture
 def cash_entry_data():
-    return GeneratedJournalEntry(
+    return GeneratedJournalLine(
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.CASH,
         description="Lyft ride purchase.",
@@ -586,7 +586,7 @@ def cash_entry_data():
 
 @pytest.fixture
 def bank_statement_existing_entry():
-    return JournalEntry(
+    return JournalLine(
         journal_line_id="original-id",
         date=datetime.date(2026, 1, 25),
         account=JournalAccount.NON_ESSENTIALS_EXPENSE,
@@ -626,11 +626,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[expense_entry_data, cash_entry_data],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -639,7 +639,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
-        assert len(result["entries"]) == 2
+        assert len(result["lines"]) == 2
 
     def test_updates_existing_entry_preserving_id(
         self, sample_transaction, expense_entry_data, bank_statement_existing_entry
@@ -647,7 +647,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         journal = Journal(
             journal_id="journal-1",
             name="January journal",
-            entries=[bank_statement_existing_entry],
+            lines=[bank_statement_existing_entry],
         )
         mock_parser = self._make_parser([sample_transaction])
 
@@ -661,11 +661,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[expense_entry_data],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=bank_statement_existing_entry,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -674,10 +674,10 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
-        assert len(result["entries"]) == 1
-        assert result["entries"][0]["journal_line_id"] == "original-id"
-        assert result["entries"][0]["description"] == "Lyft ride purchase."
-        assert result["entries"][0]["debit"] == "12.00"
+        assert len(result["lines"]) == 1
+        assert result["lines"][0]["journal_line_id"] == "original-id"
+        assert result["lines"][0]["description"] == "Lyft ride purchase."
+        assert result["lines"][0]["debit"] == "12.00"
 
     def test_no_transactions_leaves_journal_unchanged(self, empty_journal):
         mock_parser = self._make_parser([])
@@ -697,7 +697,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
-        assert result["entries"] == []
+        assert result["lines"] == []
 
     def test_multiple_entries_per_transaction(
         self, empty_journal, sample_transaction, expense_entry_data, cash_entry_data
@@ -714,11 +714,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[expense_entry_data, cash_entry_data],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -727,8 +727,8 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
-        assert len(result["entries"]) == 2
-        accounts = {e["account"] for e in result["entries"]}
+        assert len(result["lines"]) == 2
+        accounts = {e["account"] for e in result["lines"]}
         assert accounts == {JournalAccount.NON_ESSENTIALS_EXPENSE.value, JournalAccount.CASH.value}
 
     def test_multiple_transactions_all_entries_accumulated(
@@ -752,7 +752,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             previous_balance=Decimal("988.00"),
             new_balance=Decimal("966.23"),
         )
-        gas_expense = GeneratedJournalEntry(
+        gas_expense = GeneratedJournalLine(
             date=datetime.date(2026, 1, 26),
             account=JournalAccount.ESSENTIALS_EXPENSE,
             description="Gas purchase at Shell.",
@@ -760,7 +760,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             credit=Decimal("0.00"),
             category="gas",
         )
-        gas_cash = GeneratedJournalEntry(
+        gas_cash = GeneratedJournalLine(
             date=datetime.date(2026, 1, 26),
             account=JournalAccount.CASH,
             description="Gas purchase at Shell.",
@@ -787,11 +787,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 side_effect=extract_side_effect,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -800,7 +800,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
-        assert len(result["entries"]) == 4
+        assert len(result["lines"]) == 4
 
     def test_parser_error_propagates_without_saving(self, empty_journal):
         mock_parser = MagicMock()
@@ -894,11 +894,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[expense_entry_data],
             ) as mock_extract,
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -926,11 +926,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[expense_entry_data],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal") as mock_save,
@@ -961,14 +961,14 @@ class TestHandleSyncJournalEntriesFromBankStatement:
 
         assert isinstance(result, dict)
         assert "journal_id" in result
-        assert "entries" in result
+        assert "lines" in result
 
     # ---------------------------------------------------------------------------
     # Re-categorization step
     # ---------------------------------------------------------------------------
 
     def test_recategorizes_null_category_entries(self, empty_journal, sample_transaction):
-        null_entry = GeneratedJournalEntry(
+        null_entry = GeneratedJournalLine(
             date=datetime.date(2026, 1, 25),
             account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Uncategorized transaction from Rudy's.",
@@ -988,7 +988,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[null_entry],
             ),
             patch(
@@ -996,7 +996,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=null_entry,
             ) as mock_recategorize,
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -1022,14 +1022,14 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[expense_entry_data, cash_entry_data],
             ),
             patch(
                 "balanceai_backend.helpers.journal_entry_helper.generate_transaction_category"
             ) as mock_recategorize,
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -1041,7 +1041,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         mock_recategorize.assert_not_called()
 
     def test_recategorized_entry_is_used_in_journal(self, empty_journal, sample_transaction):
-        null_entry = GeneratedJournalEntry(
+        null_entry = GeneratedJournalLine(
             date=datetime.date(2026, 1, 25),
             account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Uncategorized transaction from Rudy's.",
@@ -1067,7 +1067,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[null_entry],
             ),
             patch(
@@ -1075,7 +1075,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=recategorized,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -1084,13 +1084,13 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
-        assert result["entries"][0]["description"] == "Haircut at Rudy's."
-        assert result["entries"][0]["category"] == "haircut"
+        assert result["lines"][0]["description"] == "Haircut at Rudy's."
+        assert result["lines"][0]["category"] == "haircut"
 
     def test_only_null_category_entries_are_recategorized(
         self, empty_journal, sample_transaction, expense_entry_data
     ):
-        null_entry = GeneratedJournalEntry(
+        null_entry = GeneratedJournalLine(
             date=datetime.date(2026, 1, 25),
             account=JournalAccount.CASH,
             description="Uncategorized transaction from Rudy's.",
@@ -1110,7 +1110,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[expense_entry_data, null_entry],
             ),
             patch(
@@ -1118,7 +1118,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=null_entry,
             ) as mock_recategorize,
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -1130,7 +1130,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         mock_recategorize.assert_called_once_with(null_entry)
 
     def test_all_null_category_entries_are_recategorized(self, empty_journal, sample_transaction):
-        null_entry_1 = GeneratedJournalEntry(
+        null_entry_1 = GeneratedJournalLine(
             date=datetime.date(2026, 1, 25),
             account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Uncategorized transaction from Rudy's.",
@@ -1138,7 +1138,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             credit=Decimal("0.00"),
             category=None,
         )
-        null_entry_2 = GeneratedJournalEntry(
+        null_entry_2 = GeneratedJournalLine(
             date=datetime.date(2026, 1, 25),
             account=JournalAccount.CASH,
             description="Uncategorized transaction from Rudy's.",
@@ -1158,7 +1158,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[null_entry_1, null_entry_2],
             ),
             patch(
@@ -1166,7 +1166,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 side_effect=lambda e: e,
             ) as mock_recategorize,
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -1178,7 +1178,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         assert mock_recategorize.call_count == 2
 
     def test_rate_limit_in_step2_does_not_rerun_step1(self, empty_journal, sample_transaction):
-        null_entry = GeneratedJournalEntry(
+        null_entry = GeneratedJournalLine(
             date=datetime.date(2026, 1, 25),
             account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Uncategorized transaction from Rudy's.",
@@ -1201,7 +1201,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[null_entry],
             ) as mock_extract,
             patch(
@@ -1209,7 +1209,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 side_effect=[FakeRateLimitError(), recategorized],
             ) as mock_recategorize,
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -1227,7 +1227,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
     def test_null_category_entry_still_added_when_recategorization_returns_unchanged(
         self, empty_journal, sample_transaction
     ):
-        null_entry = GeneratedJournalEntry(
+        null_entry = GeneratedJournalLine(
             date=datetime.date(2026, 1, 25),
             account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description="Uncategorized transaction from Rudy's.",
@@ -1247,7 +1247,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 return_value=[null_entry],
             ),
             patch(
@@ -1255,7 +1255,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=null_entry,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -1264,14 +1264,14 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 "journal-1", "/path/to/statement.pdf", Bank.CHASE
             )
 
-        assert len(result["entries"]) == 1
+        assert len(result["lines"]) == 1
 
     # ---------------------------------------------------------------------------
     # Response redaction
     # ---------------------------------------------------------------------------
 
     def _make_entry_data(self, i):
-        return GeneratedJournalEntry(
+        return GeneratedJournalLine(
             date=datetime.date(2026, 1, i + 1),
             account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             description=f"Transaction {i}",
@@ -1295,11 +1295,11 @@ class TestHandleSyncJournalEntriesFromBankStatement:
                 return_value=mock_parser,
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.extract_journal_entries_from_bank_statement_transaction",
+                "balanceai_backend.helpers.journal_entry_helper.extract_journal_lines_from_bank_statement_transaction",
                 side_effect=lambda txn: [entries[transactions.index(txn)]],
             ),
             patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_entry",
+                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
                 return_value=None,
             ),
             patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
@@ -1310,28 +1310,28 @@ class TestHandleSyncJournalEntriesFromBankStatement:
 
     def test_redaction_returns_all_entries_when_empty(self, empty_journal):
         result = self._sync_with_n_entries(empty_journal, 0)
-        assert result["entries"] == []
-        assert "entries_redacted" not in result
+        assert result["lines"] == []
+        assert "lines_redacted" not in result
 
     def test_redaction_returns_all_entries_when_below_threshold(self, empty_journal):
         result = self._sync_with_n_entries(empty_journal, 4)
-        assert len(result["entries"]) == 4
-        assert "entries_redacted" not in result
+        assert len(result["lines"]) == 4
+        assert "lines_redacted" not in result
 
     def test_redaction_returns_all_entries_when_exactly_5(self, empty_journal):
         result = self._sync_with_n_entries(empty_journal, 5)
-        assert len(result["entries"]) == 5
-        assert "entries_redacted" not in result
+        assert len(result["lines"]) == 5
+        assert "lines_redacted" not in result
 
     def test_redaction_returns_first_5_entries_when_above_threshold(self, empty_journal):
         result = self._sync_with_n_entries(empty_journal, 6)
-        assert len(result["entries"]) == 5
+        assert len(result["lines"]) == 5
 
     def test_redaction_entries_redacted_count_is_correct(self, empty_journal):
         result = self._sync_with_n_entries(empty_journal, 8)
-        assert result["entries_redacted"] == 3
+        assert result["lines_redacted"] == 3
 
     def test_redaction_entries_are_in_original_order(self, empty_journal):
         result = self._sync_with_n_entries(empty_journal, 7)
-        descriptions = [e["description"] for e in result["entries"]]
+        descriptions = [e["description"] for e in result["lines"]]
         assert descriptions == [f"Transaction {i}" for i in range(5)]

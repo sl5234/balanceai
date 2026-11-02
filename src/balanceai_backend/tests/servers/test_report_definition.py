@@ -21,15 +21,15 @@ _STANDARD_BUCKETING_SQL = """
         SUM(CASE WHEN je.account = 'essential_expense' AND je.debit > 0 THEN je.debit ELSE 0 END) AS essential_expenses,
         SUM(CASE WHEN je.account = 'non_essential_expense' AND je.debit > 0 THEN je.debit ELSE 0 END) AS non_essential_expenses,
         SUM(CASE WHEN je.account = 'transfer' AND je.credit > 0 THEN je.credit ELSE 0 END) AS transfers
-    FROM journal_entries je
+    FROM journal_lines je
     WHERE je.date BETWEEN :start_date AND :end_date
     GROUP BY je.date
     ORDER BY je.date
 """
 
-_UNPARAMETERIZED_SQL = "SELECT SUM(je.credit) FROM journal_entries je WHERE je.account = 'cash' AND je.credit > 0 AND je.category = 'cigarettes' AND je.date BETWEEN '2025-10-01' AND '2025-10-31'"
+_UNPARAMETERIZED_SQL = "SELECT SUM(je.credit) FROM journal_lines je WHERE je.account = 'cash' AND je.credit > 0 AND je.category = 'cigarettes' AND je.date BETWEEN '2025-10-01' AND '2025-10-31'"
 
-_LLM_PARAMETERIZED_SQL = "SELECT SUM(je.credit) FROM journal_entries je WHERE je.account = 'cash' AND je.credit > 0 AND je.category = 'cigarettes' AND je.date BETWEEN :start_date AND :end_date"
+_LLM_PARAMETERIZED_SQL = "SELECT SUM(je.credit) FROM journal_lines je WHERE je.account = 'cash' AND je.credit > 0 AND je.category = 'cigarettes' AND je.date BETWEEN :start_date AND :end_date"
 
 _LLM_RESPONSE = json.dumps(
     {
@@ -66,13 +66,13 @@ def seeded_conn(in_memory_conn):
         INSERT INTO journals VALUES ('j1', 'Test journal', '', '2025-10-01T00:00:00+00:00');
 
         -- Income: cash debit leg
-        INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES ('e1', 'j1', '2025-10-01', 'cash', 'Paycheck', 5000.0, 0.0, 'income', 0.0, 'Self');
+        INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES ('e1', 'j1', '2025-10-01', 'cash', 'Paycheck', 5000.0, 0.0, 'income', 0.0, 'Self');
         -- Essential expense: essential_expense debit leg
-        INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES ('e2', 'j1', '2025-10-05', 'essential_expense', 'Whole Foods', 120.0, 0.0, 'groceries', 0.0, 'Self');
+        INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES ('e2', 'j1', '2025-10-05', 'essential_expense', 'Whole Foods', 120.0, 0.0, 'groceries', 0.0, 'Self');
         -- Non-essential expense: non_essential_expense debit leg
-        INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES ('e3', 'j1', '2025-10-10', 'non_essential_expense', 'Netflix', 15.0, 0.0, 'entertainment', 0.0, 'Self');
+        INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES ('e3', 'j1', '2025-10-10', 'non_essential_expense', 'Netflix', 15.0, 0.0, 'entertainment', 0.0, 'Self');
         -- Transfer: transfer credit leg
-        INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES ('e4', 'j1', '2025-10-15', 'transfer', 'Savings transfer', 0.0, 500.0, 'transfer', 0.0, 'Self');
+        INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES ('e4', 'j1', '2025-10-15', 'transfer', 'Savings transfer', 0.0, 500.0, 'transfer', 0.0, 'Self');
     """)
     return in_memory_conn
 

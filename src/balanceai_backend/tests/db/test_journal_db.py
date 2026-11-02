@@ -14,13 +14,13 @@ from balanceai_backend.db.journal_db import (
     delete_journal_entries_for_raw_transaction,
     delete_journal_entry,
     find_booked_raw_transactions,
-    find_journal_entries,
+    find_journal_lines,
     find_journals,
     save_journal,
     update_journal,
 )
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
-from balanceai_backend.models.journal import Journal, JournalAccount, JournalEntry
+from balanceai_backend.models.journal import Journal, JournalAccount, JournalLine
 
 
 @pytest.fixture
@@ -79,8 +79,8 @@ class TestSaveJournal:
         assert count == 2
 
 
-def _make_entry(line_id: str, date: datetime.date, amount: Decimal) -> JournalEntry:
-    return JournalEntry(
+def _make_entry(line_id: str, date: datetime.date, amount: Decimal) -> JournalLine:
+    return JournalLine(
         journal_line_id=line_id,
         date=date,
         account=JournalAccount.CASH,
@@ -93,9 +93,9 @@ def _make_entry(line_id: str, date: datetime.date, amount: Decimal) -> JournalEn
     )
 
 
-def _insert_entry(db, entry: JournalEntry, journal_id: str) -> None:
+def _insert_entry(db, entry: JournalLine, journal_id: str) -> None:
     db.execute(
-        "INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (
             entry.journal_line_id,
             journal_id,
@@ -167,8 +167,8 @@ class TestFindJournals:
 
         results = find_journals(journal_id=sample_journal.journal_id, conn=db)
 
-        assert len(results[0].entries) == 1
-        e = results[0].entries[0]
+        assert len(results[0].lines) == 1
+        e = results[0].lines[0]
         assert e.journal_line_id == "entry-1"
         assert e.debit == Decimal("42.50")
 
@@ -190,19 +190,19 @@ class TestFindJournals:
 
         results = find_journals(journal_id=j1.journal_id, conn=db)
 
-        assert len(results[0].entries) == 1
-        assert results[0].entries[0].journal_line_id == "entry-j1"
+        assert len(results[0].lines) == 1
+        assert results[0].lines[0].journal_line_id == "entry-j1"
 
 
 class TestFindJournalEntries:
     def test_raises_when_journal_not_found(self, db):
         with pytest.raises(ValueError, match="nonexistent"):
-            find_journal_entries("nonexistent", conn=db)
+            find_journal_lines("nonexistent", conn=db)
 
     def test_returns_empty_list_when_no_entries(self, db, sample_journal):
         save_journal(sample_journal, db)
 
-        assert find_journal_entries(sample_journal.journal_id, conn=db) == []
+        assert find_journal_lines(sample_journal.journal_id, conn=db) == []
 
     def test_returns_all_entries_when_no_date_filter(self, db, sample_journal):
         save_journal(sample_journal, db)
@@ -211,7 +211,7 @@ class TestFindJournalEntries:
         _insert_entry(db, e1, sample_journal.journal_id)
         _insert_entry(db, e2, sample_journal.journal_id)
 
-        results = find_journal_entries(sample_journal.journal_id, conn=db)
+        results = find_journal_lines(sample_journal.journal_id, conn=db)
 
         assert {e.journal_line_id for e in results} == {"entry-1", "entry-2"}
 
@@ -222,7 +222,7 @@ class TestFindJournalEntries:
         _insert_entry(db, e1, sample_journal.journal_id)
         _insert_entry(db, e2, sample_journal.journal_id)
 
-        results = find_journal_entries(
+        results = find_journal_lines(
             sample_journal.journal_id, date=datetime.date(2026, 1, 10), conn=db
         )
 
@@ -237,7 +237,7 @@ class TestFindJournalEntries:
             sample_journal.journal_id,
         )
 
-        results = find_journal_entries(
+        results = find_journal_lines(
             sample_journal.journal_id, date=datetime.date(2026, 1, 15), conn=db
         )
 
@@ -250,7 +250,7 @@ class TestFindJournalEntries:
         _insert_entry(db, e1, sample_journal.journal_id)
         _insert_entry(db, e2, sample_journal.journal_id)
 
-        results = find_journal_entries(
+        results = find_journal_lines(
             sample_journal.journal_id, date=datetime.date(2026, 1, 10), conn=db
         )
 
@@ -258,7 +258,7 @@ class TestFindJournalEntries:
 
     def test_entry_fields_are_correctly_mapped(self, db, sample_journal):
         save_journal(sample_journal, db)
-        entry = JournalEntry(
+        entry = JournalLine(
             journal_line_id="entry-full",
             date=datetime.date(2026, 1, 15),
             account=JournalAccount.CASH,
@@ -271,7 +271,7 @@ class TestFindJournalEntries:
         )
         _insert_entry(db, entry, sample_journal.journal_id)
 
-        results = find_journal_entries(sample_journal.journal_id, conn=db)
+        results = find_journal_lines(sample_journal.journal_id, conn=db)
 
         assert len(results) == 1
         e = results[0]
@@ -290,7 +290,7 @@ class TestFindJournalEntries:
 
         save_journal(sample_journal, db)
         db.execute(
-            "INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 "entry-null-recip",
                 sample_journal.journal_id,
@@ -306,7 +306,7 @@ class TestFindJournalEntries:
         )
         db.commit()
 
-        results = find_journal_entries(sample_journal.journal_id, conn=db)
+        results = find_journal_lines(sample_journal.journal_id, conn=db)
 
         assert results[0].recipient == RECIPIENT_SELF
 
@@ -328,7 +328,7 @@ class TestFindJournalEntries:
             sample_journal.journal_id,
         )
 
-        results = find_journal_entries(sample_journal.journal_id, conn=db)
+        results = find_journal_lines(sample_journal.journal_id, conn=db)
 
         assert [e.journal_line_id for e in results] == ["entry-1", "entry-2", "entry-3"]
 
@@ -348,7 +348,7 @@ class TestFindJournalEntries:
             db, _make_entry("entry-j2", datetime.date(2026, 2, 10), Decimal("20.00")), j2.journal_id
         )
 
-        results = find_journal_entries(j1.journal_id, conn=db)
+        results = find_journal_lines(j1.journal_id, conn=db)
 
         assert len(results) == 1
         assert results[0].journal_line_id == "entry-j1"
@@ -373,7 +373,7 @@ class TestDeleteJournal:
         delete_journal(sample_journal.journal_id, db)
 
         rows = db.execute(
-            "SELECT * FROM journal_entries WHERE journal_id = ?", (sample_journal.journal_id,)
+            "SELECT * FROM journal_lines WHERE journal_id = ?", (sample_journal.journal_id,)
         ).fetchall()
         assert rows == []
 
@@ -415,7 +415,7 @@ class TestUpdateJournal:
     def test_replaces_entries(self, db, sample_journal):
         save_journal(sample_journal, db)
         db.execute(
-            "INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 "entry-1",
                 sample_journal.journal_id,
@@ -431,11 +431,11 @@ class TestUpdateJournal:
         )
 
         entry2 = _make_entry("entry-2", datetime.date(2026, 1, 20), Decimal("99.00"))
-        sample_journal.entries = [entry2]
+        sample_journal.lines = [entry2]
         update_journal(sample_journal, db)
 
         rows = db.execute(
-            "SELECT * FROM journal_entries WHERE journal_id = ?", (sample_journal.journal_id,)
+            "SELECT * FROM journal_lines WHERE journal_id = ?", (sample_journal.journal_id,)
         ).fetchall()
         assert len(rows) == 1
         assert rows[0]["journal_line_id"] == "entry-2"
@@ -452,7 +452,7 @@ class TestUpdateJournal:
         )
         save_journal(other, db)
         db.execute(
-            "INSERT INTO journal_entries (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 "entry-collision",
                 other.journal_id,
@@ -473,7 +473,7 @@ class TestUpdateJournal:
         collision_entry = _make_entry(
             "entry-collision", datetime.date(2026, 1, 5), Decimal("20.00")
         )
-        sample_journal.entries = [collision_entry]
+        sample_journal.lines = [collision_entry]
 
         with pytest.raises(sqlite3.IntegrityError):
             update_journal(sample_journal, db)
@@ -603,11 +603,11 @@ class TestEntrySource:
         entry.journal_entry_id = "e-1"
         entry.raw_transaction_id = "txn-1"
         entry.bank_account_id = CHECKING
-        sample_journal.entries = [entry]
+        sample_journal.lines = [entry]
 
         update_journal(sample_journal, db)
 
-        [found] = find_journal_entries(sample_journal.journal_id, conn=db)
+        [found] = find_journal_lines(sample_journal.journal_id, conn=db)
         assert (found.journal_entry_id, found.raw_transaction_id, found.bank_account_id) == (
             "e-1",
             "txn-1",
@@ -616,13 +616,11 @@ class TestEntrySource:
 
     def test_entries_without_a_source_read_as_none(self, db, sample_journal):
         save_journal(sample_journal, db)
-        sample_journal.entries = [
-            _make_entry("entry-1", datetime.date(2026, 9, 8), Decimal("4.33"))
-        ]
+        sample_journal.lines = [_make_entry("entry-1", datetime.date(2026, 9, 8), Decimal("4.33"))]
 
         update_journal(sample_journal, db)
 
-        [found] = find_journal_entries(sample_journal.journal_id, conn=db)
+        [found] = find_journal_lines(sample_journal.journal_id, conn=db)
         assert (found.journal_entry_id, found.raw_transaction_id, found.bank_account_id) == (
             None,
             None,
@@ -630,7 +628,7 @@ class TestEntrySource:
         )
 
 
-def _lines(journal_entry_id: str, *raw_transaction_ids: str | None) -> list[JournalEntry]:
+def _lines(journal_entry_id: str, *raw_transaction_ids: str | None) -> list[JournalLine]:
     """One entry's lines, one per raw transaction id."""
     lines = []
     for n, raw_transaction_id in enumerate(raw_transaction_ids):
@@ -643,7 +641,7 @@ def _lines(journal_entry_id: str, *raw_transaction_ids: str | None) -> list[Jour
 
 def _entry_ids(db, journal: Journal) -> list[str | None]:
     return sorted(
-        {e.journal_entry_id for e in find_journal_entries(journal.journal_id, conn=db)},
+        {e.journal_entry_id for e in find_journal_lines(journal.journal_id, conn=db)},
         key=lambda e: e or "",
     )
 
@@ -655,7 +653,7 @@ class TestBookedEntries:
         with db:
             add_journal_entry(sample_journal.journal_id, _lines("e-1", "txn-1", "txn-1"), db)
 
-        found = find_journal_entries(sample_journal.journal_id, conn=db)
+        found = find_journal_lines(sample_journal.journal_id, conn=db)
         assert sorted(e.journal_line_id for e in found) == ["e-1-0", "e-1-1"]
         assert {e.journal_entry_id for e in found} == {"e-1"}
 
@@ -740,7 +738,7 @@ class TestBookedEntries:
         assert _entry_ids(db, sample_journal) == ["e-2"]
 
 
-def _booked_on(journal_entry_id: str, bank_account_id: str) -> list[JournalEntry]:
+def _booked_on(journal_entry_id: str, bank_account_id: str) -> list[JournalLine]:
     """An entry whose bank-side line is on bank_account_id; the counter line has none."""
     bank_side, counter = _lines(journal_entry_id, journal_entry_id, journal_entry_id)
     bank_side.bank_account_id = bank_account_id

@@ -14,11 +14,11 @@ from balanceai_backend.db.journal_db import (
     find_journals,
 )
 from balanceai_backend.models.bank_account import BankAccountType
-from balanceai_backend.models.journal import JournalEntry
+from balanceai_backend.models.journal import JournalLine
 from balanceai_backend.models.raw_transaction import RawTransaction
-from balanceai_backend.raw_transactions.generate_journal_entries import (
-    generate_journal_entries,
-    generate_matched_transfer_entries,
+from balanceai_backend.raw_transactions.generate_journal_entry import (
+    generate_journal_entry,
+    generate_matched_transfer_entry,
 )
 from balanceai_backend.raw_transactions.match_transfers import Match, find_matched_transfers
 from balanceai_backend.raw_transactions.raw_transaction_db import find_raw_transactions
@@ -104,10 +104,10 @@ def _find_matchable(txns: list[RawTransaction], booked: dict[str, str]) -> list[
 
 def _build_matched_entries(
     matches: list[Match], account_types: dict[str, BankAccountType]
-) -> list[list[JournalEntry]]:
+) -> list[list[JournalLine]]:
     """One entry per matched transfer."""
     return [
-        generate_matched_transfer_entries(
+        generate_matched_transfer_entry(
             o, account_types[o.account_id], i, account_types[i.account_id]
         )
         for o, i in matches
@@ -116,11 +116,11 @@ def _build_matched_entries(
 
 def _build_unmatched_entries(
     txns: list[RawTransaction], account_types: dict[str, BankAccountType]
-) -> list[list[JournalEntry]]:
+) -> list[list[JournalLine]]:
     """One entry per transaction; a zero amount has none."""
     entries = []
     for t in txns:
-        lines = generate_journal_entries(t, account_types[t.account_id])
+        lines = generate_journal_entry(t, account_types[t.account_id])
         if lines:
             entries.append(lines)
     return entries
@@ -129,7 +129,7 @@ def _build_unmatched_entries(
 def _save(
     journal_id: str,
     replaced_entry_ids: list[str],
-    new_entries: list[list[JournalEntry]],
+    new_entries: list[list[JournalLine]],
     conn: sqlite3.Connection,
 ) -> None:
     """Delete the unmatched entries the matches replace and add the new

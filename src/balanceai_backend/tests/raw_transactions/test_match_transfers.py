@@ -1,4 +1,4 @@
-"""Tests for find_matched_transfers and generate_matched_transfer_entries."""
+"""Tests for find_matched_transfers and generate_matched_transfer_entry."""
 
 import datetime
 from decimal import Decimal
@@ -7,8 +7,8 @@ import pytest
 from balanceai_backend.models.bank_account import BankAccountType
 from balanceai_backend.models.journal import JournalAccount
 from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
-from balanceai_backend.raw_transactions.generate_journal_entries import (
-    generate_matched_transfer_entries,
+from balanceai_backend.raw_transactions.generate_journal_entry import (
+    generate_matched_transfer_entry,
 )
 from balanceai_backend.raw_transactions.match_transfers import find_matched_transfers
 
@@ -166,12 +166,12 @@ class TestFindMatchedTransfers:
         assert _match_ids(txns) == []
 
 
-class TestGenerateMatchedTransferEntries:
+class TestGenerateMatchedTransferEntry:
     def test_the_two_bank_side_lines(self):
         out_side = _txn("out", CHECKING, "-900", 20, JournalAccount.CREDIT_CARD_PAYABLE)
         in_side = _txn("in", CARD, "900", 21, JournalAccount.CASH)
 
-        credit, debit = generate_matched_transfer_entries(
+        credit, debit = generate_matched_transfer_entry(
             out_side, BankAccountType.CHECKING, in_side, BankAccountType.CREDIT_CARD
         )
 
@@ -190,7 +190,7 @@ class TestGenerateMatchedTransferEntries:
         out_side = _txn("out", CHECKING, "-1000", 1)
         in_side = _txn("in", SAVINGS, "1000", 2)
 
-        credit, debit = generate_matched_transfer_entries(
+        credit, debit = generate_matched_transfer_entry(
             out_side, BankAccountType.CHECKING, in_side, BankAccountType.SAVINGS
         )
 
@@ -207,7 +207,7 @@ class TestGenerateMatchedTransferEntries:
         assert credit.description == "Transfer out" and debit.description == "Transfer in"
 
     def test_lines_balance_and_share_one_entry(self):
-        lines = generate_matched_transfer_entries(
+        lines = generate_matched_transfer_entry(
             _txn("out", CHECKING, "-1000", 1),
             BankAccountType.CHECKING,
             _txn("in", SAVINGS, "1000", 2),
@@ -222,7 +222,7 @@ class TestGenerateMatchedTransferEntries:
 
     def test_unclassified_side_raises(self):
         with pytest.raises(ValueError, match="in isn't classified"):
-            generate_matched_transfer_entries(
+            generate_matched_transfer_entry(
                 _txn("out", CHECKING, "-1000", 1),
                 BankAccountType.CHECKING,
                 _txn("in", SAVINGS, "1000", 2, counter_account=None),

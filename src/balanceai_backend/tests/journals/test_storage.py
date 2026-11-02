@@ -20,7 +20,7 @@
 # )
 # from balanceai_backend.models.account import Account, AccountType
 # from balanceai_backend.models.bank import Bank
-# from balanceai_backend.models.journal import Journal, JournalAccount, JournalEntry
+# from balanceai_backend.models.journal import Journal, JournalAccount, JournalLine
 #
 #
 # @pytest.fixture
@@ -35,7 +35,7 @@
 #
 # @pytest.fixture
 # def sample_entry():
-#     return JournalEntry(
+#     return JournalLine(
 #         journal_line_id="j1",
 #         date=datetime.date(2026, 1, 15),
 #         account=JournalAccount.ESSENTIALS_EXPENSE,
@@ -47,7 +47,7 @@
 #
 # @pytest.fixture
 # def sample_entry_2():
-#     return JournalEntry(
+#     return JournalLine(
 #         journal_line_id="j2",
 #         date=datetime.date(2026, 1, 20),
 #         account=JournalAccount.CASH,
@@ -64,7 +64,7 @@
 #         description="January journal",
 #         start_date=datetime.date(2026, 1, 1),
 #         end_date=datetime.date(2026, 1, 31),
-#         entries=[sample_entry],
+#         lines=[sample_entry],
 #     )
 #
 #
@@ -75,7 +75,7 @@
 #         description="February journal",
 #         start_date=datetime.date(2026, 2, 1),
 #         end_date=datetime.date(2026, 2, 28),
-#         entries=[],
+#         lines=[],
 #     )
 #
 #
@@ -118,7 +118,7 @@
 #         save_journal(sample_journal)
 #
 #         loaded = load_journals()[0]
-#         entry = loaded.entries[0]
+#         entry = loaded.lines[0]
 #
 #         assert entry.journal_line_id == sample_entry.journal_line_id
 #         assert entry.date == sample_entry.date
@@ -375,7 +375,7 @@
 #             description="Empty journal",
 #             start_date=datetime.date(2026, 1, 1),
 #             end_date=datetime.date(2026, 1, 31),
-#             entries=[],
+#             lines=[],
 #         )
 #         save_journal(journal)
 #
@@ -393,7 +393,7 @@
 #             description="January journal",
 #             start_date=datetime.date(2026, 1, 1),
 #             end_date=datetime.date(2026, 1, 31),
-#             entries=[sample_entry, sample_entry_2],
+#             lines=[sample_entry, sample_entry_2],
 #         )
 #         save_journal(journal)
 #
@@ -415,7 +415,7 @@
 #             description="January journal",
 #             start_date=datetime.date(2026, 1, 1),
 #             end_date=datetime.date(2026, 1, 31),
-#             entries=[sample_entry, sample_entry_2],
+#             lines=[sample_entry, sample_entry_2],
 #         )
 #         save_journal(journal)
 #
@@ -429,14 +429,14 @@
 #             description="Journal 1",
 #             start_date=datetime.date(2026, 1, 1),
 #             end_date=datetime.date(2026, 1, 31),
-#             entries=[sample_entry],
+#             lines=[sample_entry],
 #         )
 #         journal_2 = Journal(
 #             account=sample_account_2,
 #             description="Journal 2",
 #             start_date=datetime.date(2026, 1, 1),
 #             end_date=datetime.date(2026, 1, 31),
-#             entries=[sample_entry_2],
+#             lines=[sample_entry_2],
 #         )
 #         save_journal(journal_1)
 #         save_journal(journal_2)

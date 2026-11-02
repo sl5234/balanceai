@@ -12,7 +12,7 @@ from balanceai_backend.models.bank_account import (
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.services.plaid import get_accounts
 from balanceai_backend.utils.journal_entry_util import (
-    extract_journal_entries_from_plaid_transaction,
+    extract_journal_lines_from_plaid_transaction,
 )
 
 logger = logging.getLogger(__name__)
@@ -151,7 +151,7 @@ def save_linked_plaid_item(item: PlaidItem, conn: sqlite3.Connection = _default_
     return sync_bank_accounts_from_plaid(item, conn=conn)
 
 
-def extract_journal_entries_from_transactions(transactions: dict) -> dict:
+def extract_journal_lines_from_transactions(transactions: dict) -> dict:
     """
     Extract journal entries from a Plaid transactions response dict.
 
@@ -173,11 +173,11 @@ def extract_journal_entries_from_transactions(transactions: dict) -> dict:
     remove_entries = []
 
     for txn in transactions.get("added", []) + transactions.get("modified", []):
-        entries = extract_journal_entries_from_plaid_transaction(txn)
+        entries = extract_journal_lines_from_plaid_transaction(txn)
         upsert_entries.extend(entries)
 
     for txn in transactions.get("removed", []):
-        entries = extract_journal_entries_from_plaid_transaction(txn)
+        entries = extract_journal_lines_from_plaid_transaction(txn)
         remove_entries.extend(entries)
 
     return {"upsert": upsert_entries, "remove": remove_entries}
