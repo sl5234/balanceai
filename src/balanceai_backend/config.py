@@ -1,10 +1,11 @@
 import base64
-from pathlib import Path
+import os
 
 from appdevcommons.kms_encryptor import KMSEncryptor  # type: ignore[import-untyped]
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from balanceai_backend.dagger.aws import AWSClients
+from balanceai_backend.paths import SECRETS_DIR
 
 
 class Settings(BaseSettings):
@@ -49,7 +50,8 @@ class Settings(BaseSettings):
     _aws_clients: AWSClients | None = None
 
     model_config = SettingsConfigDict(
-        env_file=Path(__file__).parent / ".env",
+        # BALANCEAI_ENV_FILE points elsewhere, e.g. a nonexistent file for tests.
+        env_file=os.environ.get("BALANCEAI_ENV_FILE") or SECRETS_DIR / ".env",
         case_sensitive=False,
         extra="ignore",  # Ignore extra fields from environment variables
     )

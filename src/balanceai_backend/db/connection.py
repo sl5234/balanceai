@@ -3,6 +3,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+from balanceai_backend.paths import SECRETS_DIR
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,7 +147,8 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
             pass  # Already applied or column doesn't exist yet on a fresh schema
 
 
-DATA_DIR = Path(__file__).parent.parent / "data"
+# BALANCEAI_DATA_DIR points elsewhere, e.g. a temp folder for tests.
+DATA_DIR = Path(os.environ.get("BALANCEAI_DATA_DIR") or SECRETS_DIR / "data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 _DB_PATH = DATA_DIR / "balanceai.db"
