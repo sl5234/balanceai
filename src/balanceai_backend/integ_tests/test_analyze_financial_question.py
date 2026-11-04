@@ -9,213 +9,177 @@ Tests cover the four core spending Q&A use cases from IDEAS.md:
 Run with:
     pytest integ_tests/ -v
 
-Requires a configured Gemini API key (via settings).
+Requires AWS credentials (to decrypt the Anthropic key). Makes paid Claude calls.
 
-Synthetic dataset — October 2025:
+Synthetic dataset — October 2025, booked the way booking writes entries:
   Spending:
-    Whole Foods  $120  groceries   Oct 05
-    Shell         $50  gas         Oct 10
-    Netflix       $15  entertainment Oct 12
-    Whole Foods   $80  groceries   Oct 20
-    Amazon        $95  shopping    Oct 25
+    Whole Foods  $120  groceries     Oct 05  checking
+    Shell         $50  gas           Oct 10  checking
+    Netflix       $15  entertainment Oct 12  checking
+    Whole Foods   $80  groceries     Oct 20  checking
+    Amazon        $95  shopping      Oct 25  card
     Total spending: $360
 
   Income:
     Acme Corp  $5,000  income  Oct 01
 
-  Transfers:
-    Bank of America 9999  $500   transfer  Oct 08
-    Bank of America 9999  $1,000 transfer  Oct 22
+  Transfers (checking -> savings):
+    $500    Oct 08
+    $1,000  Oct 22
 """
 
+import asyncio
 import sqlite3
-import time
 from datetime import date
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from mcp.server.elicitation import AcceptedElicitation
 
 from balanceai_backend.db.connection import create_schema
-from balanceai_backend.servers.bookkeeping_server import analyze_financial_question
+from balanceai_backend.db.readonly_journal_connection import open_readonly_journal_connection
+from balanceai_backend.servers.bookkeeping_server import (
+    ShareQueryRowsConsent,
+    analyze_financial_question,
+)
 
 # ---------------------------------------------------------------------------
 # Synthetic database
 # ---------------------------------------------------------------------------
 
-_JOURNAL_ENTRIES = [
-    # (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient)
-    # Salary income $5,000 — Oct 01
-    (
-        "e01",
-        "j1",
+_CHECKING, _SAVINGS, _CARD = "chk-1", "sav-1", "card-1"
+
+_COLUMNS = (
+    "journal_line_id, journal_id, journal_entry_id, date, account, description,"
+    " debit, credit, category, tax, counterparty, bank_account_id"
+)
+
+
+def _entry(eid, day, description, amount, category, counterparty, debit, credit):
+    """Two lines of one entry. debit/credit are (account, bank_account_id or None)."""
+    return [
+        (
+            f"{eid}-d",
+            "j1",
+            eid,
+            day,
+            debit[0],
+            description,
+            amount,
+            0.0,
+            category,
+            0.0,
+            counterparty,
+            debit[1],
+        ),
+        (
+            f"{eid}-c",
+            "j1",
+            eid,
+            day,
+            credit[0],
+            description,
+            0.0,
+            amount,
+            category,
+            0.0,
+            counterparty,
+            credit[1],
+        ),
+    ]
+
+
+_JOURNAL_LINES = [
+    # Salary $5,000 into checking
+    *_entry(
+        "e1",
         "2025-10-01",
-        "cash",
-        "Salary from Acme Corp",
-        5000.0,
-        0.0,
-        "income",
-        0.0,
-        "Self",
-    ),
-    (
-        "e02",
-        "j1",
-        "2025-10-01",
-        "sale",
-        "Salary from Acme Corp",
-        0.0,
+        "ACME CORP PAYROLL",
         5000.0,
         "income",
-        0.0,
         "Acme Corp",
+        ("cash", _CHECKING),
+        ("salary_income", None),
     ),
-    # Whole Foods $120 — Oct 05
-    (
-        "e03",
-        "j1",
+    # Spending from checking
+    *_entry(
+        "e2",
         "2025-10-05",
-        "essential_expense",
-        "Whole Foods grocery run",
-        120.0,
-        0.0,
-        "groceries",
-        0.0,
-        "Self",
-    ),
-    (
-        "e04",
-        "j1",
-        "2025-10-05",
-        "cash",
-        "Whole Foods grocery run",
-        0.0,
+        "WHOLEFDS #123",
         120.0,
         "groceries",
-        0.0,
         "Whole Foods",
+        ("essential_expense", None),
+        ("cash", _CHECKING),
     ),
-    # Shell $50 — Oct 10
-    ("e05", "j1", "2025-10-10", "essential_expense", "Gas at Shell", 50.0, 0.0, "gas", 0.0, "Self"),
-    ("e06", "j1", "2025-10-10", "cash", "Gas at Shell", 0.0, 50.0, "gas", 0.0, "Shell"),
-    # Netflix $15 — Oct 12
-    (
-        "e07",
-        "j1",
-        "2025-10-12",
-        "non_essential_expense",
-        "Netflix subscription",
-        15.0,
-        0.0,
-        "entertainment",
-        0.0,
-        "Self",
+    *_entry(
+        "e3",
+        "2025-10-10",
+        "SHELL OIL 5678",
+        50.0,
+        "gas",
+        "Shell",
+        ("essential_expense", None),
+        ("cash", _CHECKING),
     ),
-    (
-        "e08",
-        "j1",
+    *_entry(
+        "e4",
         "2025-10-12",
-        "cash",
-        "Netflix subscription",
-        0.0,
+        "NETFLIX.COM",
         15.0,
         "entertainment",
-        0.0,
         "Netflix",
+        ("non_essential_expense", None),
+        ("cash", _CHECKING),
     ),
-    # Whole Foods $80 — Oct 20
-    (
-        "e09",
-        "j1",
+    *_entry(
+        "e5",
         "2025-10-20",
-        "essential_expense",
-        "Whole Foods grocery run",
-        80.0,
-        0.0,
-        "groceries",
-        0.0,
-        "Self",
-    ),
-    (
-        "e10",
-        "j1",
-        "2025-10-20",
-        "cash",
-        "Whole Foods grocery run",
-        0.0,
+        "WHOLEFDS #123",
         80.0,
         "groceries",
-        0.0,
         "Whole Foods",
+        ("essential_expense", None),
+        ("cash", _CHECKING),
     ),
-    # Amazon $95 — Oct 25
-    (
-        "e11",
-        "j1",
+    # Spending on the card
+    *_entry(
+        "e6",
         "2025-10-25",
-        "essential_expense",
-        "Amazon purchase",
+        "AMZN MKTP US",
         95.0,
-        0.0,
         "shopping",
-        0.0,
-        "Self",
+        "Amazon",
+        ("essential_expense", None),
+        ("credit_card_payable", _CARD),
     ),
-    ("e12", "j1", "2025-10-25", "cash", "Amazon purchase", 0.0, 95.0, "shopping", 0.0, "Amazon"),
-    # Transfer to Bank of America 9999 $500 — Oct 08
-    (
-        "e13",
-        "j1",
+    # Transfers checking -> savings (both sides 'Self', no expense row)
+    *_entry(
+        "e7",
         "2025-10-08",
-        "cash",
-        "Transfer to Bank of America 9999",
-        500.0,
-        0.0,
-        "transfer",
-        0.0,
-        "Self",
-    ),
-    (
-        "e14",
-        "j1",
-        "2025-10-08",
-        "transfer",
-        "Transfer to Bank of America 9999",
-        0.0,
+        "TRANSFER TO SAV 9999",
         500.0,
         "transfer",
-        0.0,
-        "Bank of America 9999",
-    ),
-    # Transfer to Bank of America 9999 $1,000 — Oct 22
-    (
-        "e15",
-        "j1",
-        "2025-10-22",
-        "cash",
-        "Transfer to Bank of America 9999",
-        1000.0,
-        0.0,
-        "transfer",
-        0.0,
         "Self",
+        ("cash", _SAVINGS),
+        ("cash", _CHECKING),
     ),
-    (
-        "e16",
-        "j1",
+    *_entry(
+        "e8",
         "2025-10-22",
-        "transfer",
-        "Transfer to Bank of America 9999",
-        0.0,
+        "TRANSFER TO SAV 9999",
         1000.0,
         "transfer",
-        0.0,
-        "Bank of America 9999",
+        "Self",
+        ("cash", _SAVINGS),
+        ("cash", _CHECKING),
     ),
 ]
 
 
-def _make_synthetic_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
+def _make_synthetic_db(path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     create_schema(conn)
     conn.execute(
@@ -223,8 +187,8 @@ def _make_synthetic_db() -> sqlite3.Connection:
         ("j1", "October 2025 Journal", "", "2025-10-01T00:00:00+00:00"),
     )
     conn.executemany(
-        "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        _JOURNAL_ENTRIES,
+        f"INSERT INTO journal_lines ({_COLUMNS}) VALUES ({', '.join('?' * 12)})",
+        _JOURNAL_LINES,
     )
     conn.commit()
     return conn
@@ -234,7 +198,14 @@ def _make_synthetic_db() -> sqlite3.Connection:
 # Helpers
 # ---------------------------------------------------------------------------
 
-RATE_LIMIT_DELAY = 13  # seconds between Gemini calls (free tier: 5 req/min)
+
+def _ask(question: str, start: date, end: date) -> dict:
+    """Call analyze_financial_question with the user's consent auto-accepted."""
+    ctx = MagicMock()
+    ctx.elicit = AsyncMock(return_value=AcceptedElicitation(data=ShareQueryRowsConsent()))
+    return asyncio.run(
+        analyze_financial_question(ctx, question=question, start_date=start, end_date=end)
+    )
 
 
 def _numeric_values(rows: list[dict]) -> list[float]:
@@ -253,14 +224,16 @@ def _contains_approx(values: list[float], expected: float, rel: float = 0.01) ->
 
 class TestAnalyzeFinancialQuestion:
     @pytest.fixture(autouse=True)
-    def synthetic_db(self):
-        db = _make_synthetic_db()
+    def synthetic_db(self, tmp_path):
+        db = _make_synthetic_db(tmp_path / "synthetic.db")
+        readonly = open_readonly_journal_connection(tmp_path / "synthetic.db")
         with (
             patch("balanceai_backend.servers.bookkeeping_server.conn", db),
+            patch("balanceai_backend.servers.bookkeeping_server.readonly_journal_conn", readonly),
             patch("balanceai_backend.prompts.financial_query_prompt.conn", db),
-            patch("balanceai_backend.services.gemini.DEFAULT_MODEL_ID", "gemini-2.5-flash-lite"),
         ):
             yield db
+        readonly.close()
         db.close()
 
     # -----------------------------------------------------------------------
@@ -269,42 +242,37 @@ class TestAnalyzeFinancialQuestion:
 
     def test_spend_in_period(self):
         """Total spending in October 2025 should be $360."""
-        result = analyze_financial_question(
-            question="How much did I spend in October 2025?",
-            start_date=date(2025, 10, 1),
-            end_date=date(2025, 10, 31),
+        result = _ask(
+            "How much did I spend in October 2025?", date(2025, 10, 1), date(2025, 10, 31)
         )
         assert result["row_count"] >= 1
         assert _contains_approx(
             _numeric_values(result["rows"]), 360.0
         ), f"Expected 360.0 in rows, got: {result['rows']}"
-        time.sleep(RATE_LIMIT_DELAY)
 
     def test_spend_in_period_2(self):
         """Total spending in October 2025 should be $360."""
-        result = analyze_financial_question(
-            question="How much did I spend with the exception of transfers in October 2025?",
-            start_date=date(2025, 10, 1),
-            end_date=date(2025, 10, 31),
+        result = _ask(
+            "How much did I spend with the exception of transfers in October 2025?",
+            date(2025, 10, 1),
+            date(2025, 10, 31),
         )
         assert result["row_count"] >= 1
         assert _contains_approx(
             _numeric_values(result["rows"]), 360.0
         ), f"Expected 360.0 in rows, got: {result['rows']}"
-        time.sleep(RATE_LIMIT_DELAY)
 
     def test_spend_in_first_half_of_month(self):
         """Spending Oct 1–15 should be $185 (Whole Foods $120 + Shell $50 + Netflix $15)."""
-        result = analyze_financial_question(
-            question="How much did I spend with the exception of transfers between October 1 and October 15, 2025?",
-            start_date=date(2025, 10, 1),
-            end_date=date(2025, 10, 15),
+        result = _ask(
+            "How much did I spend with the exception of transfers between October 1 and October 15, 2025?",
+            date(2025, 10, 1),
+            date(2025, 10, 15),
         )
         assert result["row_count"] >= 1
         assert _contains_approx(
             _numeric_values(result["rows"]), 185.0
         ), f"Expected 185.0 in rows, got: {result['rows']}"
-        time.sleep(RATE_LIMIT_DELAY)
 
     # -----------------------------------------------------------------------
     # Idea #2 — How much did I spend on [category]?
@@ -312,29 +280,25 @@ class TestAnalyzeFinancialQuestion:
 
     def test_spend_on_groceries(self):
         """Groceries total should be $200 ($120 + $80 at Whole Foods)."""
-        result = analyze_financial_question(
-            question="How much did I spend on groceries in October 2025?",
-            start_date=date(2025, 10, 1),
-            end_date=date(2025, 10, 31),
+        result = _ask(
+            "How much did I spend on groceries in October 2025?",
+            date(2025, 10, 1),
+            date(2025, 10, 31),
         )
         assert result["row_count"] >= 1
         assert _contains_approx(
             _numeric_values(result["rows"]), 200.0
         ), f"Expected 200.0 in rows, got: {result['rows']}"
-        time.sleep(RATE_LIMIT_DELAY)
 
     def test_spend_on_gas(self):
         """Gas total should be $50."""
-        result = analyze_financial_question(
-            question="How much did I spend on gas in October 2025?",
-            start_date=date(2025, 10, 1),
-            end_date=date(2025, 10, 31),
+        result = _ask(
+            "How much did I spend on gas in October 2025?", date(2025, 10, 1), date(2025, 10, 31)
         )
         assert result["row_count"] >= 1
         assert _contains_approx(
             _numeric_values(result["rows"]), 50.0
         ), f"Expected 50.0 in rows, got: {result['rows']}"
-        time.sleep(RATE_LIMIT_DELAY)
 
     # -----------------------------------------------------------------------
     # Idea #3 — How much did I spend at [merchant]?
@@ -342,32 +306,28 @@ class TestAnalyzeFinancialQuestion:
 
     def test_spend_at_whole_foods(self):
         """Whole Foods total should be $200 (two transactions: $120 + $80)."""
-        result = analyze_financial_question(
-            question="How much did I spend at Whole Foods in October 2025?",
-            start_date=date(2025, 10, 1),
-            end_date=date(2025, 10, 31),
+        result = _ask(
+            "How much did I spend at Whole Foods in October 2025?",
+            date(2025, 10, 1),
+            date(2025, 10, 31),
         )
         assert result["row_count"] >= 1
         assert _contains_approx(
             _numeric_values(result["rows"]), 200.0
         ), f"Expected 200.0 in rows, got: {result['rows']}"
         assert (
-            "recipient" in result["sql"].lower()
-        ), "SQL should filter by recipient for merchant queries"
-        time.sleep(RATE_LIMIT_DELAY)
+            "counterparty" in result["sql"].lower()
+        ), "SQL should filter by counterparty for merchant queries"
 
     def test_spend_at_shell(self):
         """Shell total should be $50."""
-        result = analyze_financial_question(
-            question="How much did I spend at Shell in October 2025?",
-            start_date=date(2025, 10, 1),
-            end_date=date(2025, 10, 31),
+        result = _ask(
+            "How much did I spend at Shell in October 2025?", date(2025, 10, 1), date(2025, 10, 31)
         )
         assert result["row_count"] >= 1
         assert _contains_approx(
             _numeric_values(result["rows"]), 50.0
         ), f"Expected 50.0 in rows, got: {result['rows']}"
-        time.sleep(RATE_LIMIT_DELAY)
 
     # -----------------------------------------------------------------------
     # Idea #4 — What are my biggest expenses this month?
@@ -375,20 +335,17 @@ class TestAnalyzeFinancialQuestion:
 
     def test_biggest_expenses_returns_multiple_rows(self):
         """Should return multiple rows ranked by spend amount."""
-        result = analyze_financial_question(
-            question="What are my biggest expenses in October 2025?",
-            start_date=date(2025, 10, 1),
-            end_date=date(2025, 10, 31),
+        result = _ask(
+            "What are my biggest expenses in October 2025?", date(2025, 10, 1), date(2025, 10, 31)
         )
         assert result["row_count"] > 1, "Expected multiple rows for biggest expenses breakdown"
-        time.sleep(RATE_LIMIT_DELAY)
 
     def test_biggest_expenses_top_is_whole_foods(self):
         """Whole Foods ($200) should be the top spender in October 2025."""
-        result = analyze_financial_question(
-            question="What are my biggest expenses in October 2025, ranked by total amount?",
-            start_date=date(2025, 10, 1),
-            end_date=date(2025, 10, 31),
+        result = _ask(
+            "What are my biggest expenses in October 2025, ranked by total amount?",
+            date(2025, 10, 1),
+            date(2025, 10, 31),
         )
         assert result["row_count"] >= 1
         # The first row should contain the largest value, which is 200.0 (Whole Foods)
@@ -396,4 +353,14 @@ class TestAnalyzeFinancialQuestion:
         assert _contains_approx(
             first_row_values, 200.0
         ), f"Expected top expense to be 200.0 (Whole Foods), got first row: {result['rows'][0]}"
-        time.sleep(RATE_LIMIT_DELAY)
+
+    # -----------------------------------------------------------------------
+    # Income
+    # -----------------------------------------------------------------------
+
+    def test_income(self):
+        """Income in October 2025 should be $5,000 (transfers are not income)."""
+        result = _ask(
+            "How much income did I get in October 2025?", date(2025, 10, 1), date(2025, 10, 31)
+        )
+        assert _contains_approx(_numeric_values(result["rows"]), 5000.0), result["rows"]

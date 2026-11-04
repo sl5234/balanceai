@@ -29,7 +29,7 @@ def create_schema(connection: sqlite3.Connection) -> None:
             credit            REAL NOT NULL,
             category          TEXT,
             tax               REAL NOT NULL DEFAULT 0,
-            recipient         TEXT,
+            counterparty      TEXT,
             raw_transaction_id  TEXT,
             bank_account_id     TEXT,
             journal_entry_id    TEXT
@@ -39,7 +39,7 @@ def create_schema(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_lines_date             ON journal_lines(date);
         CREATE INDEX IF NOT EXISTS idx_lines_category         ON journal_lines(category);
         CREATE INDEX IF NOT EXISTS idx_lines_account          ON journal_lines(account);
-        CREATE INDEX IF NOT EXISTS idx_lines_recipient        ON journal_lines(recipient);
+        CREATE INDEX IF NOT EXISTS idx_lines_counterparty     ON journal_lines(counterparty);
         CREATE INDEX IF NOT EXISTS idx_lines_raw_txn          ON journal_lines(raw_transaction_id);
         CREATE INDEX IF NOT EXISTS idx_lines_journal_entry_id ON journal_lines(journal_entry_id);
 
@@ -151,14 +151,14 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
 DATA_DIR = Path(os.environ.get("BALANCEAI_DATA_DIR") or SECRETS_DIR / "data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-_DB_PATH = DATA_DIR / "balanceai.db"
+DB_PATH = DATA_DIR / "balanceai.db"
 
-conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 create_schema(conn)
 _apply_migrations(conn)
 
 try:
-    os.chmod(_DB_PATH, 0o600)
+    os.chmod(DB_PATH, 0o600)
 except OSError:
     pass  # e.g. Windows or a filesystem without chmod semantics

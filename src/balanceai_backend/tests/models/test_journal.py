@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 from balanceai_backend.models.journal import (
-    RECIPIENT_SELF,
+    COUNTERPARTY_SELF,
     GeneratedJournalEntrySet,
     GeneratedJournalLine,
     JournalAccount,
@@ -119,7 +119,7 @@ def entry_dict():
         "credit": "0.00",
         "category": "haircut",
         "tax": "2.25",
-        "recipient": RECIPIENT_SELF,
+        "counterparty": COUNTERPARTY_SELF,
     }
 
 

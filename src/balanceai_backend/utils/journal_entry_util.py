@@ -28,18 +28,18 @@ DEFAULT_MODEL_ID = "claude-sonnet-4-6"
 def generate_transaction_category(entry: GeneratedJournalLine) -> GeneratedJournalLine:
     """
     For a journal entry with null category, look up cached categorization or fall back to
-    Tavily + LLM. Caches recipient → category for future lookups.
+    Tavily + LLM. Caches counterparty → category for future lookups.
     Returns the entry unchanged if no context can be found.
     """
-    key = entry.recipient.lower()
+    key = entry.counterparty.lower()
     cache = load_merchant_context_cache()
 
     if key in cache:
         return entry.model_copy(update={"category": cache[key]})
 
-    context = tavily_service.search(f"What type of business is: {entry.recipient}")
+    context = tavily_service.search(f"What type of business is: {entry.counterparty}")
     if not context:
-        logger.warning("Tavily returned no context for recipient: %s", entry.recipient)
+        logger.warning("Tavily returned no context for counterparty: %s", entry.counterparty)
         return entry
 
     schema = json.dumps(GeneratedJournalLine.model_json_schema(), indent=2)

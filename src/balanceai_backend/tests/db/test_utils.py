@@ -78,7 +78,7 @@ class TestGetSchemaSummary:
         from balanceai_backend.db.connection import conn
 
         result = get_schema_summary(conn)
-        for col in ("recipient", "credit", "debit", "category", "date"):
+        for col in ("counterparty", "credit", "debit", "category", "date"):
             assert col in result, f"Expected column '{col}' in schema summary"
 
 

@@ -16,3 +16,5 @@ DEFAULT_CATEGORIES = [
     Category(name="fees", description="Bank fees, service charges, and penalties"),
     Category(name="other", description="Transactions that don't fit other categories"),
 ]
+
+FINANCIAL_QUERY_MODEL_ID = "claude-haiku-5-5"

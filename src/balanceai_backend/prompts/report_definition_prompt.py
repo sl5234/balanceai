@@ -20,7 +20,7 @@ Rules:
   A >= / <= date pair becomes: >= :start_date ... <= :end_date (preserve the original form)
 - Beyond dates, use the report name and description to decide which other scalar
   literals represent user-varying criteria worth parameterizing (e.g. :category,
-  :recipient, :min_amount). Only parameterize scalars — do NOT attempt to parameterize
+  :counterparty, :min_amount). Only parameterize scalars — do NOT attempt to parameterize
   IN-clause lists (SQLite named parameters cannot expand lists).
 - Consistency rule: if a scalar literal is semantically coupled to a hardcoded
   IN-clause list (e.g. category = 'shopping' is coupled to an IN (...) list of

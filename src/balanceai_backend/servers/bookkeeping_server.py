@@ -16,6 +16,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel
 
 from balanceai_backend.config import settings
+from balanceai_backend.constants import FINANCIAL_QUERY_MODEL_ID
 from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.db.connection import conn
 from balanceai_backend.db.journal_db import (
@@ -33,12 +34,14 @@ from balanceai_backend.db.journal_db import (
 from balanceai_backend.db.journal_db import (
     update_journal as db_update_journal,
 )
+from balanceai_backend.db.readonly_journal_connection import readonly_journal_conn
 from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_bank_statement,
     handle_sync_journal_entries_from_receipt,
     handle_sync_journal_entries_from_transactions,
 )
 from balanceai_backend.models import Bank, Journal
+from balanceai_backend.models.financial_query import FinancialQuery
 from balanceai_backend.models.journal import JournalLine
 from balanceai_backend.models.report import ReportDefinition
 from balanceai_backend.prompts.financial_query_prompt import financial_query_system_prompt
@@ -56,6 +59,7 @@ from balanceai_backend.reports.report_definition_db import (
 from balanceai_backend.reports.report_definition_db import (
     save_report_definition as _save_report_definition,
 )
+from balanceai_backend.services import anthropic as anthropic_service
 from balanceai_backend.services.gemini import GeminiClient
 from balanceai_backend.services.gemini import converse as gemini_converse
 
@@ -89,19 +93,19 @@ mcp = FastMCP(
         call 2: average monthly spending by category over the prior 3 months
         synthesize: delta per category
     - For merchant spend questions, always use a two-step fuzzy lookup because
-      the same merchant may appear under multiple recipient names (e.g. "Shell",
+      the same merchant may appear under multiple counterparty names (e.g. "Shell",
       "Shell Oil", "Shell Service Station").
       Example: "How much did I spend at Shell in October 2025?" ->
-        call 1: list all DISTINCT recipients LIKE '%shell%' in that period
-        call 2: sum spend across those recipients
+        call 1: list all DISTINCT counterparties LIKE '%shell%' in that period
+        call 2: sum spend across those counterparties
     - Pass prior call results in the `context` argument when a follow-up query
       depends on previous results (e.g. for comparison or anomaly detection).
     - `create_report_definition` requires an `unparameterized_sql` from a prior
       `analyze_financial_question` call. Never call it without first running the
       relevant queries. Specifically:
-        step 1: find DISTINCT recipients matching the subject over the past 6 months
+        step 1: find DISTINCT counterparties matching the subject over the past 6 months
                 (use the same two-step fuzzy lookup described above)
-        step 2: run a sample query for the most recent 1-month period using those recipients
+        step 2: run a sample query for the most recent 1-month period using those counterparties
         step 3: call `create_report_definition` with the SQL from step 2 as `unparameterized_sql`
                 and pass the user's original request as `prompt`
     - `generate_report` accepts an optional `parameters` dict for any named parameters
@@ -332,6 +336,10 @@ class ShareJournalEntriesConsent(BaseModel):
     """Empty schema: the prompt is a plain accept/decline."""
 
 
+class ShareQueryRowsConsent(BaseModel):
+    """Empty schema: the prompt is a plain accept/decline."""
+
+
 @mcp.tool()
 async def list_journal_entries(
     ctx: Context, journal_id: str, date: date | None = None
@@ -424,7 +432,7 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
         "credit",
         "category",
         "tax",
-        "recipient",
+        "counterparty",
     ]
     with out.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -436,7 +444,8 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
 
 
 @mcp.tool()
-def analyze_financial_question(
+async def analyze_financial_question(
+    ctx: Context,
     question: str,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -448,7 +457,11 @@ def analyze_financial_question(
 
     An internal LLM generates the correct SQL from the question, handling
     double-entry bookkeeping semantics automatically — e.g. it always filters
-    by recipient (not description) and targets the correct leg for spending vs income.
+    by counterparty (not description) and targets the correct leg for spending vs income.
+    The SQL runs read-only and can only read the journals and journal_lines tables.
+
+    Rows are private, so the user is asked to approve sharing them before any
+    are returned.
 
     This tool answers ONE focused question. For complex analyses (trends,
     comparisons, anomalies), the planning agent should decompose the problem
@@ -464,13 +477,16 @@ def analyze_financial_question(
               "Average monthly spend on dining over the last 6 months"
         start_date: Optional date hint (inclusive). Helps the LLM scope the query.
         end_date: Optional date hint (inclusive). Helps the LLM scope the query.
-        account_id: Optional journal account ID to scope to one account.
+        account_id: Optional bank account id (bank_accounts.id) to scope to one account.
         context: Optional dict of prior results to inform this query.
             Use for chained or comparative queries, e.g.:
             {"prior_period": "Sep 2025", "prior_total": 450.00}
 
     Returns:
         dict with question, description, sql, rows, row_count, and optionally total.
+
+    Raises:
+        PermissionError: if the user declines or cancels the approval prompt.
     """
     user_parts = [f"Question: {question}"]
     if start_date:
@@ -478,7 +494,7 @@ def analyze_financial_question(
     if end_date:
         user_parts.append(f"End date hint: {end_date}")
     if account_id:
-        user_parts.append(f"Account ID filter: {account_id}")
+        user_parts.append(f"Bank account ID filter: {account_id}")
     if context:
         user_parts.append(f"Context from prior queries: {json.dumps(context)}")
 
@@ -487,39 +503,43 @@ def analyze_financial_question(
     logger.debug("analyze_financial_question | user_message: %s", user_message)
     logger.debug("analyze_financial_question | system_prompt: %s", system_prompt)
 
-    try:
-        raw = gemini_converse(
-            client=GeminiClient(),
-            user_message=user_message,
-            system_prompt=system_prompt,
-            max_tokens=1024,
-        )
-    except Exception:
-        logger.exception("analyze_financial_question | gemini call failed")
-        raise
-    logger.debug("analyze_financial_question | raw_response:\n%s", raw)
+    query = anthropic_service.parse(
+        model_id=FINANCIAL_QUERY_MODEL_ID,
+        content=user_message,
+        output_format=FinancialQuery,
+        system_instruction=system_prompt,
+        max_output_tokens=16000,  # thinking is on by default and counts toward this
+        timeout=120.0,
+        log_to=logger,
+    )
+    if query is None:
+        raise ValueError("The AI declined to write a query for this question.")
+    sql, description = query.sql, query.description
+    logger.debug("analyze_financial_question | response: %s", query.model_dump_json())
 
-    try:
-        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
-        json_str = json_match.group(1).strip() if json_match else raw.strip()
-        parsed = json.loads(json_str)
-        sql = parsed["sql"]
-        description = parsed.get("description", "")
-    except Exception:
-        logger.exception("analyze_financial_question | response parsing failed")
-        raise
-    logger.debug("analyze_financial_question | sql: %s", sql)
+    rows = [dict(r) for r in readonly_journal_conn.execute(sql).fetchall()]
+    logger.debug("analyze_financial_question | rows (%d): %s", len(rows), rows)
 
-    rows = [dict(r) for r in conn.execute(sql).fetchall()]
-    logger.debug("analyze_financial_question | row_count: %d", len(rows))
-
-    return {
+    result = {
         "question": question,
         "description": description,
         "sql": sql,
-        "rows": rows,
+        "rows": [],
         "row_count": len(rows),
     }
+    if not rows:
+        return result
+
+    # TODO: consider redacting merchants, descriptions and ids by default. Values must be
+    # checked, not column names (the AI picks names), and months like "2026-10" kept.
+    consent = await ctx.elicit(
+        message=f"Share {len(rows)} rows with the assistant? Query: {description}",
+        schema=ShareQueryRowsConsent,
+    )
+    if consent.action != "accept":
+        raise PermissionError("User declined to share query results.")
+    result["rows"] = rows
+    return result
 
 
 @mcp.tool()
