@@ -136,7 +136,7 @@ class TestGenerateJournalEntry:
             assert e.date == datetime.date(2026, 9, 8)
             assert e.description == "STARBUCKS #123"
             assert e.category == "dining"
-            assert e.recipient == "Starbucks"
+            assert e.counterparty == "Starbucks"
             assert e.tax == Decimal(0)
             assert e.raw_transaction_id == "txn-1"
         assert entries[0].journal_line_id != entries[1].journal_line_id
@@ -166,7 +166,7 @@ class TestGenerateJournalEntry:
 
         entries = generate_journal_entry(txn, BankAccountType.CHECKING)
 
-        assert {e.recipient for e in entries} == {"STARBUCKS #123"}
+        assert {e.counterparty for e in entries} == {"STARBUCKS #123"}
 
     def test_zero_amount_has_no_lines(self):
         txn = _txn("0.00", JournalAccount.NON_ESSENTIALS_EXPENSE)

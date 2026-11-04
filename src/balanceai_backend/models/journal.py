@@ -60,7 +60,7 @@ class BusinessJournalAccount(str, Enum):
     OPERATING_EXPENSE = "operating_expense"  # everything else; detail in category
 
 
-RECIPIENT_SELF = "Self"
+COUNTERPARTY_SELF = "Self"
 
 
 class GeneratedJournalLine(BaseModel):
@@ -141,8 +141,8 @@ class GeneratedJournalLine(BaseModel):
             "Default to 0 if unknown or not applicable."
         ),
     )
-    recipient: str = Field(
-        default=RECIPIENT_SELF,
+    counterparty: str = Field(
+        default=COUNTERPARTY_SELF,
         description=(
             "Who received the value in this entry. "
             "For the expense/asset debit entry, use 'Self' (you are the one incurring the expense). "
@@ -207,7 +207,7 @@ class JournalLine(GeneratedJournalLine):
             "credit": str(self.credit),
             "category": None if redact else self.category,
             "tax": str(self.tax),
-            "recipient": None if redact else self.recipient,
+            "counterparty": None if redact else self.counterparty,
             "journal_entry_id": self.journal_entry_id,
             "raw_transaction_id": self.raw_transaction_id,
             "bank_account_id": self.bank_account_id,
@@ -224,7 +224,7 @@ class JournalLine(GeneratedJournalLine):
             credit=Decimal(d["credit"]),
             category=d.get("category"),
             tax=Decimal(d.get("tax", "0")),
-            recipient=d.get("recipient", RECIPIENT_SELF),
+            counterparty=d.get("counterparty", COUNTERPARTY_SELF),
             journal_entry_id=d.get("journal_entry_id"),
             raw_transaction_id=d.get("raw_transaction_id"),
             bank_account_id=d.get("bank_account_id"),

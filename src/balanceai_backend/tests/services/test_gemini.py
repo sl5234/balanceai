@@ -196,9 +196,9 @@ class TestGeminiIntegration:
         assert "sql" in parsed, "Response must contain a 'sql' key"
         assert "description" in parsed, "Response must contain a 'description' key"
         assert parsed["sql"].strip().upper().startswith("SELECT"), "sql must be a SELECT statement"
-        # Should filter by recipient, not description
+        # Should filter by counterparty, not description
         assert (
-            "recipient" in parsed["sql"].lower()
-        ), "sql should filter by recipient for merchant queries"
+            "counterparty" in parsed["sql"].lower()
+        ), "sql should filter by counterparty for merchant queries"
 
         time.sleep(self.RATE_LIMIT_DELAY)

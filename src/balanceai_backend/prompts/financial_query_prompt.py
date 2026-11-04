@@ -1,6 +1,7 @@
 from datetime import date
 
 from balanceai_backend.db.connection import conn
+from balanceai_backend.db.readonly_journal_connection import JOURNAL_TABLES
 from balanceai_backend.db.utils import (
     get_distinct_accounts,
     get_distinct_categories,
@@ -8,21 +9,35 @@ from balanceai_backend.db.utils import (
 )
 
 _DOUBLE_ENTRY_SEMANTICS = """\
-Double-entry bookkeeping semantics — critical rules for correct queries:
-- Every transaction creates exactly TWO rows in journal_lines (a debit line and a credit line).
-- SPENDING: debit leg has recipient='Self'; credit leg has recipient=<merchant name>.
-    To find spending at a merchant: WHERE je.account = 'cash' AND je.credit > 0 AND je.recipient = '<merchant>'
-    To find all spending: WHERE je.account = 'cash' AND je.credit > 0 AND je.recipient != 'Self'
-- INCOME: debit leg has recipient='Self' (cash received); credit leg has recipient=<payer>.
-    To find income: WHERE je.account = 'income' AND je.debit > 0 AND je.recipient = 'Self'
-- NEVER filter by description to identify a merchant — both legs share the same description.
-- Always filter to ONE leg to avoid double-counting.
-- Column 'account' (bookkeeping type: 'cash', 'income', etc.) lives in journal_lines ONLY.
-  The journals table has 'account_id' (bank account UUID) and 'account_type' — NOT 'account'.
-- When filtering by Account ID, JOIN journals j ON j.journal_id = je.journal_id and filter j.account_id = '<id>'.
-  Example: SELECT SUM(je.credit) FROM journal_lines je JOIN journals j ON je.journal_id = j.journal_id
-           WHERE j.account_id = '<id>' AND je.account = 'cash' AND je.credit > 0 AND je.recipient != 'Self'
-Dates are ISO 8601 strings (e.g. '2025-10-22'). Monetary amounts (debit, credit) are in USD.
+Double-entry bookkeeping semantics (critical for correct queries):
+- Each bank transaction is one journal entry: two rows in journal_lines that share
+  a journal_entry_id. One row is the bank side (account 'cash' or
+  'credit_card_payable', bank_account_id set); the other is the counter side
+  (bank_account_id NULL).
+- counterparty is the other party: the merchant, the payer, or 'Self' for money
+  moved between the user's own accounts. Both rows of an entry share it, so tell
+  the rows apart by account, never by counterparty.
+- Accounts: assets 'cash', 'investments', 'loans_receivable'; liabilities
+  'credit_card_payable', 'loans_payable'; equity 'opening_balance'; income
+  'salary_income', 'interest_income', 'other_income'; expenses 'essential_expense',
+  'non_essential_expense', 'interest_and_fees'.
+- SPENDING: the expense-account rows. Net spend = SUM(debit) - SUM(credit).
+    WHERE l.account IN ('essential_expense', 'non_essential_expense', 'interest_and_fees')
+- Refunds are credits on the expense account, dated when refunded, so a period's
+  net spend can be negative. If the user asks for gross spending, use SUM(debit) alone.
+- INCOME: the income-account rows. Net income = SUM(credit) - SUM(debit).
+    WHERE l.account IN ('salary_income', 'interest_income', 'other_income')
+- Count each entry once: query only the expense or only the income rows, never
+  both rows of an entry.
+- Transfers between the user's own accounts have two bank-side rows and no expense
+  or income row, so they are never spending or income.
+- Filter merchants by counterparty, never by description (description is the bank's
+  raw text, e.g. 'SQ *BLUE BOTTLE 1234 SF').
+- To filter by bank account, join to the entry's bank-side row:
+    JOIN journal_lines b ON b.journal_entry_id = l.journal_entry_id
+                        AND b.bank_account_id = '<id>'
+- To filter by journal: WHERE l.journal_id = '<id>' (or join journals by name).
+Dates are ISO 8601 text (e.g. '2025-10-22'); compare as strings, use strftime for months.
 """
 
 _INSTRUCTIONS = """\
@@ -34,18 +49,12 @@ Rules:
 - Always apply correct double-entry semantics.
 - Inline all values as literals (no placeholders).
 - For dates inferred from natural language (e.g. "October 2025"), use exact ISO dates.
-- Return ONLY valid JSON with no extra text.
-
-Return format:
-{
-  "sql": "<SELECT statement>",
-  "description": "<one sentence: what this query computes>"
-}
+- description: one sentence on what the query computes.
 """
 
 
 def financial_query_system_prompt(today: date) -> str:
-    schema = get_schema_summary(conn)
+    schema = get_schema_summary(conn, sorted(JOURNAL_TABLES))
     categories = get_distinct_categories(conn)
     accounts = get_distinct_accounts(conn)
     categories_str = ", ".join(repr(c) for c in categories)

@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.models import Journal
-from balanceai_backend.models.journal import RECIPIENT_SELF, JournalAccount, JournalLine
+from balanceai_backend.models.journal import COUNTERPARTY_SELF, JournalAccount, JournalLine
 
 
 def _build_line(r) -> JournalLine:
@@ -17,7 +17,7 @@ def _build_line(r) -> JournalLine:
         credit=Decimal(str(r["credit"])),
         category=r["category"],
         tax=Decimal(str(r["tax"])),
-        recipient=r["recipient"] or RECIPIENT_SELF,
+        counterparty=r["counterparty"] or COUNTERPARTY_SELF,
         journal_entry_id=r["journal_entry_id"],
         raw_transaction_id=r["raw_transaction_id"],
         bank_account_id=r["bank_account_id"],
@@ -88,7 +88,7 @@ def _insert_journal_lines(
 ) -> None:
     conn.executemany(
         "INSERT INTO journal_lines (journal_line_id, journal_id, date, account,"
-        " description, debit, credit, category, tax, recipient, journal_entry_id,"
+        " description, debit, credit, category, tax, counterparty, journal_entry_id,"
         " raw_transaction_id, bank_account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             (
@@ -101,7 +101,7 @@ def _insert_journal_lines(
                 str(entry.credit),
                 entry.category,
                 str(entry.tax),
-                entry.recipient,
+                entry.counterparty,
                 entry.journal_entry_id,
                 entry.raw_transaction_id,
                 entry.bank_account_id,

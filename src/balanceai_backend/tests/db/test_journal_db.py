@@ -89,13 +89,13 @@ def _make_entry(line_id: str, date: datetime.date, amount: Decimal) -> JournalLi
         credit=Decimal(0),
         category="groceries",
         tax=Decimal(0),
-        recipient="Self",
+        counterparty="Self",
     )
 
 
 def _insert_entry(db, entry: JournalLine, journal_id: str) -> None:
     db.execute(
-        "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (
             entry.journal_line_id,
             journal_id,
@@ -106,7 +106,7 @@ def _insert_entry(db, entry: JournalLine, journal_id: str) -> None:
             str(entry.credit),
             entry.category,
             str(entry.tax),
-            entry.recipient,
+            entry.counterparty,
         ),
     )
     db.commit()
@@ -267,7 +267,7 @@ class TestFindJournalEntries:
             credit=Decimal("0.00"),
             category="groceries",
             tax=Decimal("3.50"),
-            recipient="Jane",
+            counterparty="Jane",
         )
         _insert_entry(db, entry, sample_journal.journal_id)
 
@@ -283,14 +283,14 @@ class TestFindJournalEntries:
         assert e.credit == Decimal("0.00")
         assert e.category == "groceries"
         assert e.tax == Decimal("3.50")
-        assert e.recipient == "Jane"
+        assert e.counterparty == "Jane"
 
-    def test_null_recipient_defaults_to_self(self, db, sample_journal):
-        from balanceai_backend.models.journal import RECIPIENT_SELF
+    def test_null_counterparty_defaults_to_self(self, db, sample_journal):
+        from balanceai_backend.models.journal import COUNTERPARTY_SELF
 
         save_journal(sample_journal, db)
         db.execute(
-            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 "entry-null-recip",
                 sample_journal.journal_id,
@@ -308,7 +308,7 @@ class TestFindJournalEntries:
 
         results = find_journal_lines(sample_journal.journal_id, conn=db)
 
-        assert results[0].recipient == RECIPIENT_SELF
+        assert results[0].counterparty == COUNTERPARTY_SELF
 
     def test_entries_ordered_by_date(self, db, sample_journal):
         save_journal(sample_journal, db)
@@ -415,7 +415,7 @@ class TestUpdateJournal:
     def test_replaces_entries(self, db, sample_journal):
         save_journal(sample_journal, db)
         db.execute(
-            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 "entry-1",
                 sample_journal.journal_id,
@@ -452,7 +452,7 @@ class TestUpdateJournal:
         )
         save_journal(other, db)
         db.execute(
-            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, recipient) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 "entry-collision",
                 other.journal_id,

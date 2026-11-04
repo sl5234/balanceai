@@ -9,6 +9,7 @@ from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import conn, create_schema
 from balanceai_backend.db.journal_db import find_booked_raw_transactions
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
+from balanceai_backend.models.financial_query import FinancialQuery
 from balanceai_backend.models.journal import (
     GeneratedJournalEntrySet,
     GeneratedJournalLine,
@@ -20,6 +21,8 @@ from balanceai_backend.models.raw_transaction import Classification, ClassifiedB
 from balanceai_backend.raw_transactions.raw_transaction_db import upsert_raw_transaction
 from balanceai_backend.servers.bookkeeping_server import (
     ShareJournalEntriesConsent,
+    ShareQueryRowsConsent,
+    analyze_financial_question,
     create_journal,
     delete_journal,
     list_journal_entries,
@@ -760,3 +763,44 @@ class TestJournalTools:
 
         assert result["lines"] == []
         assert result["bank_account_ids"] == [savings]
+
+
+_PARSE = "balanceai_backend.servers.bookkeeping_server.anthropic_service.parse"
+
+
+def _analyze(sql: str, ctx: MagicMock, question: str = "How much did I spend?") -> dict:
+    """Call analyze_financial_question with the AI's reply mocked to the given SQL."""
+    query = FinancialQuery(sql=sql, description="Total spend")
+    with patch(_PARSE, return_value=query):
+        return asyncio.run(analyze_financial_question(ctx, question))
+
+
+class TestAnalyzeFinancialQuestion:
+    def test_returns_rows_when_user_accepts(self):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        result = _analyze("SELECT 42 AS total", ctx)
+        assert result["rows"] == [{"total": 42}]
+        ctx.elicit.assert_awaited_once()
+        assert "Share 1 rows" in ctx.elicit.await_args.kwargs["message"]
+
+    @pytest.mark.parametrize("elicit_result", [DeclinedElicitation(), CancelledElicitation()])
+    def test_raises_when_user_declines_or_cancels(self, elicit_result):
+        with pytest.raises(PermissionError):
+            _analyze("SELECT 42 AS total", _make_ctx(elicit_result))
+
+    def test_returns_without_asking_when_no_rows(self):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        result = _analyze("SELECT debit FROM journal_lines WHERE 0", ctx)
+        assert result["rows"] == [] and result["row_count"] == 0
+        ctx.elicit.assert_not_awaited()
+
+    def test_blocks_sql_outside_journal_tables(self):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        with pytest.raises(sqlite3.DatabaseError):
+            _analyze("SELECT access_token FROM plaid_items", ctx)
+        ctx.elicit.assert_not_awaited()
+
+    def test_raises_when_ai_declines(self):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        with patch(_PARSE, return_value=None), pytest.raises(ValueError):
+            asyncio.run(analyze_financial_question(ctx, "q"))

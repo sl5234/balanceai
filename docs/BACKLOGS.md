@@ -130,15 +130,17 @@ transaction (and the file path for receipts and statements).
 transactions (`raw_transactions/generate_journal_entry.py`), against the
 personal account list. Older code that reads or writes journal entries still
 assumes the earlier accounts and conventions (e.g. spending as cash credits,
-`recipient` = "Self" on one side), so it will misread or mis-write entries
-booked the new way:
+`counterparty` (was `recipient`) = "Self" on one side), so it will misread or
+mis-write entries booked the new way:
 
-- `prompts/financial_query_prompt.py` (`analyze_financial_question`) and
-  `prompts/report_definition_prompt.py` (`create_report_definition`), which
-  write SQL over `journal_lines`.
+- `prompts/report_definition_prompt.py` (`create_report_definition`), which
+  writes SQL over `journal_lines`. (`prompts/financial_query_prompt.py` was
+  rewritten for the new booking on 2026-11-03.)
 - The LLM entry tools — `sync_journal_entries_from_transactions`, `_from_receipt`,
   `_from_bank_statement` — with `GeneratedJournalLine`'s field descriptions and
-  `prompts/extract_journal_entry_prompt.py`. `db/journal_db.py`'s
+  `prompts/extract_journal_entry_prompt.py`. `GeneratedJournalLine.counterparty`'s
+  description still teaches "Self" on the expense side and the merchant on the
+  other; booking puts the same counterparty on both lines. `db/journal_db.py`'s
   `update_journal` still replaces every entry because they save through it.
 
 **Proposed fix:** rewire each onto the new accounts and rules, or retire it —

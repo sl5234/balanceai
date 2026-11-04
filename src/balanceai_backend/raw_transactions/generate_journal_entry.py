@@ -137,7 +137,7 @@ def _line(
         debit=amount if is_debit else Decimal(0),
         credit=Decimal(0) if is_debit else amount,
         category=txn.classification.category,
-        recipient=txn.classification.counterparty or txn.description,
+        counterparty=txn.classification.counterparty or txn.description,
         journal_entry_id=journal_entry_id,
         raw_transaction_id=txn.id,
         bank_account_id=bank_account_id,

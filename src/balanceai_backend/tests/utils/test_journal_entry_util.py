@@ -32,7 +32,7 @@ def uncategorized_entry():
         description="Uncategorized transaction from Rudy's.",
         debit=Decimal("25.00"),
         credit=Decimal("0.00"),
-        recipient="Rudy's",
+        counterparty="Rudy's",
         category=None,
     )
 
@@ -58,7 +58,7 @@ class TestGenerateTransactionCategory:
         mock_tavily.assert_not_called()
         mock_llm.assert_not_called()
 
-    def test_calls_tavily_when_recipient_not_in_cache(self, uncategorized_entry):
+    def test_calls_tavily_when_counterparty_not_in_cache(self, uncategorized_entry):
         with (
             patch(
                 "balanceai_backend.utils.journal_entry_util.load_merchant_context_cache",
@@ -149,7 +149,7 @@ class TestGenerateTransactionCategory:
         assert result.category == "haircut"
         assert result.description == "Haircut at Rudy's."
 
-    def test_writes_recipient_to_category_cache_when_llm_assigns_category(
+    def test_writes_counterparty_to_category_cache_when_llm_assigns_category(
         self, uncategorized_entry
     ):
         categorized = uncategorized_entry.model_copy(update={"category": "haircut"})

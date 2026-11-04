@@ -1,4 +1,5 @@
 import base64
+import logging
 from typing import Literal
 
 import anthropic
@@ -69,8 +70,9 @@ def parse[ParsedT: BaseModel](
     output_format: type[ParsedT],
     system_instruction: str | None = None,
     max_output_tokens: int = 1024,
-    temperature: float = 0.7,
+    temperature: float | None = None,
     timeout: float = 60.0,
+    log_to: logging.Logger | None = None,
 ) -> ParsedT | None:
     """
     Send a text request and get the reply as an instance of output_format.
@@ -82,6 +84,11 @@ def parse[ParsedT: BaseModel](
     timeout: seconds to wait for the reply before giving up on this attempt
     (raises anthropic.APITimeoutError).
 
+    temperature: left out of the request when None; newer models reject it.
+
+    log_to: if given, the raw response (stop reason, token usage, content) is
+    logged to it at DEBUG.
+
     Returns:
         The parsed reply, or None if the model declined to answer.
     """
@@ -89,9 +96,17 @@ def parse[ParsedT: BaseModel](
     resp = client.messages.parse(
         model=model_id,
         max_tokens=max_output_tokens,
-        temperature=temperature,
+        temperature=temperature if temperature is not None else anthropic.omit,
         messages=[{"role": "user", "content": content}],
         system=system_instruction if system_instruction is not None else anthropic.omit,
         output_format=output_format,
     )
+    if log_to is not None:
+        log_to.debug(
+            "anthropic parse | model: %s | stop_reason: %s | usage: %s | content: %s",
+            model_id,
+            resp.stop_reason,
+            resp.usage,
+            resp.content,
+        )
     return resp.parsed_output
