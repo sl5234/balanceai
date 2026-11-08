@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import re
 import sqlite3
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,8 +9,14 @@ import pytest
 from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import conn, create_schema
 from balanceai_backend.db.journal_db import find_booked_raw_transactions
+from balanceai_backend.db.readonly_journal_connection import open_readonly_journal_connection
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
-from balanceai_backend.models.financial_query import FinancialQuery
+from balanceai_backend.models.financial_query import (
+    REJECTION_MESSAGES,
+    UNANSWERABLE_MESSAGE,
+    FinancialQuery,
+    QueryRejection,
+)
 from balanceai_backend.models.journal import (
     GeneratedJournalEntrySet,
     GeneratedJournalLine,
@@ -22,6 +29,7 @@ from balanceai_backend.raw_transactions.raw_transaction_db import upsert_raw_tra
 from balanceai_backend.servers.bookkeeping_server import (
     ShareJournalEntriesConsent,
     ShareQueryRowsConsent,
+    _hide_descriptions,
     analyze_financial_question,
     create_journal,
     delete_journal,
@@ -770,7 +778,7 @@ _PARSE = "balanceai_backend.servers.bookkeeping_server.anthropic_service.parse"
 
 def _analyze(sql: str, ctx: MagicMock, question: str = "How much did I spend?") -> dict:
     """Call analyze_financial_question with the AI's reply mocked to the given SQL."""
-    query = FinancialQuery(sql=sql, description="Total spend")
+    query = FinancialQuery(sql=sql, description="Total spend", rejection=None)
     with patch(_PARSE, return_value=query):
         return asyncio.run(analyze_financial_question(ctx, question))
 
@@ -781,7 +789,10 @@ class TestAnalyzeFinancialQuestion:
         result = _analyze("SELECT 42 AS total", ctx)
         assert result["rows"] == [{"total": 42}]
         ctx.elicit.assert_awaited_once()
-        assert "Share 1 rows" in ctx.elicit.await_args.kwargs["message"]
+        message = ctx.elicit.await_args.kwargs["message"]
+        assert "Share 1 rows" in message
+        assert 'Question asked: "How much did I spend?"' in message
+        assert "Total spend" not in message  # the AI's summary isn't shown
 
     @pytest.mark.parametrize("elicit_result", [DeclinedElicitation(), CancelledElicitation()])
     def test_raises_when_user_declines_or_cancels(self, elicit_result):
@@ -796,7 +807,7 @@ class TestAnalyzeFinancialQuestion:
 
     def test_blocks_sql_outside_journal_tables(self):
         ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
-        with pytest.raises(sqlite3.DatabaseError):
+        with pytest.raises(RuntimeError, match=re.escape(UNANSWERABLE_MESSAGE)):
             _analyze("SELECT access_token FROM plaid_items", ctx)
         ctx.elicit.assert_not_awaited()
 
@@ -804,3 +815,81 @@ class TestAnalyzeFinancialQuestion:
         ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
         with patch(_PARSE, return_value=None), pytest.raises(ValueError):
             asyncio.run(analyze_financial_question(ctx, "q"))
+
+    def test_error_text_with_data_does_not_reach_the_assistant(self):
+        """SBL-1: a value that isn't UTF-8 makes sqlite3 quote it in the error,
+        which would reach the assistant before the consent prompt."""
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        with pytest.raises(RuntimeError) as error:
+            _analyze("SELECT 'Acme Corp|5000.0' || x'ff' AS x", ctx)
+        assert str(error.value) == UNANSWERABLE_MESSAGE
+        assert error.value.__cause__ is None and error.value.__suppress_context__
+        ctx.elicit.assert_not_awaited()
+
+    def test_broken_sql_gives_the_plain_message(self):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        with pytest.raises(RuntimeError, match=re.escape(UNANSWERABLE_MESSAGE)):
+            _analyze("SELEC nonsense", ctx)
+
+    @pytest.mark.parametrize("rejection", list(QueryRejection))
+    def test_rejection_gives_its_message_and_runs_no_sql(self, rejection):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        query = FinancialQuery(sql=None, description="q", rejection=rejection)
+        with (
+            patch(_PARSE, return_value=query),
+            patch("balanceai_backend.servers.bookkeeping_server.readonly_journal_conn") as ro,
+            pytest.raises(ValueError) as error,
+        ):
+            asyncio.run(analyze_financial_question(ctx, "q"))
+        assert str(error.value) == REJECTION_MESSAGES[rejection]
+        ro.execute.assert_not_called()
+
+    def test_no_sql_and_no_rejection_gives_the_plain_message(self):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        query = FinancialQuery(sql=None, description="q", rejection=None)
+        with patch(_PARSE, return_value=query), pytest.raises(ValueError) as error:
+            asyncio.run(analyze_financial_question(ctx, "q"))
+        assert str(error.value) == UNANSWERABLE_MESSAGE
+
+    def test_every_rejection_has_a_message(self):
+        assert set(REJECTION_MESSAGES) == set(QueryRejection)
+
+
+class TestHideDescriptions:
+    @pytest.fixture(autouse=True)
+    def journal(self, tmp_path):
+        """Two journal lines: one whose description is raw bank text, and one
+        whose description is also its counterparty."""
+        path = tmp_path / "journal.db"
+        db = sqlite3.connect(path)
+        db.execute("CREATE TABLE journal_lines (description TEXT, counterparty TEXT)")
+        db.executemany(
+            "INSERT INTO journal_lines VALUES (?, ?)",
+            [("SQ *BLUE BOTTLE 0423 OAKLAND", "Blue Bottle Coffee"), ("Shell", "Shell")],
+        )
+        db.commit()
+        readonly = open_readonly_journal_connection(path)
+        with patch("balanceai_backend.servers.bookkeeping_server.readonly_journal_conn", readonly):
+            yield
+        readonly.close()
+        db.close()
+
+    @pytest.mark.parametrize("column", ["description", "d"])
+    def test_hides_a_description_under_any_column_name(self, column):
+        rows = _hide_descriptions([{column: "SQ *BLUE BOTTLE 0423 OAKLAND"}])
+        assert rows == [{column: "[hidden description]"}]
+
+    def test_keeps_a_description_that_is_also_a_counterparty(self):
+        assert _hide_descriptions([{"description": "Shell"}]) == [{"description": "Shell"}]
+
+    def test_keeps_everything_else(self):
+        row = {"counterparty": "Blue Bottle Coffee", "debit": 6.5, "date": "2025-10-22"}
+        assert _hide_descriptions([row]) == [row]
+
+    def test_analyze_returns_rows_with_descriptions_hidden(self):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        result = _analyze("SELECT description, counterparty FROM journal_lines ORDER BY 2", ctx)
+        assert result["rows"] == [
+            {"description": "[hidden description]", "counterparty": "Blue Bottle Coffee"},
+            {"description": "Shell", "counterparty": "Shell"},
+        ]

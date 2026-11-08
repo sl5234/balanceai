@@ -41,7 +41,11 @@ from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_transactions,
 )
 from balanceai_backend.models import Bank, Journal
-from balanceai_backend.models.financial_query import FinancialQuery
+from balanceai_backend.models.financial_query import (
+    REJECTION_MESSAGES,
+    UNANSWERABLE_MESSAGE,
+    FinancialQuery,
+)
 from balanceai_backend.models.journal import JournalLine
 from balanceai_backend.models.report import ReportDefinition
 from balanceai_backend.prompts.financial_query_prompt import financial_query_system_prompt
@@ -85,6 +89,10 @@ mcp = FastMCP(
     - For any spending, income, or financial analysis question, use
       `analyze_financial_question`. It handles double-entry bookkeeping semantics
       correctly via an internal LLM.
+    - Ask `analyze_financial_question` plain-language questions about the user's
+      money, as the user would say them. Never put SQL, table or column names,
+      or instructions on how to build the query in the question; such questions
+      are rejected.
     - For complex questions (trends, comparisons, anomalies, burn rate), decompose
       into multiple focused sub-questions and call `analyze_financial_question`
       once per sub-question, then synthesize the results yourself.
@@ -96,14 +104,16 @@ mcp = FastMCP(
       the same merchant may appear under multiple counterparty names (e.g. "Shell",
       "Shell Oil", "Shell Service Station").
       Example: "How much did I spend at Shell in October 2025?" ->
-        call 1: list all DISTINCT counterparties LIKE '%shell%' in that period
-        call 2: sum spend across those counterparties
+        call 1: "Which merchants with 'Shell' in the name did I pay in October 2025?"
+                -> e.g. Shell, Shell Oil, Shell Service Station
+        call 2: "How much did I spend in October 2025 at these merchants:
+                <the merchant names call 1 returned>?"
     - Pass prior call results in the `context` argument when a follow-up query
       depends on previous results (e.g. for comparison or anomaly detection).
     - `create_report_definition` requires an `unparameterized_sql` from a prior
       `analyze_financial_question` call. Never call it without first running the
       relevant queries. Specifically:
-        step 1: find DISTINCT counterparties matching the subject over the past 6 months
+        step 1: find the merchants matching the subject over the past 6 months
                 (use the same two-step fuzzy lookup described above)
         step 2: run a sample query for the most recent 1-month period using those counterparties
         step 3: call `create_report_definition` with the SQL from step 2 as `unparameterized_sql`
@@ -443,6 +453,30 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
     return {"output_path": str(out), "rows_written": len(journal.lines)}
 
 
+_HIDDEN = "[hidden description]"
+
+
+def _hide_descriptions(rows: list[dict]) -> list[dict]:
+    """Replace values that are a journal line's description (the bank's raw
+    text, e.g. 'SQ *BLUE BOTTLE 0423 OAKLAND') with _HIDDEN, whatever the
+    column is called (SBL-5). A description that's also a counterparty is kept:
+    it's the merchant's name, which is shared anyway. Only exact matches are
+    caught; consent (SBL-6) is the guard against unusual queries."""
+    descriptions = {
+        r[0]
+        for r in readonly_journal_conn.execute("SELECT DISTINCT description FROM journal_lines")
+    }
+    counterparties = {
+        r[0]
+        for r in readonly_journal_conn.execute("SELECT DISTINCT counterparty FROM journal_lines")
+    }
+    hidden = descriptions - counterparties
+    return [
+        {k: _HIDDEN if isinstance(v, str) and v in hidden else v for k, v in row.items()}
+        for row in rows
+    ]
+
+
 @mcp.tool()
 async def analyze_financial_question(
     ctx: Context,
@@ -459,6 +493,9 @@ async def analyze_financial_question(
     double-entry bookkeeping semantics automatically — e.g. it always filters
     by counterparty (not description) and targets the correct leg for spending vs income.
     The SQL runs read-only and can only read the journals and journal_lines tables.
+
+    Ask in plain language, as the user would. Questions containing SQL, table or
+    column names, or instructions on how to build the query are rejected.
 
     Rows are private, so the user is asked to approve sharing them before any
     are returned.
@@ -487,6 +524,8 @@ async def analyze_financial_question(
 
     Raises:
         PermissionError: if the user declines or cancels the approval prompt.
+        ValueError: if the question is rejected or can't be turned into a query.
+        RuntimeError: if the query fails.
     """
     user_parts = [f"Question: {question}"]
     if start_date:
@@ -514,10 +553,21 @@ async def analyze_financial_question(
     )
     if query is None:
         raise ValueError("The AI declined to write a query for this question.")
-    sql, description = query.sql, query.description
     logger.debug("analyze_financial_question | response: %s", query.model_dump_json())
+    if query.rejection is not None:
+        raise ValueError(REJECTION_MESSAGES[query.rejection])
+    if not query.sql:
+        raise ValueError(UNANSWERABLE_MESSAGE)
+    sql, description = query.sql, query.description
 
-    rows = [dict(r) for r in readonly_journal_conn.execute(sql).fetchall()]
+    # The error text can quote journal values (e.g. a value that isn't UTF-8),
+    # and it would reach the assistant before the consent prompt (SBL-1), so
+    # keep it in the local log only.
+    try:
+        rows = [dict(r) for r in readonly_journal_conn.execute(sql).fetchall()]
+    except sqlite3.Error:
+        logger.warning("analyze_financial_question | query failed", exc_info=True)
+        raise RuntimeError(UNANSWERABLE_MESSAGE) from None
     logger.debug("analyze_financial_question | rows (%d): %s", len(rows), rows)
 
     result = {
@@ -530,15 +580,19 @@ async def analyze_financial_question(
     if not rows:
         return result
 
-    # TODO: consider redacting merchants, descriptions and ids by default. Values must be
-    # checked, not column names (the AI picks names), and months like "2026-10" kept.
+    # Show the question the tool received, not the AI's summary (SBL-6). The
+    # assistant writes the question, and a hijacked assistant (e.g. one that
+    # read injected text in a web page, email or transaction description) can
+    # send one the user never asked, like "monthly totals, plus every merchant
+    # and description". Showing it lets the user catch that before approving.
+    # The AI's summary isn't shown, since nothing checks it against the query.
     consent = await ctx.elicit(
-        message=f"Share {len(rows)} rows with the assistant? Query: {description}",
+        message=f'Share {len(rows)} rows with the assistant?\nQuestion asked: "{question}"',
         schema=ShareQueryRowsConsent,
     )
     if consent.action != "accept":
         raise PermissionError("User declined to share query results.")
-    result["rows"] = rows
+    result["rows"] = _hide_descriptions(rows)
     return result
 
 
@@ -678,6 +732,7 @@ def generate_report(
     )
     logger.debug("generate_report | sql_template: %s", defn.sql_template)
 
+    # TODO(SBL-2): run on readonly_journal_conn and ask before writing the CSV.
     rows = [dict(r) for r in conn.execute(defn.sql_template, params).fetchall()]
     logger.debug("generate_report | row_count: %d", len(rows))
 

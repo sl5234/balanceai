@@ -14,8 +14,13 @@ account for the OTHER side:
 - investments: money moved into or out of an investment or brokerage account.
 - credit_card_payable: paying off a credit card.
 - loans_payable: a payment on a mortgage, car, or student loan.
-- loans_receivable: money lent to someone, or someone repaying you.
+- loans_receivable: money lent to someone, or someone repaying you. Only when
+  the description says it's a loan; never guess a loan from a payment to or
+  from a person.
 - cash: money moved between your own bank accounts (e.g. checking to savings).
+- unclassified: the purpose can't be told, e.g. a Zelle, Venmo, Cash App or
+  PayPal payment to or from a person (it could be a purchase, a repayment, a
+  split bill, rent or a gift). The user will review it.
 Never use opening_balance.
 
 The bank_account_type is the account you're in; pick the account on the other
@@ -43,8 +48,10 @@ _FIELDS = """\
 
 _INPUT = """\
 ## INPUT
-A JSON list of transactions. Each has: index, date, description, amount
-(negative = money out of the bank account, positive = money in),
+A JSON list of transactions. Each has: index, description, direction
+("out" = money left the account: a purchase, bill, or transfer out; on a credit
+card, a charge. "in" = money came in: income, a refund, or a transfer in; on a
+credit card, a payment or refund),
 bank_account_type (e.g. checking, credit_card), and, when known,
 plaid_category, plaid_category_detailed, plaid_confidence (VERY_HIGH, HIGH,
 MEDIUM, LOW, UNKNOWN), and web_context (a web search result about the
@@ -54,27 +61,32 @@ at LOW confidence. Don't guess a business type from its name alone.
 
 _EXAMPLES = """\
 ## EXAMPLES
-Trader Joe's, -45.00, checking, plaid_category FOOD_AND_DRINK
+Trader Joe's, out, checking, plaid_category FOOD_AND_DRINK
   -> counter_account: essential_expense, category: groceries, counterparty: Trader Joe's
-Bilt Eqr, -1200.00, checking, plaid_category RENT_AND_UTILITIES
+Bilt Eqr, out, checking, plaid_category RENT_AND_UTILITIES
   -> counter_account: essential_expense, category: rent, counterparty: EQR
      (Bilt is the rent-payment service; EQR is the landlord being paid)
-ACME CORP PAYROLL, +2500.00, checking, plaid_category INCOME
+ACME CORP PAYROLL, in, checking, plaid_category INCOME
   -> counter_account: salary_income, category: income, counterparty: Acme Corp
-Rudy's, -30.00, credit_card, plaid_category missing, no web_context
+Rudy's, out, credit_card, plaid_category missing, no web_context
   -> counter_account: non_essential_expense, category: null, counterparty: Rudy's
      (don't guess "dining" or "haircut" from the name)
-Amazon.com, +15.00, credit_card, plaid_category GENERAL_MERCHANDISE
+Amazon.com, in, credit_card, plaid_category GENERAL_MERCHANDISE
   -> counter_account: non_essential_expense, category: shopping, counterparty: Amazon
      (money in from a merchant = refund, same account as the purchase)
-United Airlines, +500.00, checking, plaid_category TRAVEL
+United Airlines, in, checking, plaid_category TRAVEL
   -> counter_account: non_essential_expense, category: travel, counterparty: United Airlines
      (a refund: a spending category with money coming in, even into checking)
-CREDIT CARD 3333 PAYMENT, -500.00, checking, plaid_category LOAN_PAYMENTS
+CREDIT CARD 3333 PAYMENT, out, checking, plaid_category LOAN_PAYMENTS
   -> counter_account: credit_card_payable, category: transfer, counterparty: Self
-AUTOMATIC PAYMENT - THANK YOU, +2078.50, credit_card, plaid_category LOAN_PAYMENTS
+AUTOMATIC PAYMENT - THANK YOU, in, credit_card, plaid_category LOAN_PAYMENTS
   -> counter_account: cash, category: transfer, counterparty: Self
      (you're in the card account; the money came from your bank account)
+ZELLE PAYMENT TO JANE DOE, out, checking, plaid_category TRANSFER_OUT
+  -> counter_account: unclassified, category: null, counterparty: Jane Doe
+     (a payment to a person: the purpose can't be told from the bank feed)
+VENMO CASHOUT FROM JOHN SMITH, in, checking, plaid_category TRANSFER_IN
+  -> counter_account: unclassified, category: null, counterparty: John Smith
 """
 
 

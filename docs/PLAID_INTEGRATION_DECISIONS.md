@@ -1,5 +1,7 @@
 # Plaid integration decisions
 
+<!-- INSTRUCTIONS: Keep entries concise, but with enough detail to understand the decision on its own later. Prefer a concrete example over explanation. Keep grounded facts to the few that drove the decision; leave out supporting detail. -->
+
 ## #1 — 2026-08-20 — Bank auth via Plaid Hosted Link + a one-time local CLI command, not custom frontend UI
 
 **Category:** system (technical)

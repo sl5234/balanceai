@@ -105,6 +105,14 @@ _CASES = [
         JournalAccount.CASH,
     ),
     ("late_fee", "LATE FEE", "-39.00", CARD, "BANK_FEES", JournalAccount.INTEREST_AND_FEES),
+    (
+        "zelle_to_person",
+        "ZELLE PAYMENT TO JANE DOE",
+        "-150.00",
+        CHECKING,
+        "TRANSFER_OUT",
+        JournalAccount.UNCLASSIFIED,
+    ),
 ]
 
 

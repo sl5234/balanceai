@@ -2,6 +2,10 @@
 
 <!-- INSTRUCTIONS: Add a new `## Session: YYYY-MM-DD` entry at the top of the log below with a summary of that session's status. Keep each entry short — 3-4 sentences max. Never edit or remove previous entries; they stay as a permanent history. -->
 
+## Session: 2026-11-05
+
+Finished the pass over real classified transactions. Uncommitted on `feature/security-backlogs`: `SECURITY_BACKLOGS.md` (SBL-1 to SBL-6), BL-10 (corrections, free-form rules, review of person-to-person payments) and BL-11 (link refunds to purchases), classification sending direction instead of amount and date, a web search DEBUG log, and the `unclassified` holding account. Plan of record is now `docs/ROADMAP.md`: test analyze, then receipts, then the backlog items together, then reports, then retiring legacy flows, then statements.
+
 ## Session: 2026-10-22
 
 Manually tested step 2 against the real AI on a fresh Plaid sandbox pull (61 transactions, all classified, no errors); reuse, user-over-AI copying, and transfers never being copied all behave as designed, confirmed by new INFO log lines for copies and AI answers. Two prompt fixes, verified on a re-run: money in with a spending category is a refund (not other_income), and on a credit card or loan account a payment toward it is `cash`. The link-bank server now attaches its log file only on startup, so unit tests stop writing to the real log; squashed into the step 2 commit (not pushed). Noted for step 4: a bank-side mapping for money market, cd, ira, 401k, other_depository, mortgage, student/auto loan, and home equity accounts; the sandbox gives some transactions the wrong sign (card payment, Gusto). Added `integ_tests/test_classify_raw_transactions.py` (10 known transactions, one real Haiku call, 10/10 passing) and opened a PR to `main`. Next: steps 3–6.

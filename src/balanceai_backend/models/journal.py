@@ -30,6 +30,10 @@ class JournalAccount(str, Enum):
     ESSENTIALS_EXPENSE = "essential_expense"
     NON_ESSENTIALS_EXPENSE = "non_essential_expense"
     INTEREST_AND_FEES = "interest_and_fees"  # card interest, bank fees
+    # Holding
+    # The purpose is unknown (e.g. a Zelle to a person); always flagged for the
+    # user to review. Neither spending nor income. Should be 0 once all are reviewed.
+    UNCLASSIFIED = "unclassified"
 
 
 class BusinessJournalAccount(str, Enum):

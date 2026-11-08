@@ -1,5 +1,7 @@
 # Backend decisions
 
+<!-- INSTRUCTIONS: Keep entries concise, but with enough detail to understand the decision on its own later. Prefer a concrete example over explanation. Keep grounded facts to the few that drove the decision; leave out supporting detail. -->
+
 ## #1 — 2026-08-20 — External SDK clients use lazy, memoized construction via `functools.lru_cache`, co-located with their service
 
 **Category:** system (technical)
