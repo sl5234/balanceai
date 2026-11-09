@@ -93,9 +93,24 @@ ruff check --fix .
 # 3. Type check code
 mypy .
 
-# 4. Run tests
-pytest
+# 4. Run unit tests
+pytest tests/
+
+# 4b. (Optional) Run integration tests — they call real AI APIs and cost money
+pytest integ_tests/
 
 # 5. Build
 python -m build
+
+# 6. Check for leaks in what you're committing: no credentials (API keys,
+#    tokens, passwords, Plaid access tokens) and no real data from the DB or
+#    logs (transaction ids, merchants, amounts, account numbers, journal ids).
+#    Use made-up values in code, prompts, tests and docs. The gitleaks
+#    pre-commit hook (.pre-commit-config.yaml) catches credentials, not real data.
+git diff --cached
+
+# 7. Check for new security risks: transaction data reaching the assistant or
+#    an AI provider without the user's consent, consent prompts that can
+#    mislead, data in error messages, SQL that isn't read-only. Run
+#    /security-review for larger changes.
 ```

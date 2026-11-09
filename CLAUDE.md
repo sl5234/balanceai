@@ -16,3 +16,10 @@ Key points:
   (format → lint → type check → test)
 - Use `pytest tests/ -v` for unit tests, `pytest integ_tests/ -v` for integration tests (run
   from within `src/balanceai_backend/`)
+
+## No real data or secrets in the repo
+
+Never write real data (transaction ids, merchants, amounts, account numbers,
+journal ids, names) or credentials into any file or commit message — docs,
+prompts, tests, code. Use made-up examples, e.g. "a $12.50 charge at Blue
+Bottle Coffee".
