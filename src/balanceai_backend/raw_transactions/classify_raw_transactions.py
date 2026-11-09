@@ -31,6 +31,12 @@ from balanceai_backend.services import anthropic as anthropic_service
 from balanceai_backend.services import tavily as tavily_service
 
 logger = logging.getLogger(__name__)
+# DEBUG so web search queries and results reach the link-bank server's log,
+# which logs the package at INFO.
+logger.setLevel(logging.DEBUG)
+
+# How much of a web search result to log.
+_LOGGED_RESULT_CHARS = 300
 
 MODEL_ID = "claude-haiku-4-5"
 _BATCH_SIZE = 20
@@ -314,11 +320,19 @@ def _search_web(txns: list[RawTransaction]) -> dict[str, str]:
         unsure = txn.category is None or txn.category_confidence in _WEB_SEARCH_CONFIDENCE
         if not unsure or key in results:
             continue
+        query = f"What type of business is: {txn.description}"
         try:
-            results[key] = tavily_service.search(f"What type of business is: {txn.description}")
+            results[key] = tavily_service.search(query)
         except Exception:
             logger.warning("Web search failed for transaction %s", txn.id, exc_info=True)
             results[key] = None
+            continue
+        logger.debug(
+            "Web search for transaction %s | query: %s | result: %s",
+            txn.id,
+            query,
+            (results[key] or "")[:_LOGGED_RESULT_CHARS] or None,
+        )
     return {key: result for key, result in results.items() if result}
 
 
@@ -328,9 +342,8 @@ def _build_ai_input(
     """What the AI sees for one transaction — no account numbers or ids."""
     fields = {
         "index": index,
-        "date": txn.posting_date.isoformat(),
         "description": txn.description,
-        "amount": str(txn.amount),
+        "direction": "out" if txn.amount < 0 else "in",
         "bank_account_type": account_types.get(txn.account_id),
         "plaid_category": txn.category,
         "plaid_category_detailed": txn.category_detailed,

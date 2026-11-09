@@ -192,22 +192,25 @@ class TestClassifyRawTransactions:
         assert _sent(fake_ai) == [
             {
                 "index": 0,
-                "date": "2026-08-18",
                 "description": "Rudy's",
-                "amount": "-10.00",
+                "direction": "out",
                 "bank_account_type": "checking",
             },
             {
                 "index": 1,
-                "date": "2026-08-19",
                 "description": "Uber",
-                "amount": "-6.33",
+                "direction": "out",
                 "bank_account_type": "credit_card",
                 "plaid_category": "TRANSPORTATION",
                 "plaid_category_detailed": "TRANSPORTATION_TAXIS_AND_RIDE_SHARES",
                 "plaid_confidence": "VERY_HIGH",
             },
         ]
+
+    def test_money_in_is_sent_as_direction_in(self, db, fake_ai):
+        upsert_raw_transaction(_txn("t1", description="Refund", amount=Decimal("15.00")), conn=db)
+        classify_raw_transactions(conn=db)
+        assert _sent(fake_ai)[0]["direction"] == "in"
 
     def test_calls_haiku_at_temperature_zero(self, db, fake_ai):
         upsert_raw_transaction(_txn("t1"), conn=db)

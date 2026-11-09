@@ -1,5 +1,7 @@
 # Distribution channel decisions
 
+<!-- INSTRUCTIONS: Keep entries concise, but with enough detail to understand the decision on its own later. Prefer a concrete example over explanation. Keep grounded facts to the few that drove the decision; leave out supporting detail. -->
+
 ## #11 — 2026-08-19 — Sequencing: local MCP server + open-source (bring-your-own-keys) first, defer everything else
 
 **Category:** product

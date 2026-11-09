@@ -146,3 +146,142 @@ mis-write entries booked the new way:
 **Proposed fix:** rewire each onto the new accounts and rules, or retire it —
 the Plaid tool is replaced by booking classified raw transactions; receipts and
 statements could become raw transactions too.
+
+## BL-10 — Users can't correct classifications or set override rules
+
+**Added:** 2026-11-04
+**Related:** BL-9; docs/BACKEND_IMPLEMENTATION_DECISIONS.md #17
+
+**Problem:** Users fix bookkeeping by correcting a raw transaction's
+classification, not by editing entries (decision #17), but none of that path
+exists:
+
+- No tool sets a user classification. `ClassifiedBy.USER` exists and is kept
+  across syncs (flagged `needs_user_review` if the source changes) and reused
+  for matching transactions, but nothing creates one.
+  (`categorize_transaction` is an old tool on the legacy `Transaction` model.)
+- `needs_user_review` is set but nothing lists or resolves it.
+- No way to say "always classify transactions like this as …".
+
+**Direction so far:**
+
+1. Correct one raw transaction → rewrite its own journal lines (found by
+   `raw_transaction_id`); journals pick it up since they're read from
+   `journal_lines`. Later similar transactions follow the correction.
+2. Override rules as natural-language context from the user, e.g. "whenever
+   ~$13.50 goes out to Foo Store, it's my lunch — classify it as dining".
+   Rules are passed to the classification AI call with the transactions.
+   When a rule clearly matches a recurring transaction (same description,
+   amount, direction), apply it without an AI call. Rules apply to new
+   transactions only; booked entries aren't rewritten.
+
+**To decide (deep dive):** which wins when a correction and a rule disagree;
+matched transfers (reclassifying one side splits the pair); how review of
+`needs_user_review` works. For natural-language rules: the AI no longer gets
+amounts (only direction), so rules that mention an amount need the amount
+sent again for matching transactions, or matched locally first; which rules
+go into each call (all, or only ones relevant to the batch); how users list
+and edit rules across sessions (stored in the DB, listing asks before sharing).
+
+**Update 2026-11-04 — rules are free-form text, applied by the backend:**
+
+- A rule is any free-form text from the user, e.g. "$13.50 at Foo Store on
+  Tuesdays is lunch — classify as dining" or "Zelle to Jane is rent". It can
+  mention merchant, amount or range, day or date, account, direction, and set
+  the account, category or counterparty.
+- Rejected: a Claude Code skill or MD file that the assistant reads and applies
+  before calling an MCP tool. The assistant would have to see every
+  transaction's description, amount and date on every sync (raw data through
+  the assistant), and a skill only works in Claude Code, not other MCP clients.
+- Chosen direction: rules are stored server-side (DB, or a file in the secrets
+  folder) and included in the backend's classification AI call with the
+  transactions. Data goes only where classification already sends it, and
+  every sync applies the rules.
+- Contradictions are checked when a rule is added: `add_classification_rule`
+  makes one AI call comparing the new rule with existing ones and returns
+  conflicts or overlaps for the user to resolve (replace, keep both, reword).
+  Listing rules asks before sharing.
+- Open: rules about amounts, dates or weekdays need the AI to see the amount
+  and date again (removed on 2026-11-04). Options: send them only when rules
+  exist, or send day of week and a rounded amount instead.
+
+**Update 2026-11-05 — person-to-person payments need the user's intent:**
+
+- Zelle, Venmo, Cash App and PayPal payments to or from a person go to
+  `unclassified`, always flagged for review. One payment can be a loan, a loan
+  repaid, a refund, rent, or a purchase from a person (e.g. used furniture),
+  and nothing in the data tells them apart.
+- Only the user knows the intent, so review is how these get resolved: list the
+  flagged transactions, the user says what each was (e.g. "loan repaid" ->
+  `loans_receivable`), and the correction rewrites its journal lines.
+  Recurring ones become rules ("Zelle to Jane is rent").
+- A loan repaid only balances if the loan itself was booked to
+  `loans_receivable`, so both legs may need correcting.
+- Zelle memos ("for couch") would help, but Plaid usually doesn't return them;
+  the user supplies that context.
+- Transactions classified before `unclassified` existed (e.g. a repayment
+  booked as `other_income`) aren't reclassified by a sync; they need a
+  correction or a one-off reclassify.
+
+**Priority:** do this right after the current pass of fixing classifications
+on real transactions, before the next sync.
+
+## BL-11 — Refunds aren't linked to their purchases
+
+**Added:** 2026-11-05
+**Related:** BL-10; docs/BACKEND_IMPLEMENTATION_DECISIONS.md #5, #12
+
+**Problem:** A refund is classified on its own, so the AI guesses its account
+and category from the description and direction alone (and can get it wrong,
+e.g. `other_income`). Nothing links it to the purchase it reverses, so there's
+no way to see a purchase's cost after refunds. Plaid gives no such link.
+
+**Proposed fix:** link a refund to its purchase, like transfer matching
+(`raw_transactions/match_transfers.py`), but without merging entries: a refund
+is its own event and stays its own entry, booked as a credit to the purchase's
+expense account. Store the link on the refund (e.g. `refund_of` on
+`raw_transactions`) and copy the purchase's counter account and category.
+
+- Candidates: same bank account, same normalized counterparty, money in dated
+  after the purchase and within N days (e.g. 90), amount equal to or less than
+  the purchase (partial refunds).
+- Several candidates: link the one exact amount match if there's exactly one;
+  otherwise don't link (like transfer ties, decision #12).
+- Limits: one refund for several items, or several partial refunds, won't
+  match by amount.
+- Later: list purchases still waiting on a refund; let a user correction
+  (BL-10) set or clear the link.
+
+## BL-12 — analyze's failures don't say what's missing from the question
+
+**Added:** 2026-11-05
+**Related:** SBL-1
+
+**Problem:** When analyze can't answer, the assistant gets one of a few fixed
+messages (a rejection, or "Couldn't answer this question"). They don't say
+what to change, e.g. which period, or which merchant was meant.
+
+**Proposed fix:**
+- A `needs_clarification` rejection with a question back to the user (e.g.
+  "Which period: October, or the last 30 days?"), written by the SQL model.
+  It runs before any SQL, so nothing can leak.
+- Plain messages per error type (e.g. no matching transactions vs. a broken
+  query), chosen from the error's type, never its text.
+- One automatic retry that gives the SQL model the error type, not the text:
+  the text can contain journal data, and the SQL model's calls go to Anthropic.
+- Narrow the `technical_query` rule if everyday words that are also column
+  names (category, account, description) cause false rejections.
+
+## BL-13 — Some spending lines get no category
+
+**Added:** 2026-11-08
+**Related:** BL-10; ROADMAP #3 (Ollama for classification)
+
+**Problem:** Booking sometimes puts a transaction on an expense account but
+leaves its category empty, so analyze's category answers show it as null
+("Uncategorized"). Example: a restaurant charge booked to
+non_essential_expense with category null. Cause not checked yet.
+
+**Proposed fix:** require a category on every expense line when classifying
+(fall back to the closest default category, or book to 'unclassified' for
+review). Handle it in the Ollama classification work.

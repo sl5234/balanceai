@@ -63,6 +63,10 @@ def _to_raw_transaction(
         category_detailed = getattr(pfc, "detailed", None)
         category_confidence = getattr(pfc, "confidence_level", None)
 
+    # Plaid's merchant_name (e.g. "Starbucks") when it has one; otherwise its raw
+    # name (e.g. "SQ *BLUE BOTTLE 1234 SF", "PAYROLL", "ZELLE PAYMENT TO …").
+    # The raw name isn't kept when merchant_name exists. This description is
+    # what classification sends to the AI and to the web search.
     description = getattr(txn, "merchant_name", None) or txn.name
 
     return RawTransaction(
@@ -73,6 +77,7 @@ def _to_raw_transaction(
         plaid_account_id=txn.account_id,
         posting_date=txn.date,
         description=description,
+        # Plaid: positive = money out. Ours: negative = money out (see RawTransaction.amount).
         amount=-Decimal(str(txn.amount)),
         category=category,
         category_detailed=category_detailed,

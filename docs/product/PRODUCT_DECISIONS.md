@@ -1,5 +1,7 @@
 # Product decisions
 
+<!-- INSTRUCTIONS: Keep entries concise, but with enough detail to understand the decision on its own later. Prefer a concrete example over explanation. Keep grounded facts to the few that drove the decision; leave out supporting detail. -->
+
 ## #1 — 2026-10-11 — Users work with transactions, not journal entries
 
 **Category:** product

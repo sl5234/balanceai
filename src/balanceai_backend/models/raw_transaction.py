@@ -25,8 +25,8 @@ class Classification:
 
     needs_user_review: a person should check this classification — the source
     changed the transaction after the user classified it, or the AI couldn't
-    tell what it was for (no category). Cleared when the classification is
-    set again.
+    tell what it was for (no category, or counter_account unclassified, which
+    always sets it). Cleared when the classification is set again.
     """
 
     counter_account: JournalAccount
@@ -34,6 +34,11 @@ class Classification:
     category: str | None = None
     counterparty: str | None = None
     needs_user_review: bool = False
+
+    def __post_init__(self) -> None:
+        # An unknown purpose always needs a person, whoever classified it.
+        if self.counter_account == JournalAccount.UNCLASSIFIED:
+            self.needs_user_review = True
 
     def to_dict(self) -> dict:
         return {
@@ -96,7 +101,11 @@ class RawTransaction:
     account_id: str
     posting_date: datetime.date
     description: str
-    amount: Decimal  # negative = debit, positive = credit — flipped from Plaid's own convention
+    # Required of every source (Plaid, statements, receipts): negative = money out of
+    # this account, positive = money in. On a credit card, a charge is negative and a
+    # payment or refund is positive. Plaid's sign is the opposite, so sync flips it;
+    # a statement or receipt parser must convert to this before storing.
+    amount: Decimal
     plaid_item_id: str | None = None
     plaid_account_id: str | None = None
     category: str | None = None

@@ -1,5 +1,7 @@
 # Model provider security decisions
 
+<!-- INSTRUCTIONS: Keep entries concise, but with enough detail to understand the decision on its own later. Prefer a concrete example over explanation. Keep grounded facts to the few that drove the decision; leave out supporting detail. -->
+
 ## #1 — 2026-08-19 — Redact/minimize customer financial data before sending to model providers
 
 **Category:** system (technical)
