@@ -794,6 +794,11 @@ class TestAnalyzeFinancialQuestion:
         assert 'Question asked: "How much did I spend?"' in message
         assert "Total spend" not in message  # the AI's summary isn't shown
 
+    def test_rounds_floats_to_cents(self):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        result = _analyze("SELECT 0.1 + 0.2 AS x, 3 AS n, 'a' AS s", ctx)
+        assert result["rows"] == [{"x": 0.3, "n": 3, "s": "a"}]
+
     @pytest.mark.parametrize("elicit_result", [DeclinedElicitation(), CancelledElicitation()])
     def test_raises_when_user_declines_or_cancels(self, elicit_result):
         with pytest.raises(PermissionError):
@@ -853,6 +858,79 @@ class TestAnalyzeFinancialQuestion:
 
     def test_every_rejection_has_a_message(self):
         assert set(REJECTION_MESSAGES) == set(QueryRejection)
+
+
+class TestAnalyzeFilters:
+    """journal_id, account_id and dates are checked before any AI call."""
+
+    @pytest.fixture
+    def db(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        create_schema(connection)
+        with patch("balanceai_backend.servers.bookkeeping_server.conn", connection):
+            yield connection
+        connection.close()
+
+    @pytest.fixture
+    def journal_id(self, db):
+        upsert_bank_account(
+            BankAccount(
+                id="test_bank:checking:0000",
+                institution_name="Test Bank",
+                account_type=BankAccountType.CHECKING,
+                last4="0000",
+            ),
+            conn=db,
+        )
+        upsert_bank_account(
+            BankAccount(
+                id="test_bank:savings:1111",
+                institution_name="Test Bank",
+                account_type=BankAccountType.SAVINGS,
+                last4="1111",
+            ),
+            conn=db,
+        )
+        return create_journal(name="Personal", bank_account_ids=["test_bank:checking:0000"])[
+            "journal_id"
+        ]
+
+    def _run(self, **kwargs):
+        ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))
+        query = FinancialQuery(sql="SELECT 42 AS total", description="d", rejection=None)
+        with patch(_PARSE, return_value=query) as parse:
+            asyncio.run(analyze_financial_question(ctx, "How much did I spend?", **kwargs))
+        return parse
+
+    def test_passes_journal_and_account_to_the_ai(self, journal_id):
+        parse = self._run(journal_id=journal_id, account_id="test_bank:checking:0000")
+        content = parse.call_args.kwargs["content"]
+        assert f"Journal ID filter: {journal_id}" in content
+        assert "Bank account ID filter: test_bank:checking:0000" in content
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"journal_id": "nope"}, "No journal with id nope"),
+            ({"account_id": "nope"}, "No bank account with id nope"),
+            ({"account_id": "test_bank:savings:1111", "journal_id": None}, "isn't in journal"),
+            (
+                {"start_date": datetime.date(2025, 11, 1), "end_date": datetime.date(2025, 10, 1)},
+                "is after the end date",
+            ),
+        ],
+    )
+    def test_rejects_bad_filters_before_the_ai_call(self, journal_id, kwargs, message):
+        if "journal_id" in kwargs and kwargs["journal_id"] is None:
+            kwargs["journal_id"] = journal_id  # an account outside this journal
+        with patch(_PARSE) as parse, pytest.raises(ValueError, match=message):
+            asyncio.run(
+                analyze_financial_question(
+                    _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent())), "q", **kwargs
+                )
+            )
+        parse.assert_not_called()
 
 
 class TestHideDescriptions:

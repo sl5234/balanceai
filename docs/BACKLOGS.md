@@ -271,3 +271,17 @@ what to change, e.g. which period, or which merchant was meant.
   the text can contain journal data, and the SQL model's calls go to Anthropic.
 - Narrow the `technical_query` rule if everyday words that are also column
   names (category, account, description) cause false rejections.
+
+## BL-13 — Some spending lines get no category
+
+**Added:** 2026-11-08
+**Related:** BL-10; ROADMAP #3 (Ollama for classification)
+
+**Problem:** Booking sometimes puts a transaction on an expense account but
+leaves its category empty, so analyze's category answers show it as null
+("Uncategorized"). Example: a restaurant charge booked to
+non_essential_expense with category null. Cause not checked yet.
+
+**Proposed fix:** require a category on every expense line when classifying
+(fall back to the closest default category, or book to 'unclassified' for
+review). Handle it in the Ollama classification work.

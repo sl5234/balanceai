@@ -25,6 +25,10 @@ Double-entry bookkeeping semantics (critical for correct queries):
     WHERE l.account IN ('essential_expense', 'non_essential_expense', 'interest_and_fees')
 - Refunds are credits on the expense account, dated when refunded, so a period's
   net spend can be negative. If the user asks for gross spending, use SUM(debit) alone.
+- Whenever you return net_spend, also return its parts as columns:
+  purchases (SUM(debit)) and refunds (SUM(credit)), using COALESCE(..., 0).
+  Example: purchases 300.00, refunds 500.00, net_spend -200.00. This applies to
+  totals and to each row of a breakdown (by month, category or merchant).
 - INCOME: the income-account rows. Net income = SUM(credit) - SUM(debit).
     WHERE l.account IN ('salary_income', 'interest_income', 'other_income')
 - Count each entry once: query only the expense or only the income rows, never
@@ -35,6 +39,13 @@ Double-entry bookkeeping semantics (critical for correct queries):
   person) and awaits the user's review. They are neither spending nor income;
   don't include them in either. If the user asks what's unreviewed or
   unclassified, query these rows (money out = debit, money in = credit).
+- When answering a spending total, also return the unclassified money out for
+  the same period and filters as its own column, unclassified_out
+  (SUM(debit) of 'unclassified' rows); for an income total, unclassified_in
+  (SUM(credit)), using COALESCE(..., 0). Example: net_spend 1250.00,
+  unclassified_out 250.00. In a breakdown by month, add it per month. Leave it
+  out when the question filters or groups by category (e.g. dining):
+  unclassified rows have no category, so their amount wouldn't belong to it.
 - Filter merchants by counterparty, never by description (description is the bank's
   raw text, e.g. 'SQ *BLUE BOTTLE 1234 SF').
 - To filter by bank account, join to the entry's bank-side row:

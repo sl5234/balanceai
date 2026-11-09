@@ -35,6 +35,7 @@ from balanceai_backend.db.journal_db import (
     update_journal as db_update_journal,
 )
 from balanceai_backend.db.readonly_journal_connection import readonly_journal_conn
+from balanceai_backend.helpers.financial_query_helper import check_analyze_filters
 from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_bank_statement,
     handle_sync_journal_entries_from_receipt,
@@ -108,6 +109,8 @@ mcp = FastMCP(
                 -> e.g. Shell, Shell Oil, Shell Service Station
         call 2: "How much did I spend in October 2025 at these merchants:
                 <the merchant names call 1 returned>?"
+    - If the user has more than one journal (list_journals), ask which one a
+      question is about and pass its `journal_id`.
     - Pass prior call results in the `context` argument when a follow-up query
       depends on previous results (e.g. for comparison or anomaly detection).
     - `create_report_definition` requires an `unparameterized_sql` from a prior
@@ -484,6 +487,7 @@ async def analyze_financial_question(
     start_date: date | None = None,
     end_date: date | None = None,
     account_id: str | None = None,
+    journal_id: str | None = None,
     context: dict | None = None,
 ) -> dict:
     """
@@ -515,6 +519,8 @@ async def analyze_financial_question(
         start_date: Optional date hint (inclusive). Helps the LLM scope the query.
         end_date: Optional date hint (inclusive). Helps the LLM scope the query.
         account_id: Optional bank account id (bank_accounts.id) to scope to one account.
+        journal_id: Optional journal id (from list_journals) to scope to one journal.
+            With more than one journal, ask the user which one they mean.
         context: Optional dict of prior results to inform this query.
             Use for chained or comparative queries, e.g.:
             {"prior_period": "Sep 2025", "prior_total": 450.00}
@@ -524,9 +530,13 @@ async def analyze_financial_question(
 
     Raises:
         PermissionError: if the user declines or cancels the approval prompt.
-        ValueError: if the question is rejected or can't be turned into a query.
+        ValueError: if a filter doesn't exist (journal, bank account), the start
+            date is after the end date, or the question is rejected or can't be
+            turned into a query.
         RuntimeError: if the query fails.
     """
+    check_analyze_filters(start_date, end_date, account_id, journal_id, conn=conn)
+
     user_parts = [f"Question: {question}"]
     if start_date:
         user_parts.append(f"Start date hint: {start_date}")
@@ -534,6 +544,8 @@ async def analyze_financial_question(
         user_parts.append(f"End date hint: {end_date}")
     if account_id:
         user_parts.append(f"Bank account ID filter: {account_id}")
+    if journal_id:
+        user_parts.append(f"Journal ID filter: {journal_id}")
     if context:
         user_parts.append(f"Context from prior queries: {json.dumps(context)}")
 
@@ -564,7 +576,12 @@ async def analyze_financial_question(
     # and it would reach the assistant before the consent prompt (SBL-1), so
     # keep it in the local log only.
     try:
-        rows = [dict(r) for r in readonly_journal_conn.execute(sql).fetchall()]
+        # Amounts are stored as REAL (binary floats), so sums pick up noise
+        # like 0.30000000000000004 (0.1 + 0.2).
+        rows = [
+            {k: round(v, 2) if isinstance(v, float) else v for k, v in dict(r).items()}
+            for r in readonly_journal_conn.execute(sql).fetchall()
+        ]
     except sqlite3.Error:
         logger.warning("analyze_financial_question | query failed", exc_info=True)
         raise RuntimeError(UNANSWERABLE_MESSAGE) from None
