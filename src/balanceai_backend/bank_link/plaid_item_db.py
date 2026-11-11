@@ -11,6 +11,7 @@ def _build_item(row) -> PlaidItem:
         institution_id=row["institution_id"],
         institution_name=row["institution_name"],
         created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 
@@ -34,13 +35,14 @@ def save_plaid_item(item: PlaidItem, conn: sqlite3.Connection = _default_conn) -
     with conn:
         conn.execute(
             "INSERT INTO plaid_items"
-            " (item_id, access_token, institution_id, institution_name, created_at)"
-            " VALUES (?,?,?,?,?)",
+            " (item_id, access_token, institution_id, institution_name, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?)",
             (
                 item.item_id,
                 item.access_token,
                 item.institution_id,
                 item.institution_name,
+                item.created_at,
                 item.created_at,
             ),
         )

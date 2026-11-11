@@ -21,7 +21,6 @@ from balanceai_backend.models.receipt import (
     ReceiptExtraction,
     ReceiptKind,
 )
-from balanceai_backend.models.transaction import Transaction
 from balanceai_backend.paths import RECEIPTS_DIR
 from balanceai_backend.raw_transactions.raw_transaction_db import (
     find_receipt_account_ids_for_card_last4,
@@ -131,11 +130,9 @@ def sync_raw_transactions_from_receipt(
     receipt: ReceiptExtraction, account_id: str, conn: sqlite3.Connection = _default_conn
 ) -> RawTransaction:
     """Save the receipt as a raw transaction (source="receipt"). Saving the same
-    receipt again updates it rather than adding a second one."""
+    receipt again adds a second row (catching duplicates is part of BL-15)."""
     amount = -receipt.total if receipt.kind is ReceiptKind.PURCHASE else receipt.total
     txn = RawTransaction(
-        id="receipt-"
-        + Transaction.generate_id(account_id, receipt.date, receipt.counterparty, amount),
         source="receipt",
         account_id=account_id,
         posting_date=receipt.date,

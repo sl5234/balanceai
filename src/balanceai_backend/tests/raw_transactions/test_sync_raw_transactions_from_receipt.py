@@ -86,7 +86,7 @@ def _receipt(**overrides) -> ReceiptExtraction:
 def _earlier_receipt(db, account_id, card="1234", id="earlier"):
     upsert_raw_transaction(
         RawTransaction(
-            id=id,
+            raw_transaction_id=id,
             source="receipt",
             account_id=account_id,
             posting_date=datetime.date(2026, 10, 1),
@@ -178,7 +178,8 @@ class TestSyncRawTransactionsFromReceipt:
         txn = sync_raw_transactions_from_receipt(
             _receipt(tax=Decimal("1.02"), tip=Decimal("2.00")), CHECKING, conn=db
         )
-        [saved] = find_raw_transactions(id=txn.id, conn=db)
+        [saved] = find_raw_transactions(raw_transaction_id=txn.raw_transaction_id, conn=db)
+        assert len(saved.raw_transaction_id) == 32 and saved.plaid_transaction_id is None
         assert saved.source == "receipt"
         assert saved.amount == Decimal("-12.50")
         assert saved.description == "Blue Bottle Coffee"
@@ -192,10 +193,11 @@ class TestSyncRawTransactionsFromReceipt:
         txn = sync_raw_transactions_from_receipt(_receipt(kind=ReceiptKind.REFUND), CARD, conn=db)
         assert txn.amount == Decimal("12.50")
 
-    def test_saving_the_same_receipt_twice_keeps_one_row(self, db):
+    def test_saving_the_same_receipt_twice_adds_two_rows(self, db):
+        """Ids are random, so duplicates aren't caught here (BL-15)."""
         sync_raw_transactions_from_receipt(_receipt(), CHECKING, conn=db)
         sync_raw_transactions_from_receipt(_receipt(), CHECKING, conn=db)
-        assert len(find_raw_transactions(source="receipt", conn=db)) == 1
+        assert len(find_raw_transactions(source="receipt", conn=db)) == 2
 
     def test_keeps_the_category_hint(self, db):
         txn = sync_raw_transactions_from_receipt(_receipt(category="dining"), CHECKING, conn=db)

@@ -68,7 +68,7 @@ def generate_journal_entry(txn: RawTransaction, account_type: BankAccountType) -
         ValueError: if the transaction isn't classified.
     """
     if txn.classification is None:
-        raise ValueError(f"Raw transaction {txn.id} isn't classified")
+        raise ValueError(f"Raw transaction {txn.raw_transaction_id} isn't classified")
     amount = abs(txn.amount)
     if amount == 0:
         return []
@@ -103,7 +103,7 @@ def generate_matched_transfer_entry(
     """
     for txn in (out_side, in_side):
         if txn.classification is None:
-            raise ValueError(f"Raw transaction {txn.id} isn't classified")
+            raise ValueError(f"Raw transaction {txn.raw_transaction_id} isn't classified")
     amount = abs(out_side.amount)
     journal_entry_id = UniqueIdGenerator.generate_id()
     return [
@@ -141,6 +141,6 @@ def _line(
         category=txn.classification.category,
         counterparty=txn.classification.counterparty or txn.description,
         journal_entry_id=journal_entry_id,
-        raw_transaction_id=txn.id,
+        raw_transaction_id=txn.raw_transaction_id,
         bank_account_id=bank_account_id,
     )

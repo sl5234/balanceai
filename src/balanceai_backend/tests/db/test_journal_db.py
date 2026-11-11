@@ -96,7 +96,7 @@ def _make_entry(line_id: str, date: datetime.date, amount: Decimal) -> JournalLi
 
 def _insert_entry(db, entry: JournalLine, journal_id: str) -> None:
     db.execute(
-        "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'2026-01-01T00:00:00+00:00','2026-01-01T00:00:00+00:00')",
         (
             entry.journal_line_id,
             journal_id,
@@ -291,7 +291,7 @@ class TestFindJournalEntries:
 
         save_journal(sample_journal, db)
         db.execute(
-            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'2026-01-01T00:00:00+00:00','2026-01-01T00:00:00+00:00')",
             (
                 "entry-null-recip",
                 sample_journal.journal_id,
@@ -416,7 +416,7 @@ class TestUpdateJournal:
     def test_replaces_entries(self, db, sample_journal):
         save_journal(sample_journal, db)
         db.execute(
-            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'2026-01-01T00:00:00+00:00','2026-01-01T00:00:00+00:00')",
             (
                 "entry-1",
                 sample_journal.journal_id,
@@ -453,7 +453,7 @@ class TestUpdateJournal:
         )
         save_journal(other, db)
         db.execute(
-            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO journal_lines (journal_line_id, journal_id, date, account, description, debit, credit, category, tax, counterparty, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'2026-01-01T00:00:00+00:00','2026-01-01T00:00:00+00:00')",
             (
                 "entry-collision",
                 other.journal_id,

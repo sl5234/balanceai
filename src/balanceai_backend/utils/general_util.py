@@ -1,4 +1,5 @@
 import csv
+from datetime import UTC, datetime
 from pathlib import Path
 
 MIME_TYPES = {
@@ -33,3 +34,9 @@ def publish_data(rows: list[dict], local_path: str) -> str:
         writer.writeheader()
         writer.writerows(rows)
     return str(out)
+
+
+def utc_now_iso() -> str:
+    """Now, in UTC, as ISO 8601 text, e.g. '2026-11-11T05:04:00.123456+00:00'.
+    Used for created_at / updated_at."""
+    return datetime.now(UTC).isoformat()

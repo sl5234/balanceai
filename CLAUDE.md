@@ -33,5 +33,9 @@ Bottle Coffee".
 - The user opens the PR and merges it into `main` on GitHub. `gh` can't reach
   GitHub from the sandbox, so give the PR link
   (`https://github.com/sl5234/balanceai/pull/new/<branch>`) instead.
-- After the user merges: `git checkout main && git pull --rebase`, delete the
-  merged branch, and create a new feature branch for the next work.
+- After the user says it's merged, prepare for the next work:
+  1. `git checkout main`
+  2. `git pull --rebase`
+  3. `git branch -d <merged branch>` (and `git push origin --delete <merged branch>`
+     if GitHub didn't delete it)
+  4. `git checkout -b feature/<next topic>`

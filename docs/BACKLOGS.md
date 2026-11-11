@@ -60,6 +60,10 @@ so the next sync saves them again alongside the old rows.
   incoming transactions to existing rows by account + date + amount +
   description (by count) and update instead of inserting.
 
+**Update 2026-11-11:** rows now have our own id and Plaid's in
+`plaid_transaction_id` (BL-16). What's left is matching a re-link's new Plaid
+ids to existing rows, part of BL-5.
+
 ## BL-5 — Re-linking an already-linked bank isn't handled correctly
 
 **Added:** 2026-10-05
@@ -341,12 +345,24 @@ and not booked; if already booked, its entry is removed. v1 rules (no AI):
 
 Uses the separate ids from BL-16.
 
+- Also catch a receipt uploaded twice (raw transaction ids are random now, so
+  re-uploading makes a second row).
+- Open: pending → posted. Plaid removes the pending transaction and adds the
+  posted one under a new id, so a receipt matched to the pending row would lose
+  its link and the posted row would be booked again. Likely fix: when an added
+  transaction's `pending_transaction_id` matches a stored row, update that row
+  (new `plaid_transaction_id`, amount, date) and keep our id, classification
+  and receipt link; the later "removed" then finds nothing. To check: whether
+  every institution sets `pending_transaction_id`, and posted rows whose
+  pending one we never saw.
+
 **Priority:** right after the first round of receipt testing.
 
-## BL-16 — Raw transactions use Plaid's id as their own id
+## BL-16 — Raw transactions use Plaid's id as their own id (and its column is `id`)
 
 **Added:** 2026-11-10
-**Related:** BL-4, BL-5, BL-15
+**Related:** BL-4, BL-5, BL-15, BL-17 (merged in)
+**Status:** fixed 2026-11-11 (DB wiped and re-synced, no migration)
 
 **Problem:** A Plaid row's `raw_transactions.id` is Plaid's `transaction_id`;
 a receipt's is our own hash. So ids have two formats, and a re-link (new Plaid
@@ -362,25 +378,24 @@ no foreign key) still holds the old Plaid ids, so a migration must rewrite it
 to the new ids along with `raw_transactions.id`; or wipe the DB and rebook,
 since booking rebuilds every line from raw transactions.
 
-**Priority:** with BL-5 and BL-15.
+Also rename `raw_transactions.id` → `raw_transaction_id` (and `RawTransaction.id`),
+so the name matches `journal_lines.raw_transaction_id` (was BL-17).
+
+**Fix (2026-11-11):** `raw_transaction_id` is ours (UniqueIdGenerator) for every
+source; Plaid's id is in `plaid_transaction_id`, and Plaid sync finds rows by
+it (`upsert_raw_transaction` keeps the stored id; `removed` deletes by Plaid
+id). The server stops on a database from before this change and asks to wipe
+it.
 
 ## BL-17 — Rename raw_transactions.id to raw_transaction_id
 
-**Added:** 2026-11-10
-**Related:** BL-16
-
-**Problem:** The column is `id` in `raw_transactions` but `raw_transaction_id`
-in `journal_lines`, though they hold the same value. Other tables use the
-long form (`journal_id`, `journal_line_id`).
-
-**Proposed fix:** rename `raw_transactions.id` → `raw_transaction_id` (and
-`RawTransaction.id`), so the names match across tables. Do it in the same
-migration as BL-16.
+Merged into BL-16 (2026-11-11).
 
 ## BL-18 — Tables don't record when rows were created or last changed
 
 **Added:** 2026-11-10
 **Related:** BL-16, BL-17
+**Status:** fixed 2026-11-11 (DB columns and models)
 
 **Problem:** Only `journals`, `plaid_items` and `report_definitions` have
 `created_at`, and no table has `updated_at`. `raw_transactions`,

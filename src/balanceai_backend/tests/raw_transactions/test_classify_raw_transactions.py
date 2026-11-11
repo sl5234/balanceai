@@ -56,7 +56,7 @@ def db():
 def _txn(txn_id: str, account_id: str = CHECKING, **fields) -> RawTransaction:
     return RawTransaction(
         **{
-            "id": txn_id,
+            "raw_transaction_id": txn_id,
             "source": "plaid",
             "account_id": account_id,
             "posting_date": datetime.date(2026, 8, 19),
@@ -140,7 +140,7 @@ class TestClassifyRawTransactions:
 
         assert [t["description"] for t in _sent(fake_ai)] == ["Merchant posted"]
         assert result == {"classified": 1, "unclassified": 0, "errors": []}
-        pending = find_raw_transactions(id="pending", conn=db)[0]
+        pending = find_raw_transactions(raw_transaction_id="pending", conn=db)[0]
         assert pending.classification is None
 
     def test_skips_already_classified_transactions(self, db, fake_ai):
@@ -154,7 +154,7 @@ class TestClassifyRawTransactions:
         classify_raw_transactions(conn=db)
 
         assert [t["description"] for t in _sent(fake_ai)] == ["Merchant t2"]
-        assert find_raw_transactions(id="t1", conn=db)[0].classification == mine
+        assert find_raw_transactions(raw_transaction_id="t1", conn=db)[0].classification == mine
 
     def test_sends_batches_of_twenty(self, db, fake_ai):
         for i in range(45):
@@ -470,7 +470,7 @@ class TestReuse:
 
         fake_ai.assert_not_called()
         assert result == {"classified": 1, "unclassified": 0, "errors": []}
-        new = find_raw_transactions(id="new", conn=db)[0].classification
+        new = find_raw_transactions(raw_transaction_id="new", conn=db)[0].classification
         assert (new.category, new.counterparty, new.classified_by) == (
             "rideshare",
             "Uber",
@@ -485,7 +485,7 @@ class TestReuse:
 
         classify_raw_transactions(conn=db)
 
-        new = find_raw_transactions(id="new", conn=db)[0].classification
+        new = find_raw_transactions(raw_transaction_id="new", conn=db)[0].classification
         assert new.category == "user's pick"
         assert new.classified_by == ClassifiedBy.AI
 

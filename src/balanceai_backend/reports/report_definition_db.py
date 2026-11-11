@@ -3,6 +3,7 @@ import sqlite3
 
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.models.report import ReportDefinition
+from balanceai_backend.utils.general_util import utc_now_iso
 
 
 def _build_report_definition(row) -> ReportDefinition:
@@ -17,6 +18,7 @@ def _build_report_definition(row) -> ReportDefinition:
         unparameterized_sql=row["unparameterized_sql"],
         parameters=parameters,
         created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 
@@ -44,8 +46,8 @@ def save_report_definition(
         conn.execute(
             "INSERT INTO report_definitions"
             " (report_definition_id, name, prompt, sql_template, description,"
-            "  unparameterized_sql, parameters, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?)",
+            "  unparameterized_sql, parameters, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
             (
                 defn.report_definition_id,
                 defn.name,
@@ -54,6 +56,7 @@ def save_report_definition(
                 defn.description,
                 defn.unparameterized_sql,
                 json.dumps(defn.parameters),
+                defn.created_at,
                 defn.created_at,
             ),
         )
@@ -69,7 +72,8 @@ def update_report_definition(
     with conn:
         conn.execute(
             "UPDATE report_definitions"
-            " SET name=?, prompt=?, sql_template=?, description=?, unparameterized_sql=?, parameters=?"
+            " SET name=?, prompt=?, sql_template=?, description=?, unparameterized_sql=?,"
+            "  parameters=?, updated_at=?"
             " WHERE report_definition_id=?",
             (
                 updated.name,
@@ -78,6 +82,7 @@ def update_report_definition(
                 updated.description,
                 updated.unparameterized_sql,
                 json.dumps(updated.parameters),
+                utc_now_iso(),
                 updated.report_definition_id,
             ),
         )

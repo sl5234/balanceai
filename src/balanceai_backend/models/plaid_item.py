@@ -13,6 +13,7 @@ class PlaidItem:
     institution_id: str | None = None
     institution_name: str | None = None
     created_at: str = field(default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat())
+    updated_at: str | None = None  # set by the database when saved
 
     def to_dict(self) -> dict:
         return {
@@ -21,6 +22,7 @@ class PlaidItem:
             "institution_id": self.institution_id,
             "institution_name": self.institution_name,
             "created_at": self.created_at,
+            "updated_at": self.updated_at,
         }
 
     @classmethod

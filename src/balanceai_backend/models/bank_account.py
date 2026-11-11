@@ -77,6 +77,9 @@ class BankAccount:
     plaid_institution_id: str | None = None
     plaid_item_id: str | None = None
     plaid_account_id: str | None = None
+    # Set by the database when saved (UTC ISO 8601); ignored when saving.
+    created_at: str | None = None
+    updated_at: str | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -94,4 +97,6 @@ class BankAccount:
             plaid_institution_id=d.get("plaid_institution_id"),
             plaid_item_id=d.get("plaid_item_id"),
             plaid_account_id=d.get("plaid_account_id"),
+            created_at=d.get("created_at"),
+            updated_at=d.get("updated_at"),
         )

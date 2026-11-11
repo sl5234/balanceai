@@ -57,22 +57,25 @@ def find_matched_transfers(
     # Each transaction's candidates, to spot true ties.
     options: dict[str, list[tuple[int, RawTransaction]]] = {}
     for days, o, i in candidates:
-        options.setdefault(o.id, []).append((days, i))
-        options.setdefault(i.id, []).append((days, o))
+        options.setdefault(o.raw_transaction_id, []).append((days, i))
+        options.setdefault(i.raw_transaction_id, []).append((days, o))
     tied: set[str] = set()
     for txn_id, txn_options in options.items():
         closest = min(days for days, _ in txn_options)
         nearest = [other for days, other in txn_options if days == closest]
         if len({other.account_id for other in nearest}) > 1:
             tied.add(txn_id)
-            tied.update(other.id for other in nearest)
+            tied.update(other.raw_transaction_id for other in nearest)
 
     # Closest first; ids break exact ties so the result doesn't depend on input order.
     matches: list[Match] = []
     used: set[str] = set()
-    for _, o, i in sorted(candidates, key=lambda c: (c[0], c[1].posting_date, c[1].id, c[2].id)):
-        if {o.id, i.id} & (used | tied):
+    for _, o, i in sorted(
+        candidates,
+        key=lambda c: (c[0], c[1].posting_date, c[1].raw_transaction_id, c[2].raw_transaction_id),
+    ):
+        if {o.raw_transaction_id, i.raw_transaction_id} & (used | tied):
             continue
         matches.append((o, i))
-        used.update((o.id, i.id))
+        used.update((o.raw_transaction_id, i.raw_transaction_id))
     return matches

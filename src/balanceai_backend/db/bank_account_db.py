@@ -6,6 +6,7 @@ from balanceai_backend.models.bank_account import (
     BankAccount,
     BankAccountType,
 )
+from balanceai_backend.utils.general_util import utc_now_iso
 
 
 def _build_bank_account(row) -> BankAccount:
@@ -18,6 +19,8 @@ def _build_bank_account(row) -> BankAccount:
         plaid_institution_id=row["plaid_institution_id"],
         plaid_item_id=row["plaid_item_id"],
         plaid_account_id=row["plaid_account_id"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 
@@ -70,12 +73,13 @@ def upsert_bank_account(account: BankAccount, conn: sqlite3.Connection = _defaul
             f"{existing[0].plaid_account_id}, not {account.plaid_account_id}"
         )
 
+    now = utc_now_iso()
     with conn:
         conn.execute(
             "INSERT INTO bank_accounts"
             " (id, institution_name, account_type, last4, display_name,"
-            "  plaid_institution_id, plaid_item_id, plaid_account_id)"
-            " VALUES (?,?,?,?,?,?,?,?)"
+            "  plaid_institution_id, plaid_item_id, plaid_account_id, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(id) DO UPDATE SET"
             "  institution_name = excluded.institution_name,"
             "  account_type = excluded.account_type,"
@@ -85,7 +89,8 @@ def upsert_bank_account(account: BankAccount, conn: sqlite3.Connection = _defaul
             "   COALESCE(excluded.plaid_institution_id, bank_accounts.plaid_institution_id),"
             "  plaid_item_id = COALESCE(excluded.plaid_item_id, bank_accounts.plaid_item_id),"
             "  plaid_account_id ="
-            "   COALESCE(excluded.plaid_account_id, bank_accounts.plaid_account_id)",
+            "   COALESCE(excluded.plaid_account_id, bank_accounts.plaid_account_id),"
+            "  updated_at = excluded.updated_at",
             (
                 account.id,
                 account.institution_name,
@@ -95,6 +100,8 @@ def upsert_bank_account(account: BankAccount, conn: sqlite3.Connection = _defaul
                 account.plaid_institution_id,
                 account.plaid_item_id,
                 account.plaid_account_id,
+                now,
+                now,
             ),
         )
 
@@ -116,11 +123,12 @@ def create_cash_account(
         ),
         conn=conn,
     )
+    now = utc_now_iso()
     with conn:
         conn.execute(
-            "INSERT OR IGNORE INTO journal_bank_accounts (journal_id, bank_account_id)"
-            " VALUES (?, ?)",
-            (journal_id, account_id),
+            "INSERT OR IGNORE INTO journal_bank_accounts"
+            " (journal_id, bank_account_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (journal_id, account_id, now, now),
         )
     return account_id
 

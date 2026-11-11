@@ -143,7 +143,7 @@ class TestSyncTransactions:
             "bank_accounts": {"saved": 0, "skipped": 0},
         }
         [txn] = find_raw_transactions(conn=db)
-        assert txn.id == "txn-1"
+        assert txn.plaid_transaction_id == "txn-1"
         assert txn.account_id == BANK_ACCOUNT_ID  # our id, not Plaid's "plaid-acc-1"
         assert txn.plaid_account_id == "plaid-acc-1"
         assert txn.amount == Decimal("-4.5")  # Plaid positive (spend) -> our negative (debit)
@@ -331,8 +331,9 @@ class TestModifiedTransactionClassification:
 
     def test_modified_amount_keeps_and_flags_a_users_classification(self, db, linked_item):
         _sync_one_page(db, added=[_plaid_txn(amount=4.50)])
+        [synced] = find_raw_transactions(conn=db)
         update_raw_transaction_classification(
-            "txn-1", self._classification(ClassifiedBy.USER), conn=db
+            synced.raw_transaction_id, self._classification(ClassifiedBy.USER), conn=db
         )
 
         _sync_one_page(db, modified=[_plaid_txn(amount=5.25)])
@@ -345,8 +346,9 @@ class TestModifiedTransactionClassification:
 
     def test_modified_amount_clears_the_ais_classification(self, db, linked_item):
         _sync_one_page(db, added=[_plaid_txn(amount=4.50)])
+        [synced] = find_raw_transactions(conn=db)
         update_raw_transaction_classification(
-            "txn-1", self._classification(ClassifiedBy.AI), conn=db
+            synced.raw_transaction_id, self._classification(ClassifiedBy.AI), conn=db
         )
 
         _sync_one_page(db, modified=[_plaid_txn(amount=5.25)])
@@ -425,3 +427,26 @@ class TestUnknownPlaidAccount:
 
         assert find_raw_transactions(conn=db) == []
         assert get_plaid_sync_cursor("item-1", conn=db) is None
+
+
+class TestOurOwnIds:
+    """BL-16: our raw_transaction_id never changes; Plaid's id is stored apart."""
+
+    def test_stores_plaids_id_apart_from_ours(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn()])
+        [txn] = find_raw_transactions(conn=db)
+        assert txn.plaid_transaction_id == "txn-1"
+        assert len(txn.raw_transaction_id) == 32 and txn.raw_transaction_id != "txn-1"
+
+    def test_modified_keeps_our_id(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn(amount=4.50)])
+        [first] = find_raw_transactions(conn=db)
+        _sync_one_page(db, modified=[_plaid_txn(amount=5.25)])
+        [txn] = find_raw_transactions(conn=db)
+        assert txn.raw_transaction_id == first.raw_transaction_id
+        assert txn.amount == Decimal("-5.25")
+
+    def test_removed_deletes_by_plaids_id(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn()])
+        _sync_one_page(db, removed=[SimpleNamespace(transaction_id="txn-1")])
+        assert find_raw_transactions(conn=db) == []

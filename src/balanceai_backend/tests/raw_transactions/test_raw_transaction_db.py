@@ -2,11 +2,12 @@ import dataclasses
 import datetime
 import sqlite3
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 from balanceai_backend.bank_link.plaid_item_db import delete_plaid_item, save_plaid_item
 from balanceai_backend.db.bank_account_db import upsert_bank_account
-from balanceai_backend.db.connection import _apply_migrations, create_schema
+from balanceai_backend.db.connection import create_schema
 from balanceai_backend.db.journal_db import (
     add_journal_entry,
     find_booked_raw_transactions,
@@ -19,6 +20,7 @@ from balanceai_backend.models.raw_transaction import Classification, ClassifiedB
 from balanceai_backend.raw_transactions.generate_journal_entry import generate_journal_entry
 from balanceai_backend.raw_transactions.raw_transaction_db import (
     delete_raw_transaction,
+    delete_raw_transaction_by_plaid_id,
     find_raw_transactions,
     find_receipt_account_ids_for_card_last4,
     update_raw_transaction_classification,
@@ -56,7 +58,7 @@ def linked_item(db):
 @pytest.fixture
 def sample_txn():
     return RawTransaction(
-        id="txn-1",
+        raw_transaction_id="txn-1",
         source="plaid",
         plaid_item_id="item-1",
         account_id="plaid-acc-1",
@@ -76,7 +78,7 @@ class TestFindRawTransactions:
     def test_returns_saved_transaction(self, db, linked_item, sample_txn):
         upsert_raw_transaction(sample_txn, conn=db)
         [txn] = find_raw_transactions(conn=db)
-        assert txn.id == "txn-1"
+        assert txn.raw_transaction_id == "txn-1"
         assert txn.description == "Starbucks"
         assert txn.amount == Decimal("-4.50")
         assert txn.plaid_account_id == "plaid-raw-acc-1"
@@ -86,7 +88,7 @@ class TestFindRawTransactions:
         save_plaid_item(PlaidItem(item_id="item-2", access_token="b"), conn=db)
         upsert_raw_transaction(
             RawTransaction(
-                id="txn-1",
+                raw_transaction_id="txn-1",
                 source="plaid",
                 plaid_item_id="item-1",
                 account_id="acc-1",
@@ -98,7 +100,7 @@ class TestFindRawTransactions:
         )
         upsert_raw_transaction(
             RawTransaction(
-                id="txn-2",
+                raw_transaction_id="txn-2",
                 source="plaid",
                 plaid_item_id="item-2",
                 account_id="acc-2",
@@ -109,7 +111,7 @@ class TestFindRawTransactions:
             conn=db,
         )
         [txn] = find_raw_transactions(plaid_item_id="item-2", conn=db)
-        assert txn.id == "txn-2"
+        assert txn.raw_transaction_id == "txn-2"
 
     def test_filters_by_account_id(self, db, linked_item, sample_txn):
         upsert_raw_transaction(sample_txn, conn=db)
@@ -120,7 +122,7 @@ class TestFindRawTransactions:
         upsert_raw_transaction(sample_txn, conn=db)
         upsert_raw_transaction(
             RawTransaction(
-                id="txn-receipt-1",
+                raw_transaction_id="txn-receipt-1",
                 source="receipt",
                 plaid_item_id=None,
                 account_id="acct-1",
@@ -131,7 +133,7 @@ class TestFindRawTransactions:
             conn=db,
         )
         [txn] = find_raw_transactions(source="receipt", conn=db)
-        assert txn.id == "txn-receipt-1"
+        assert txn.raw_transaction_id == "txn-receipt-1"
         assert txn.plaid_item_id is None
 
 
@@ -142,7 +144,7 @@ class TestUpsertRawTransaction:
         upsert_raw_transaction(sample_txn, conn=db)
 
         modified = RawTransaction(
-            id="txn-1",
+            raw_transaction_id="txn-1",
             source="plaid",
             plaid_item_id="item-1",
             account_id="plaid-acc-1",
@@ -161,7 +163,7 @@ class TestUpsertRawTransaction:
         """Confirms plaid_item_id is genuinely nullable — a receipt/bank-statement
         row shouldn't need a fake Plaid item just to satisfy the schema."""
         txn = RawTransaction(
-            id="txn-statement-1",
+            raw_transaction_id="txn-statement-1",
             source="bank_statement",
             plaid_item_id=None,
             account_id="acct-1",
@@ -193,7 +195,7 @@ class TestPlaidItemDeletion:
         delete_plaid_item("item-1", conn=db)
 
         [txn] = find_raw_transactions(conn=db)
-        assert txn.id == "txn-1"
+        assert txn.raw_transaction_id == "txn-1"
         assert txn.plaid_item_id is None
         assert txn.plaid_account_id == "plaid-raw-acc-1"
 
@@ -250,14 +252,18 @@ class TestClassification:
 
     def test_find_by_id(self, db, linked_item, sample_txn):
         upsert_raw_transaction(sample_txn, conn=db)
-        assert [t.id for t in find_raw_transactions(id="txn-1", conn=db)] == ["txn-1"]
-        assert find_raw_transactions(id="txn-missing", conn=db) == []
+        assert [
+            t.raw_transaction_id for t in find_raw_transactions(raw_transaction_id="txn-1", conn=db)
+        ] == ["txn-1"]
+        assert find_raw_transactions(raw_transaction_id="txn-missing", conn=db) == []
 
     def test_find_unclassified_only(self, db, linked_item, sample_txn):
         upsert_raw_transaction(sample_txn, conn=db)
-        upsert_raw_transaction(dataclasses.replace(sample_txn, id="txn-2"), conn=db)
+        upsert_raw_transaction(dataclasses.replace(sample_txn, raw_transaction_id="txn-2"), conn=db)
         update_raw_transaction_classification("txn-1", _classification(), conn=db)
-        assert [t.id for t in find_raw_transactions(unclassified=True, conn=db)] == ["txn-2"]
+        assert [
+            t.raw_transaction_id for t in find_raw_transactions(unclassified=True, conn=db)
+        ] == ["txn-2"]
         assert len(find_raw_transactions(conn=db)) == 2
 
 
@@ -419,7 +425,8 @@ class TestCategoryDetails:
             sample_txn, category_detailed="FOOD_AND_DRINK_COFFEE", category_confidence="LOW"
         )
         upsert_raw_transaction(txn, conn=db)
-        assert find_raw_transactions(conn=db) == [txn]
+        [saved] = find_raw_transactions(conn=db)
+        assert dataclasses.replace(saved, created_at=None, updated_at=None) == txn
 
     def test_round_trips_through_dict(self, sample_txn):
         txn = dataclasses.replace(
@@ -457,59 +464,10 @@ class TestClassificationDictRoundTrip:
         assert RawTransaction.from_dict(d).classification is None
 
 
-class TestClassificationColumnMigration:
-    def test_adds_column_to_a_database_from_before_it_existed(self):
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        create_schema(conn)
-        conn.execute("ALTER TABLE raw_transactions DROP COLUMN classification")
-        conn.execute(
-            "INSERT INTO bank_accounts (id, institution_name, account_type, last4)"
-            " VALUES ('acc-1', 'Test Bank', 'checking', '0000')"
-        )
-        conn.execute(
-            "INSERT INTO raw_transactions (id, source, account_id, posting_date, description, amount)"
-            " VALUES ('txn-old', 'plaid', 'acc-1', '2026-08-19', 'Starbucks', '-4.50')"
-        )
-        conn.commit()
-
-        _apply_migrations(conn)
-
-        [txn] = find_raw_transactions(conn=conn)
-        assert txn.description == "Starbucks"
-        assert txn.classification is None
-        conn.close()
-
-
-class TestCategoryDetailsColumnMigration:
-    def test_adds_columns_to_a_database_from_before_they_existed(self):
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        create_schema(conn)
-        conn.execute("ALTER TABLE raw_transactions DROP COLUMN category_detailed")
-        conn.execute("ALTER TABLE raw_transactions DROP COLUMN category_confidence")
-        conn.execute(
-            "INSERT INTO bank_accounts (id, institution_name, account_type, last4)"
-            " VALUES ('acc-1', 'Test Bank', 'checking', '0000')"
-        )
-        conn.execute(
-            "INSERT INTO raw_transactions (id, source, account_id, posting_date, description, amount)"
-            " VALUES ('txn-old', 'plaid', 'acc-1', '2026-08-19', 'Starbucks', '-4.50')"
-        )
-        conn.commit()
-
-        _apply_migrations(conn)
-
-        [txn] = find_raw_transactions(conn=conn)
-        assert txn.description == "Starbucks"
-        assert (txn.category_detailed, txn.category_confidence) == (None, None)
-        conn.close()
-
-
 class TestReceiptFields:
     def test_saves_and_loads_receipt_fields(self, db):
         txn = RawTransaction(
-            id="receipt-1",
+            raw_transaction_id="receipt-1",
             source="receipt",
             account_id="acc-1",
             posting_date=datetime.date(2026, 11, 8),
@@ -520,7 +478,7 @@ class TestReceiptFields:
             tip=Decimal("2.00"),
         )
         upsert_raw_transaction(txn, conn=db)
-        [saved] = find_raw_transactions(id="receipt-1", conn=db)
+        [saved] = find_raw_transactions(raw_transaction_id="receipt-1", conn=db)
         assert (saved.card_last4, saved.tax, saved.tip) == (
             "1234",
             Decimal("1.02"),
@@ -529,7 +487,7 @@ class TestReceiptFields:
 
     def test_receipt_fields_round_trip_through_dict(self):
         txn = RawTransaction(
-            id="receipt-1",
+            raw_transaction_id="receipt-1",
             source="receipt",
             account_id="acc-1",
             posting_date=datetime.date(2026, 11, 8),
@@ -540,33 +498,11 @@ class TestReceiptFields:
         )
         assert RawTransaction.from_dict(txn.to_dict()) == txn
 
-    def test_adds_columns_to_a_database_from_before_they_existed(self):
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        create_schema(conn)
-        for column in ("card_last4", "tax", "tip"):
-            conn.execute(f"ALTER TABLE raw_transactions DROP COLUMN {column}")
-        conn.execute(
-            "INSERT INTO bank_accounts (id, institution_name, account_type, last4)"
-            " VALUES ('acc-1', 'Test Bank', 'checking', '0000')"
-        )
-        conn.execute(
-            "INSERT INTO raw_transactions (id, source, account_id, posting_date, description, amount)"
-            " VALUES ('txn-old', 'plaid', 'acc-1', '2026-08-19', 'Starbucks', '-4.50')"
-        )
-        conn.commit()
-
-        _apply_migrations(conn)
-
-        [txn] = find_raw_transactions(conn=conn)
-        assert (txn.card_last4, txn.tax, txn.tip) == (None, None, None)
-        conn.close()
-
 
 class TestFindReceiptAccountIdsForCardLast4:
     def _receipt(self, id, account_id, card="1234", source="receipt"):
         return RawTransaction(
-            id=id,
+            raw_transaction_id=id,
             source=source,
             account_id=account_id,
             posting_date=datetime.date(2026, 11, 8),
@@ -584,3 +520,69 @@ class TestFindReceiptAccountIdsForCardLast4:
     def test_only_reads_receipts(self, db):
         upsert_raw_transaction(self._receipt("p1", "acc-1", source="plaid"), conn=db)
         assert find_receipt_account_ids_for_card_last4("1234", conn=db) == []
+
+
+class TestOurIdsAndTimestamps:
+    """BL-16 / BL-18."""
+
+    def _plaid(self, amount="-4.50"):
+        """A fresh object each time, so a fresh random raw_transaction_id."""
+        return RawTransaction(
+            source="plaid",
+            account_id="acc-1",
+            posting_date=datetime.date(2026, 8, 19),
+            description="Starbucks",
+            amount=Decimal(amount),
+            plaid_transaction_id="plaid-1",
+        )
+
+    def test_same_plaid_id_updates_the_row_and_keeps_our_id(self, db):
+        times = iter(["2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00"])
+        with patch(
+            "balanceai_backend.raw_transactions.raw_transaction_db.utc_now_iso",
+            side_effect=lambda: next(times),
+        ):
+            first_id = upsert_raw_transaction(self._plaid(), conn=db)
+            second_id = upsert_raw_transaction(self._plaid("-5.25"), conn=db)
+        [txn] = find_raw_transactions(conn=db)
+        assert first_id == second_id == txn.raw_transaction_id
+        assert txn.amount == Decimal("-5.25")
+        assert (txn.created_at, txn.updated_at) == (
+            "2026-01-01T00:00:00+00:00",
+            "2026-01-02T00:00:00+00:00",
+        )
+
+    def test_finds_by_either_id(self, db):
+        our_id = upsert_raw_transaction(self._plaid(), conn=db)
+        assert find_raw_transactions(raw_transaction_id=our_id, conn=db)[
+            0
+        ].plaid_transaction_id == ("plaid-1")
+        assert find_raw_transactions(plaid_transaction_id="plaid-1", conn=db)[
+            0
+        ].raw_transaction_id == (our_id)
+
+    def test_delete_by_plaid_id(self, db):
+        upsert_raw_transaction(self._plaid(), conn=db)
+        delete_raw_transaction_by_plaid_id("plaid-1", conn=db)
+        assert find_raw_transactions(conn=db) == []
+        delete_raw_transaction_by_plaid_id("unknown", conn=db)  # no-op
+
+    def test_classification_update_sets_updated_at(self, db):
+        with patch(
+            "balanceai_backend.raw_transactions.raw_transaction_db.utc_now_iso",
+            return_value="2026-01-01T00:00:00+00:00",
+        ):
+            our_id = upsert_raw_transaction(self._plaid(), conn=db)
+        update_raw_transaction_classification(
+            our_id,
+            Classification(
+                counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+                category="dining",
+                counterparty="Starbucks",
+                classified_by=ClassifiedBy.AI,
+            ),
+            conn=db,
+        )
+        [txn] = find_raw_transactions(conn=db)
+        assert txn.created_at == "2026-01-01T00:00:00+00:00"
+        assert txn.updated_at > txn.created_at

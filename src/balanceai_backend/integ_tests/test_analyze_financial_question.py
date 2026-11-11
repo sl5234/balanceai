@@ -198,11 +198,18 @@ def _make_synthetic_db(path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     create_schema(conn)
     conn.execute(
-        "INSERT INTO journals VALUES (?, ?, ?, ?)",
-        ("j1", "October 2025 Journal", "", "2025-10-01T00:00:00+00:00"),
+        "INSERT INTO journals VALUES (?, ?, ?, ?, ?)",
+        (
+            "j1",
+            "October 2025 Journal",
+            "",
+            "2025-10-01T00:00:00+00:00",
+            "2025-10-01T00:00:00+00:00",
+        ),
     )
     conn.executemany(
-        f"INSERT INTO journal_lines ({_COLUMNS}) VALUES ({', '.join('?' * 12)})",
+        f"INSERT INTO journal_lines ({_COLUMNS}, created_at, updated_at)"
+        f" VALUES ({', '.join('?' * 12)}, '2025-10-01T00:00:00+00:00', '2025-10-01T00:00:00+00:00')",
         _JOURNAL_LINES,
     )
     conn.commit()

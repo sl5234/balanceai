@@ -70,7 +70,7 @@ def _txn(
     counter_account: JournalAccount | None = JournalAccount.CASH,
 ) -> RawTransaction:
     return RawTransaction(
-        id=txn_id,
+        raw_transaction_id=txn_id,
         source="plaid",
         account_id=account_id,
         posting_date=datetime.date(2026, 10, day),

@@ -1,3 +1,4 @@
+import dataclasses
 import sqlite3
 
 import pytest
@@ -72,7 +73,9 @@ class TestUpsertBankAccount:
     def test_inserts_and_reads_back(self, db, linked_item):
         account = _plaid_account()
         upsert_bank_account(account, conn=db)
-        assert find_bank_accounts(conn=db) == [account]
+        [saved] = find_bank_accounts(conn=db)
+        assert saved.created_at and saved.created_at == saved.updated_at
+        assert dataclasses.replace(saved, created_at=None, updated_at=None) == account
 
     def test_updates_existing_account(self, db, linked_item):
         upsert_bank_account(_plaid_account(display_name="Old Name"), conn=db)
