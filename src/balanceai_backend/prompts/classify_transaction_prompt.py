@@ -27,7 +27,7 @@ The bank_account_type is the account you're in; pick the account on the other
 side. On a credit_card or loan account, a payment toward it came from your bank
 account: use cash.
 
-Refunds: money coming in with a spending plaid_category (anything other than
+Refunds: money coming in with a spending source_category (anything other than
 INCOME or TRANSFER_IN), or from a merchant you'd buy from, is a refund, on any
 bank account type. Use the same expense account the purchase would have used.
 This comes before the default below.
@@ -53,39 +53,40 @@ A JSON list of transactions. Each has: index, description, direction
 card, a charge. "in" = money came in: income, a refund, or a transfer in; on a
 credit card, a payment or refund),
 bank_account_type (e.g. checking, credit_card), and, when known,
-plaid_category, plaid_category_detailed, plaid_confidence (VERY_HIGH, HIGH,
-MEDIUM, LOW, UNKNOWN), and web_context (a web search result about the
-description). Plaid's category is a strong hint but can be wrong, especially
-at LOW confidence. Don't guess a business type from its name alone.
+source_category (Plaid's, e.g. FOOD_AND_DRINK, or a receipt's, e.g. groceries),
+plaid_category_detailed, plaid_confidence (VERY_HIGH, HIGH, MEDIUM, LOW,
+UNKNOWN), and web_context (a web search result about the description). The
+source's category is a strong hint but can be wrong, especially at LOW
+confidence. Don't guess a business type from its name alone.
 """
 
 _EXAMPLES = """\
 ## EXAMPLES
-Trader Joe's, out, checking, plaid_category FOOD_AND_DRINK
+Trader Joe's, out, checking, source_category FOOD_AND_DRINK
   -> counter_account: essential_expense, category: groceries, counterparty: Trader Joe's
-Bilt Eqr, out, checking, plaid_category RENT_AND_UTILITIES
+Bilt Eqr, out, checking, source_category RENT_AND_UTILITIES
   -> counter_account: essential_expense, category: rent, counterparty: EQR
      (Bilt is the rent-payment service; EQR is the landlord being paid)
-ACME CORP PAYROLL, in, checking, plaid_category INCOME
+ACME CORP PAYROLL, in, checking, source_category INCOME
   -> counter_account: salary_income, category: income, counterparty: Acme Corp
-Rudy's, out, credit_card, plaid_category missing, no web_context
+Rudy's, out, credit_card, source_category missing, no web_context
   -> counter_account: non_essential_expense, category: null, counterparty: Rudy's
      (don't guess "dining" or "haircut" from the name)
-Amazon.com, in, credit_card, plaid_category GENERAL_MERCHANDISE
+Amazon.com, in, credit_card, source_category GENERAL_MERCHANDISE
   -> counter_account: non_essential_expense, category: shopping, counterparty: Amazon
      (money in from a merchant = refund, same account as the purchase)
-United Airlines, in, checking, plaid_category TRAVEL
+United Airlines, in, checking, source_category TRAVEL
   -> counter_account: non_essential_expense, category: travel, counterparty: United Airlines
      (a refund: a spending category with money coming in, even into checking)
-CREDIT CARD 3333 PAYMENT, out, checking, plaid_category LOAN_PAYMENTS
+CREDIT CARD 3333 PAYMENT, out, checking, source_category LOAN_PAYMENTS
   -> counter_account: credit_card_payable, category: transfer, counterparty: Self
-AUTOMATIC PAYMENT - THANK YOU, in, credit_card, plaid_category LOAN_PAYMENTS
+AUTOMATIC PAYMENT - THANK YOU, in, credit_card, source_category LOAN_PAYMENTS
   -> counter_account: cash, category: transfer, counterparty: Self
      (you're in the card account; the money came from your bank account)
-ZELLE PAYMENT TO JANE DOE, out, checking, plaid_category TRANSFER_OUT
+ZELLE PAYMENT TO JANE DOE, out, checking, source_category TRANSFER_OUT
   -> counter_account: unclassified, category: null, counterparty: Jane Doe
      (a payment to a person: the purpose can't be told from the bank feed)
-VENMO CASHOUT FROM JOHN SMITH, in, checking, plaid_category TRANSFER_IN
+VENMO CASHOUT FROM JOHN SMITH, in, checking, source_category TRANSFER_IN
   -> counter_account: unclassified, category: null, counterparty: John Smith
 """
 

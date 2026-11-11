@@ -46,7 +46,7 @@ Chat is the landing page, replacing the KPI 2×2 grid dashboard. Structure:
 2. Snap a photo → back in chat, the photo sits **staged in the composer** (not sent yet) —
    standard iMessage/WhatsApp attach pattern. User can discard or send.
 3. On send, the photo appears as a message in the thread.
-4. The backend parses it (`sync_journal_entries_from_receipt`) and the assistant replies
+4. The backend parses it (`upload_receipt`) and the assistant replies
    with an **editable journal entry card** — asking to confirm and post, or correct
    details first.
 5. The card uses **simplified fields** (date, merchant, amount, category, memo) rather

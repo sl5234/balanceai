@@ -225,3 +225,34 @@
 
 **Short description:** Entries are written only by booking, from classifications. A user corrects a transaction's classification, never an entry. So `update_journal` takes no `entries`.
 **Short example:** Uber booked as `non_essential_expense`; the user changes the classification to `essential_expense`, and the entry is rebooked.
+
+## #18 — 2026-11-08 — Receipts become raw transactions; a receipt outranks Plaid
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #2, #17; ROADMAP step 4
+
+**Short description:** A receipt is read into a raw transaction
+(`source="receipt"`), confirmed by the user (consent prompt), and booked by the
+same rules as Plaid. When a receipt and a Plaid transaction are the same
+purchase, the receipt wins: the Plaid one is linked to it and not booked on its
+own. Plan for now, may change (e.g. an AI pass to find matches and settle
+differences): the receipt wins on details (merchant, category, date, tax, tip)
+and the bank wins on the amount (e.g. a tip added after the receipt). The
+paying account comes from the card's last 4, looked up from earlier receipts in
+`raw_transactions`, else the user is asked; cash goes to a cash-on-hand
+account. Tax and tip are stored on the raw transaction; line items are read
+only to pick a category hint, saved in the raw transaction's `category` (the
+source's own category, as with Plaid).
+**Short example:** A $12.50 Blue Bottle Coffee receipt, card ••1234 (an earlier
+receipt on ••1234 was booked to checking ••0000) → "Book this receipt? …
+dining" → booked. Next sync, Plaid's $12.50 Blue Bottle charge on ••0000 is
+linked to it and not booked.
+
+**Grounded facts:**
+- [verified] Receipts have details Plaid lacks (tax, tip, items), and often
+  lack the bank name; a debit card's last 4 differs from its account's.
+- [unverified] Open: how matches are found (rules, an AI pass, or both), and
+  what happens to an already-booked Plaid entry when its receipt arrives
+  (remove or update its lines).

@@ -1,6 +1,5 @@
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 
 import anthropic
 
@@ -11,41 +10,14 @@ from balanceai_backend.db.journal_db import update_journal as db_update_journal
 from balanceai_backend.helpers.plaid_helper import extract_journal_lines_from_transactions
 from balanceai_backend.journals.finder import find_journal_line as finder_find_journal_line
 from balanceai_backend.models.bank import Bank
-from balanceai_backend.models.journal import GeneratedJournalEntrySet
 from balanceai_backend.parsers import get_parser
-from balanceai_backend.utils.general_util import get_mime_type
 from balanceai_backend.utils.journal_entry_util import (
     extract_journal_lines_from_bank_statement_transaction,
     generate_transaction_category,
 )
-from balanceai_backend.utils.ocr_util import OcrUtil
 
 _BATCH_SIZE = 10
 _RATE_LIMIT_RETRY_SECONDS = 60
-
-
-def handle_sync_journal_entries_from_receipt(journal_id: str, input_local_path: Path) -> dict:
-    results = find_journals(journal_id=journal_id, conn=conn)
-    if not results:
-        raise ValueError(f"Journal {journal_id} not found")
-    journal = results[0]
-
-    ocr_result = OcrUtil.executeWithAnthropic(
-        content=input_local_path.read_bytes(),
-        output_format=GeneratedJournalEntrySet,
-        mime_type=get_mime_type(input_local_path.suffix),
-    )
-
-    for entry_data in ocr_result.lines:
-        entry = entry_data.to_journal_line()
-        existing = finder_find_journal_line(journal_id, entry)
-        if existing is not None:
-            entry.journal_line_id = existing.journal_line_id
-            journal.remove_line(existing.journal_line_id)
-        journal.add_line(entry)
-
-    db_update_journal(journal, conn)
-    return journal.to_dict()
 
 
 def handle_sync_journal_entries_from_transactions(journal_id: str, transactions: dict) -> dict:

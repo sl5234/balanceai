@@ -14,7 +14,6 @@ from pathlib import Path
 from appdevcommons.hash_generator import HashGenerator
 from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
 from mcp.server.fastmcp import Context, FastMCP
-from pydantic import BaseModel
 
 import balanceai_backend.parsers.chase  # noqa: F401 - register parser
 from balanceai_backend.bank_link.link import complete_link, create_hosted_link
@@ -25,6 +24,7 @@ from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.db.bank_account_db import find_bank_accounts as db_find_bank_accounts
 from balanceai_backend.helpers.plaid_helper import save_linked_plaid_item
 from balanceai_backend.models import Account, AccountType, Bank, Category, Transaction
+from balanceai_backend.models.consent import ShareTransactionsConsent
 from balanceai_backend.parsers import get_parser
 from balanceai_backend.prompts.categorizer import build_categorization_prompt
 from balanceai_backend.raw_transactions.process_raw_transactions import (
@@ -433,7 +433,7 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
         "bank_accounts": {"saved", "skipped"} — the bank accounts created/updated
         from the item first — "classification": {"classified",
         "unclassified", "errors"}, and "booking": {journal_id: {"booked",
-        "matched"} or {"error"}}. Classification and booking problems are
+        "transfers_paired"} or {"error"}}. Classification and booking problems are
         reported there rather than raised; the pulled transactions are saved
         either way.
 
@@ -454,10 +454,6 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
     # See docs/BACKLOGS.md BL-7.
     result.update(classify_and_book_raw_transactions(item_id))
     return result
-
-
-class ShareTransactionsConsent(BaseModel):
-    """Empty schema: the prompt is a plain accept/decline."""
 
 
 @mcp.tool()

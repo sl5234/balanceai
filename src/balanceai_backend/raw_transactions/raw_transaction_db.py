@@ -31,6 +31,9 @@ def _build_transaction(row) -> RawTransaction:
         category_detailed=row["category_detailed"],
         category_confidence=row["category_confidence"],
         pending=bool(row["pending"]),
+        card_last4=row["card_last4"],
+        tax=Decimal(row["tax"]) if row["tax"] is not None else None,
+        tip=Decimal(row["tip"]) if row["tip"] is not None else None,
         classification=_deserialize_classification(row["classification"]),
     )
 
@@ -64,6 +67,18 @@ def find_raw_transactions(
     query += " ORDER BY posting_date"
     rows = conn.execute(query, params).fetchall()
     return [_build_transaction(row) for row in rows]
+
+
+def find_receipt_account_ids_for_card_last4(
+    card_last4: str, conn: sqlite3.Connection = _default_conn
+) -> list[str]:
+    """The accounts that earlier receipts paid with this card were saved to."""
+    rows = conn.execute(
+        "SELECT DISTINCT account_id FROM raw_transactions"
+        " WHERE source = 'receipt' AND card_last4 = ?",
+        (card_last4,),
+    ).fetchall()
+    return [r["account_id"] for r in rows]
 
 
 def _classification_to_keep(
@@ -128,8 +143,8 @@ def upsert_raw_transaction(txn: RawTransaction, conn: sqlite3.Connection = _defa
             "INSERT INTO raw_transactions"
             " (id, source, plaid_item_id, account_id, plaid_account_id,"
             "  posting_date, description, amount, category, category_detailed,"
-            "  category_confidence, pending, classification)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "  category_confidence, pending, classification, card_last4, tax, tip)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(id) DO UPDATE SET"
             "  source=excluded.source, plaid_item_id=excluded.plaid_item_id,"
             "  account_id=excluded.account_id, plaid_account_id=excluded.plaid_account_id,"
@@ -137,7 +152,8 @@ def upsert_raw_transaction(txn: RawTransaction, conn: sqlite3.Connection = _defa
             "  amount=excluded.amount, category=excluded.category,"
             "  category_detailed=excluded.category_detailed,"
             "  category_confidence=excluded.category_confidence, pending=excluded.pending,"
-            "  classification=excluded.classification",
+            "  classification=excluded.classification, card_last4=excluded.card_last4,"
+            "  tax=excluded.tax, tip=excluded.tip",
             (
                 txn.id,
                 txn.source,
@@ -152,6 +168,9 @@ def upsert_raw_transaction(txn: RawTransaction, conn: sqlite3.Connection = _defa
                 txn.category_confidence,
                 int(txn.pending),
                 _serialize_classification(classification),
+                txn.card_last4,
+                str(txn.tax) if txn.tax is not None else None,
+                str(txn.tip) if txn.tip is not None else None,
             ),
         )
 

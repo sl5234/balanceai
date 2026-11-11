@@ -17,7 +17,7 @@ from balanceai_backend.raw_transactions.process_raw_transactions import (
 )
 
 CLASSIFIED = {"classified": 1, "unclassified": 0, "errors": []}
-BOOKED = {"booked": 1, "matched": 0}
+BOOKED = {"booked": 1, "transfers_paired": 0}
 
 
 @pytest.fixture

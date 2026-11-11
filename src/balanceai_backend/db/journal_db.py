@@ -37,14 +37,22 @@ def _build_journal(row, entry_rows, bank_account_ids: list[str]) -> Journal:
 
 def find_journals(
     journal_id: str | None = None,
+    bank_account_id: str | None = None,
     conn: sqlite3.Connection = _default_conn,
 ) -> list[Journal]:
-    """Find journals, optionally filtered by journal_id."""
+    """Find journals, optionally filtered by journal_id, or by a bank account
+    they hold (an account is in at most one journal)."""
     query = "SELECT * FROM journals WHERE 1=1"
     params: list = []
     if journal_id is not None:
         query += " AND journal_id = ?"
         params.append(journal_id)
+    if bank_account_id is not None:
+        query += (
+            " AND journal_id IN"
+            " (SELECT journal_id FROM journal_bank_accounts WHERE bank_account_id = ?)"
+        )
+        params.append(bank_account_id)
     query += " ORDER BY created_at"
 
     rows = conn.execute(query, params).fetchall()
@@ -63,6 +71,16 @@ def find_journals(
         ]
         journals.append(_build_journal(row, entry_rows, bank_account_ids))
     return journals
+
+
+def is_account_in_journal(
+    bank_account_id: str, journal_id: str, conn: sqlite3.Connection = _default_conn
+) -> bool:
+    """True if the journal holds this bank account."""
+    return any(
+        j.journal_id == journal_id
+        for j in find_journals(bank_account_id=bank_account_id, conn=conn)
+    )
 
 
 def find_journal_lines(

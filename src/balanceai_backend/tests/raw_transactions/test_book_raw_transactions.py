@@ -114,7 +114,7 @@ class TestBookRawTransactions:
     def test_purchase_is_booked_as_two_lines(self, db, journal_id):
         _add(db, _purchase())
 
-        assert book_raw_transactions(journal_id, db) == {"booked": 1, "matched": 0}
+        assert book_raw_transactions(journal_id, db) == {"booked": 1, "transfers_paired": 0}
 
         lines = find_journal_lines(journal_id, conn=db)
         assert [(e.account, e.debit, e.credit) for e in lines] == [
@@ -126,7 +126,7 @@ class TestBookRawTransactions:
         _add(db, _purchase())
         book_raw_transactions(journal_id, db)
 
-        assert book_raw_transactions(journal_id, db) == {"booked": 0, "matched": 0}
+        assert book_raw_transactions(journal_id, db) == {"booked": 0, "transfers_paired": 0}
         assert len(find_journal_lines(journal_id, conn=db)) == 2
 
     def test_skips_unclassified_and_other_accounts(self, db, journal_id):
@@ -137,18 +137,18 @@ class TestBookRawTransactions:
             _purchase("no-journal", NO_JOURNAL),
         )
 
-        assert book_raw_transactions(journal_id, db) == {"booked": 0, "matched": 0}
+        assert book_raw_transactions(journal_id, db) == {"booked": 0, "transfers_paired": 0}
         assert find_journal_lines(journal_id, conn=db) == []
 
     def test_zero_amount_is_not_booked(self, db, journal_id):
         _add(db, _txn("zero", CHECKING, "0.00"))
 
-        assert book_raw_transactions(journal_id, db) == {"booked": 0, "matched": 0}
+        assert book_raw_transactions(journal_id, db) == {"booked": 0, "transfers_paired": 0}
 
     def test_both_sides_of_a_transfer_are_one_matched_entry(self, db, journal_id):
         _add(db, _txn("out", CHECKING, "-1000", 1), _txn("in", SAVINGS, "1000", 2))
 
-        assert book_raw_transactions(journal_id, db) == {"booked": 0, "matched": 1}
+        assert book_raw_transactions(journal_id, db) == {"booked": 2, "transfers_paired": 1}
         assert _entry_txns(db, journal_id) == [{"in", "out"}]
 
     def test_partner_arriving_later_replaces_the_unmatched_entry(self, db, journal_id):
@@ -158,7 +158,7 @@ class TestBookRawTransactions:
 
         _add(db, _txn("in", SAVINGS, "1000", 2))
 
-        assert book_raw_transactions(journal_id, db) == {"booked": 0, "matched": 1}
+        assert book_raw_transactions(journal_id, db) == {"booked": 2, "transfers_paired": 1}
         assert _entry_txns(db, journal_id) == [{"in", "out"}]
 
     def test_late_classified_tie_leaves_the_match_alone(self, db, journal_id):
@@ -173,7 +173,7 @@ class TestBookRawTransactions:
         _add(db, _txn("ally-classified", ALLY, "1000", 2))
         delete_raw_transaction("ally", conn=db)
 
-        assert book_raw_transactions(journal_id, db) == {"booked": 1, "matched": 0}
+        assert book_raw_transactions(journal_id, db) == {"booked": 1, "transfers_paired": 0}
         assert _entry_txns(db, journal_id) == [{"ally-classified"}, {"in", "out"}]
 
     def test_a_change_is_booked_again(self, db, journal_id):
@@ -185,7 +185,7 @@ class TestBookRawTransactions:
         _add(db, dataclasses.replace(_purchase(), posting_date=datetime.date(2026, 10, 2)))
         assert find_booked_raw_transactions(journal_id, db) == {}
 
-        assert book_raw_transactions(journal_id, db) == {"booked": 1, "matched": 0}
+        assert book_raw_transactions(journal_id, db) == {"booked": 1, "transfers_paired": 0}
         assert {e.date for e in find_journal_lines(journal_id, conn=db)} == {
             datetime.date(2026, 10, 2)
         }
@@ -196,7 +196,7 @@ class TestBookRawTransactions:
 
         delete_raw_transaction("in", conn=db)
 
-        assert book_raw_transactions(journal_id, db) == {"booked": 1, "matched": 0}
+        assert book_raw_transactions(journal_id, db) == {"booked": 1, "transfers_paired": 0}
         assert _entry_txns(db, journal_id) == [{"out"}]
 
     def test_unknown_journal_raises(self, db):

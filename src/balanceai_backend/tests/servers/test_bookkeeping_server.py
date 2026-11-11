@@ -7,10 +7,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from balanceai_backend.db.bank_account_db import upsert_bank_account
-from balanceai_backend.db.connection import conn, create_schema
+from balanceai_backend.db.connection import create_schema
 from balanceai_backend.db.journal_db import find_booked_raw_transactions
 from balanceai_backend.db.readonly_journal_connection import open_readonly_journal_connection
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
+from balanceai_backend.models.consent import (
+    BookReceiptConsent,
+    ShareJournalEntriesConsent,
+    ShareQueryRowsConsent,
+)
 from balanceai_backend.models.financial_query import (
     REJECTION_MESSAGES,
     UNANSWERABLE_MESSAGE,
@@ -18,25 +23,25 @@ from balanceai_backend.models.financial_query import (
     QueryRejection,
 )
 from balanceai_backend.models.journal import (
-    GeneratedJournalEntrySet,
-    GeneratedJournalLine,
     Journal,
     JournalAccount,
     JournalLine,
 )
 from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
-from balanceai_backend.raw_transactions.raw_transaction_db import upsert_raw_transaction
+from balanceai_backend.models.receipt import PaymentMethod, ReceiptExtraction, ReceiptKind
+from balanceai_backend.raw_transactions.raw_transaction_db import (
+    find_raw_transactions,
+    update_raw_transaction_classification,
+    upsert_raw_transaction,
+)
 from balanceai_backend.servers.bookkeeping_server import (
-    ShareJournalEntriesConsent,
-    ShareQueryRowsConsent,
-    _hide_descriptions,
     analyze_financial_question,
     create_journal,
     delete_journal,
     list_journal_entries,
     list_journals,
-    sync_journal_entries_from_receipt,
     update_journal,
+    upload_receipt,
 )
 from mcp.server.elicitation import (
     AcceptedElicitation,
@@ -267,312 +272,105 @@ class TestListJournalEntries:
         assert len(result) == 2
 
 
-# ---------------------------------------------------------------------------
-# create_or_update_journal_entries
-# ---------------------------------------------------------------------------
+class TestUploadReceipt:
+    """upload_receipt against an in-memory database; reading the image and
+    classifying are mocked (no AI calls)."""
 
+    CHECKING = "test_bank:checking:0000"
 
-@pytest.fixture
-def journal():
-    return Journal(
-        journal_id="journal-1",
-        name="January journal",
-        lines=[],
-    )
-
-
-@pytest.fixture
-def receipt_path(tmp_path):
-    # File must exist so read_bytes() succeeds; contents are irrelevant because
-    # OcrUtil.executeWithAnthropic is mocked in every test.
-    img = tmp_path / "receipt.jpg"
-    img.write_bytes(b"fake-image-data")
-    return str(img)
-
-
-@pytest.fixture
-def ocr_entry_data():
-    return GeneratedJournalLine(
-        date=datetime.date(2026, 1, 27),
-        account=JournalAccount.NON_ESSENTIALS_EXPENSE,
-        description="Grocery purchase at Trader Joe's",
-        debit=Decimal("32.02"),
-        credit=Decimal("0.00"),
-    )
-
-
-@pytest.fixture
-def ocr_result(ocr_entry_data):
-    return GeneratedJournalEntrySet(
-        lines=[
-            ocr_entry_data,
-            GeneratedJournalLine(
-                date=datetime.date(2026, 1, 27),
-                account=JournalAccount.CASH,
-                description="Grocery purchase at Trader Joe's",
-                debit=Decimal("0.00"),
-                credit=Decimal("32.02"),
+    @pytest.fixture
+    def db(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        create_schema(connection)
+        upsert_bank_account(
+            BankAccount(
+                id=self.CHECKING,
+                institution_name="Test Bank",
+                account_type=BankAccountType.CHECKING,
+                last4="1234",
             ),
-        ]
-    )
-
-
-class TestCreateOrUpdateJournalEntriesForReceipt:
-    def test_raises_when_journal_not_found(self, receipt_path):
-        with (
-            patch("balanceai_backend.helpers.journal_entry_helper.find_journals", return_value=[]),
-            pytest.raises(ValueError, match="journal-999"),
-        ):
-            sync_journal_entries_from_receipt("journal-999", receipt_path)
-
-    def test_creates_new_entry_when_no_match(self, journal, receipt_path, ocr_result):
-        with (
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.find_journals",
-                return_value=[journal],
-            ),
-            patch(
-                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
-                return_value=ocr_result,
-            ),
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
-                return_value=None,
-            ),
-            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
-        ):
-            result = sync_journal_entries_from_receipt("journal-1", receipt_path)
-
-        assert len(result["lines"]) == 2
-        descriptions = {e["description"] for e in result["lines"]}
-        assert "Grocery purchase at Trader Joe's" in descriptions
-
-    def test_new_entry_gets_fresh_id(self, journal, receipt_path, ocr_result):
-        with (
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.find_journals",
-                return_value=[journal],
-            ),
-            patch(
-                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
-                return_value=ocr_result,
-            ),
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
-                return_value=None,
-            ),
-            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
-        ):
-            result = sync_journal_entries_from_receipt("journal-1", receipt_path)
-
-        line_id = result["lines"][0]["journal_line_id"]
-        assert line_id is not None
-        assert line_id != ""
-
-    def test_updates_existing_entry_preserving_id(self, receipt_path, ocr_result):
-        existing_entry = JournalLine(
-            journal_line_id="original-id",
-            date=datetime.date(2026, 1, 27),
-            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
-            description="Old description",
-            debit=Decimal("30.00"),
-            credit=Decimal("0.00"),
+            conn=connection,
         )
-        journal = Journal(
-            journal_id="journal-1",
-            name="January journal",
-            lines=[existing_entry],
+        with patch("balanceai_backend.servers.bookkeeping_server.conn", connection):
+            yield connection
+        connection.close()
+
+    @pytest.fixture
+    def journal_id(self, db):
+        return create_journal(name="Personal", bank_account_ids=[self.CHECKING])["journal_id"]
+
+    def _receipt(self, card_last4="1234"):
+        return ReceiptExtraction(
+            date=datetime.date(2026, 11, 8),
+            counterparty="Blue Bottle Coffee",
+            kind=ReceiptKind.PURCHASE,
+            total=Decimal("12.50"),
+            payment_method=PaymentMethod.CARD,
+            card_last4=card_last4,
+            category="dining",
         )
 
+    def _upload(self, db, ctx, receipt=None, **kwargs):
+        def classify(conn):
+            for txn in find_raw_transactions(unclassified=True, conn=conn):
+                update_raw_transaction_classification(
+                    txn.id,
+                    Classification(
+                        counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+                        category="dining",
+                        counterparty="Blue Bottle Coffee",
+                        classified_by=ClassifiedBy.AI,
+                    ),
+                    conn=conn,
+                )
+
+        server = "balanceai_backend.servers.bookkeeping_server"
         with (
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.find_journals",
-                return_value=[journal],
-            ),
-            patch(
-                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
-                return_value=ocr_result,
-            ),
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
-                side_effect=[existing_entry, None],
-            ),
-            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
+            patch(f"{server}.resolve_receipt_path"),
+            patch(f"{server}.read_receipt", return_value=receipt or self._receipt()),
+            patch(f"{server}.classify_raw_transactions", side_effect=classify),
         ):
-            result = sync_journal_entries_from_receipt("journal-1", receipt_path)
+            return asyncio.run(upload_receipt(ctx, "receipt.jpg", **kwargs))
 
-        assert len(result["lines"]) == 2
-        expense = next(
-            e
-            for e in result["lines"]
-            if e["account"] == JournalAccount.NON_ESSENTIALS_EXPENSE.value
-        )
-        assert expense["journal_line_id"] == "original-id"
-        assert expense["description"] == "Grocery purchase at Trader Joe's"
-        assert expense["debit"] == "32.02"
+    def test_books_the_receipt_when_the_user_accepts(self, db, journal_id):
+        ctx = _make_ctx(AcceptedElicitation(data=BookReceiptConsent()))
+        result = self._upload(db, ctx)
+        assert result == {"booked": True, "journal_id": journal_id}  # no receipt details
+        message = ctx.elicit.await_args.kwargs["message"]
+        assert "Blue Bottle Coffee" in message and "matched the account's last 4" in message
+        assert len(find_booked_raw_transactions(journal_id, conn=db)) == 1
 
-    def test_adds_multiple_entries_from_ocr(self, journal, receipt_path):
-        # Double-entry: one debit line and one credit line from the same receipt
-        double_entry_result = GeneratedJournalEntrySet(
-            lines=[
-                GeneratedJournalLine(
-                    date=datetime.date(2026, 1, 27),
-                    account=JournalAccount.NON_ESSENTIALS_EXPENSE,
-                    description="Grocery purchase at Trader Joe's",
-                    debit=Decimal("32.02"),
-                    credit=Decimal("0.00"),
-                ),
-                GeneratedJournalLine(
-                    date=datetime.date(2026, 1, 27),
-                    account=JournalAccount.CASH,
-                    description="Payment via Visa",
-                    debit=Decimal("0.00"),
-                    credit=Decimal("32.02"),
-                ),
-            ]
-        )
+    @pytest.mark.parametrize("elicit_result", [DeclinedElicitation(), CancelledElicitation()])
+    def test_saves_nothing_when_declined(self, db, journal_id, elicit_result):
+        with pytest.raises(PermissionError):
+            self._upload(db, _make_ctx(elicit_result))
+        assert find_raw_transactions(source="receipt", conn=db) == []
 
-        with (
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.find_journals",
-                return_value=[journal],
-            ),
-            patch(
-                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
-                return_value=double_entry_result,
-            ),
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
-                return_value=None,
-            ),
-            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
-        ):
-            result = sync_journal_entries_from_receipt("journal-1", receipt_path)
+    def test_account_given_by_the_user(self, db, journal_id):
+        ctx = _make_ctx(AcceptedElicitation(data=BookReceiptConsent()))
+        self._upload(db, ctx, receipt=self._receipt(card_last4="9999"), account_id=self.CHECKING)
+        assert "chosen by you" in ctx.elicit.await_args.kwargs["message"]
 
-        assert len(result["lines"]) == 2
+    def test_unknown_account_raises_before_asking(self, db, journal_id):
+        ctx = _make_ctx(AcceptedElicitation(data=BookReceiptConsent()))
+        with pytest.raises(ValueError, match="No bank account"):
+            self._upload(db, ctx, account_id="nope")
+        ctx.elicit.assert_not_awaited()
 
-    def test_no_entries_from_ocr_leaves_journal_unchanged(self, journal, receipt_path):
-        empty_ocr_result = GeneratedJournalEntrySet(lines=[])
+    def test_unknown_card_asks_for_the_account(self, db, journal_id):
+        ctx = _make_ctx(AcceptedElicitation(data=BookReceiptConsent()))
+        with pytest.raises(ValueError, match="Couldn't tell which account") as error:
+            self._upload(db, ctx, receipt=self._receipt(card_last4="9999"))
+        assert "9999" not in str(error.value)
+        ctx.elicit.assert_not_awaited()
 
-        with (
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.find_journals",
-                return_value=[journal],
-            ),
-            patch(
-                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
-                return_value=empty_ocr_result,
-            ),
-            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
-        ):
-            result = sync_journal_entries_from_receipt("journal-1", receipt_path)
-
-        assert result["lines"] == []
-
-    def test_storage_update_called_once(self, journal, receipt_path, ocr_result):
-        with (
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.find_journals",
-                return_value=[journal],
-            ),
-            patch(
-                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
-                return_value=ocr_result,
-            ),
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
-                return_value=None,
-            ),
-            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal") as mock_save,
-        ):
-            sync_journal_entries_from_receipt("journal-1", receipt_path)
-
-        mock_save.assert_called_once_with(journal, conn)
-
-    def test_returns_journal_as_dict(self, journal, receipt_path, ocr_result):
-        with (
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.find_journals",
-                return_value=[journal],
-            ),
-            patch(
-                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
-                return_value=ocr_result,
-            ),
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
-                return_value=None,
-            ),
-            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
-        ):
-            result = sync_journal_entries_from_receipt("journal-1", receipt_path)
-
-        assert isinstance(result, dict)
-        assert "journal_id" in result
-        assert "lines" in result
-
-    def test_mixed_new_and_updated_entries(self, receipt_path):
-        # The journal already has a GENERAL entry. OCR returns two entries:
-        # one GENERAL (matches the existing entry → update, preserve ID) and
-        # one CASH (no match → create, gets a new ID).
-        existing_entry = JournalLine(
-            journal_line_id="existing-id",
-            date=datetime.date(2026, 1, 27),
-            account=JournalAccount.NON_ESSENTIALS_EXPENSE,
-            description="Old grocery description",
-            debit=Decimal("30.00"),
-            credit=Decimal("0.00"),
-        )
-        journal = Journal(
-            journal_id="journal-1",
-            name="January journal",
-            lines=[existing_entry],
-        )
-        ocr_result = GeneratedJournalEntrySet(
-            lines=[
-                GeneratedJournalLine(
-                    date=datetime.date(2026, 1, 27),
-                    account=JournalAccount.NON_ESSENTIALS_EXPENSE,
-                    description="Grocery purchase at Trader Joe's",
-                    debit=Decimal("32.02"),
-                    credit=Decimal("0.00"),
-                ),
-                GeneratedJournalLine(
-                    date=datetime.date(2026, 1, 27),
-                    account=JournalAccount.CASH,
-                    description="Payment via Visa",
-                    debit=Decimal("0.00"),
-                    credit=Decimal("32.02"),
-                ),
-            ]
-        )
-
-        def fake_finder(journal_id, entry):
-            # Only the GENERAL entry matches the pre-existing journal entry
-            return (
-                existing_entry if entry.account == JournalAccount.NON_ESSENTIALS_EXPENSE else None
-            )
-
-        with (
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.find_journals",
-                return_value=[journal],
-            ),
-            patch(
-                "balanceai_backend.utils.ocr_util.OcrUtil.executeWithAnthropic",
-                return_value=ocr_result,
-            ),
-            patch(
-                "balanceai_backend.helpers.journal_entry_helper.finder_find_journal_line",
-                side_effect=fake_finder,
-            ),
-            patch("balanceai_backend.helpers.journal_entry_helper.db_update_journal"),
-        ):
-            result = sync_journal_entries_from_receipt("journal-1", receipt_path)
-
-        assert len(result["lines"]) == 2
-        ids = {e["journal_line_id"] for e in result["lines"]}
-        assert "existing-id" in ids
+    def test_account_in_no_journal_is_saved_not_booked(self, db):
+        ctx = _make_ctx(AcceptedElicitation(data=BookReceiptConsent()))
+        result = self._upload(db, ctx)
+        assert result["booked"] is False and result["journal_id"] is None
+        assert "won't be booked" in ctx.elicit.await_args.kwargs["message"]
+        assert len(find_raw_transactions(source="receipt", conn=db)) == 1
 
 
 class TestJournalTools:
@@ -596,6 +394,16 @@ class TestJournalTools:
         [row] = db.execute("SELECT * FROM journals").fetchall()
         assert row["journal_id"] == result["journal_id"]
         assert row["name"] == "Personal"
+
+    def test_create_journal_creates_its_cash_account(self, db):
+        result = create_journal(name="Personal")
+        cash_id = f"cash:cash:{result['journal_id']}"
+        assert result["bank_account_ids"] == [cash_id]
+        [row] = db.execute(
+            "SELECT bank_account_id FROM journal_bank_accounts WHERE journal_id = ?",
+            (result["journal_id"],),
+        ).fetchall()
+        assert row["bank_account_id"] == cash_id
 
     def test_create_journal_description_defaults_to_empty(self, db):
         assert create_journal(name="Personal")["description"] == ""
@@ -669,9 +477,10 @@ class TestJournalTools:
 
         result = create_journal(name="Personal", bank_account_ids=[checking, savings])
 
-        assert result["bank_account_ids"] == [checking, savings]
+        cash = f"cash:cash:{result['journal_id']}"
+        assert result["bank_account_ids"] == [checking, savings, cash]
         [listed] = list_journals()
-        assert listed["bank_account_ids"] == [checking, savings]
+        assert sorted(listed["bank_account_ids"]) == sorted([checking, savings, cash])
 
     def test_update_journal_without_bank_accounts_keeps_them(self, db, bank_accounts):
         checking, _, _ = bank_accounts
@@ -680,7 +489,20 @@ class TestJournalTools:
         update_journal(journal_id, name="Home")
 
         [listed] = list_journals()
-        assert listed["bank_account_ids"] == [checking]
+        assert sorted(listed["bank_account_ids"]) == sorted([checking, f"cash:cash:{journal_id}"])
+
+    @pytest.mark.parametrize("keep", [["checking"], []])
+    def test_update_journal_keeps_the_cash_account(self, db, bank_accounts, keep):
+        checking, savings, _ = bank_accounts
+        journal_id = create_journal(name="Personal", bank_account_ids=[checking, savings])[
+            "journal_id"
+        ]
+        ids = [checking] if keep else []
+
+        update_journal(journal_id, bank_account_ids=ids)
+
+        [listed] = list_journals()
+        assert sorted(listed["bank_account_ids"]) == sorted(ids + [f"cash:cash:{journal_id}"])
 
     def test_update_journal_replaces_bank_accounts(self, db, bank_accounts):
         checking, savings, card = bank_accounts
@@ -691,7 +513,7 @@ class TestJournalTools:
         update_journal(journal_id, bank_account_ids=[card])
 
         [listed] = list_journals()
-        assert listed["bank_account_ids"] == [card]
+        assert sorted(listed["bank_account_ids"]) == sorted([card, f"cash:cash:{journal_id}"])
 
     def test_create_journal_with_taken_account_raises(self, db, bank_accounts):
         checking, _, _ = bank_accounts
@@ -733,7 +555,7 @@ class TestJournalTools:
 
         result = create_journal(name="Personal", bank_account_ids=[checking])
 
-        assert result["booking"] == {"booked": 1, "matched": 0}
+        assert result["booking"] == {"booked": 1, "transfers_paired": 0}
         assert self._booked_txns(db, result["journal_id"]) == {"on-checking"}
 
     def test_update_journal_books_an_added_account(self, db, bank_accounts):
@@ -744,7 +566,7 @@ class TestJournalTools:
 
         result = update_journal(journal_id, bank_account_ids=[checking, savings])
 
-        assert result["booking"] == {"booked": 1, "matched": 0}
+        assert result["booking"] == {"booked": 1, "transfers_paired": 0}
         assert self._booked_txns(db, journal_id) == {"on-checking", "on-savings"}
 
     def test_update_journal_removing_an_account_deletes_its_entries(self, db, bank_accounts):
@@ -770,7 +592,7 @@ class TestJournalTools:
         result = update_journal(journal_id, bank_account_ids=[savings])
 
         assert result["lines"] == []
-        assert result["bank_account_ids"] == [savings]
+        assert result["bank_account_ids"] == [savings, f"cash:cash:{journal_id}"]
 
 
 _PARSE = "balanceai_backend.servers.bookkeeping_server.anthropic_service.parse"
@@ -933,11 +755,9 @@ class TestAnalyzeFilters:
         parse.assert_not_called()
 
 
-class TestHideDescriptions:
+class TestHideDescriptionsInAnalyze:
     @pytest.fixture(autouse=True)
     def journal(self, tmp_path):
-        """Two journal lines: one whose description is raw bank text, and one
-        whose description is also its counterparty."""
         path = tmp_path / "journal.db"
         db = sqlite3.connect(path)
         db.execute("CREATE TABLE journal_lines (description TEXT, counterparty TEXT)")
@@ -951,18 +771,6 @@ class TestHideDescriptions:
             yield
         readonly.close()
         db.close()
-
-    @pytest.mark.parametrize("column", ["description", "d"])
-    def test_hides_a_description_under_any_column_name(self, column):
-        rows = _hide_descriptions([{column: "SQ *BLUE BOTTLE 0423 OAKLAND"}])
-        assert rows == [{column: "[hidden description]"}]
-
-    def test_keeps_a_description_that_is_also_a_counterparty(self):
-        assert _hide_descriptions([{"description": "Shell"}]) == [{"description": "Shell"}]
-
-    def test_keeps_everything_else(self):
-        row = {"counterparty": "Blue Bottle Coffee", "debit": 6.5, "date": "2025-10-22"}
-        assert _hide_descriptions([row]) == [row]
 
     def test_analyze_returns_rows_with_descriptions_hidden(self):
         ctx = _make_ctx(AcceptedElicitation(data=ShareQueryRowsConsent()))

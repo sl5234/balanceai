@@ -26,7 +26,7 @@ def classify_and_book_raw_transactions(
 
     Returns:
         dict with "classification" (see classify_raw_transactions) and
-        "booking": {journal_id: {"booked", "matched"} or {"error"}}.
+        "booking": {journal_id: {"booked", "transfers_paired"} or {"error"}}.
     """
     classification = classify_raw_transactions(plaid_item_id, conn)
     booking = _book_journals(plaid_item_id, conn)

@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from balanceai_backend.bank_link.link import LinkExitedError
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
+from balanceai_backend.models.consent import ShareTransactionsConsent
 from balanceai_backend.models.plaid_item import PlaidItem
 from balanceai_backend.models.raw_transaction import RawTransaction
 from balanceai_backend.servers.link_bank_server import (
-    ShareTransactionsConsent,
     get_bank_transactions,
     link_bank,
     list_bank_accounts,
@@ -179,7 +179,7 @@ class TestListBankAccounts:
 
 _CLASSIFIED_AND_BOOKED = {
     "classification": {"classified": 2, "unclassified": 0, "errors": []},
-    "booking": {"journal-1": {"booked": 2, "matched": 0}},
+    "booking": {"journal-1": {"booked": 2, "transfers_paired": 0}},
 }
 
 

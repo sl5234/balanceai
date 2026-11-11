@@ -40,6 +40,7 @@ See `DEVELOPMENT.md` for setup, linting, formatting, and testing commands.
 | `create_journal` | Create a new journal for a bank account |
 | `update_journal` | Update journal properties |
 | `list_journals` | List all journals |
+| `upload_receipt` | Read a receipt from the receipts folder and book it, after you confirm |
 
 ### balanceai_link_bank (Bank Accounts)
 
@@ -60,6 +61,21 @@ See `DEVELOPMENT.md` for setup, linting, formatting, and testing commands.
 
 `link_bank` can also be run as a one-time local CLI command instead:
 `venv/bin/python -m balanceai_backend.bank_link.link`
+
+## Receipts
+
+Always put receipt images in the receipts folder, then ask the assistant to
+upload one by its file name (e.g. "upload blue_bottle.jpg"):
+
+```
+src/balanceai_backend_secrets/receipts/
+```
+
+(or the folder `BALANCEAI_RECEIPTS_DIR` points to). `upload_receipt` reads only
+from this folder, so it can't be pointed at other files on your machine. The
+folder is inside the secrets folder, which Claude Code is denied, so the
+assistant can't open the images; their contents are shown only to you, in the
+confirmation prompt. Supported: .jpg, .png, .gif, .webp.
 
 ## Supported Banks
 

@@ -2,9 +2,16 @@ import sqlite3
 
 import pytest
 from balanceai_backend.bank_link.plaid_item_db import delete_plaid_item, save_plaid_item
-from balanceai_backend.db.bank_account_db import find_bank_accounts, upsert_bank_account
+from balanceai_backend.db.bank_account_db import (
+    create_cash_account,
+    find_bank_accounts,
+    find_cash_account_for_journal,
+    upsert_bank_account,
+)
 from balanceai_backend.db.connection import create_schema
-from balanceai_backend.models.bank_account import BankAccount, BankAccountType
+from balanceai_backend.db.journal_db import save_journal
+from balanceai_backend.models.bank_account import PLACEHOLDER_LAST4, BankAccount, BankAccountType
+from balanceai_backend.models.journal import Journal
 from balanceai_backend.models.plaid_item import PlaidItem
 
 
@@ -126,3 +133,48 @@ class TestPlaidItemDeletion:
 
         [account] = find_bank_accounts(conn=db)
         assert account.plaid_account_id == "plaid-acc-new"
+
+
+class TestCashAccount:
+    @pytest.fixture
+    def journals(self, db):
+        for journal_id, name in (("aaaa1111", "Personal"), ("bbbb2222", "My LLC")):
+            save_journal(Journal(journal_id=journal_id, name=name, lines=[]), conn=db)
+
+    def _journal_accounts(self, db, journal_id):
+        return [
+            r["bank_account_id"]
+            for r in db.execute(
+                "SELECT bank_account_id FROM journal_bank_accounts WHERE journal_id = ?",
+                (journal_id,),
+            )
+        ]
+
+    def test_creates_the_account_and_adds_it_to_the_journal(self, db, journals):
+        account_id = create_cash_account("aaaa1111", "Personal", conn=db)
+        assert account_id == "cash:cash:aaaa1111"
+        [account] = find_bank_accounts(id=account_id, conn=db)
+        assert account.account_type is BankAccountType.CASH
+        assert account.last4 == PLACEHOLDER_LAST4
+        assert account.display_name == "Cash on hand (Personal)"
+        assert self._journal_accounts(db, "aaaa1111") == [account_id]
+
+    def test_calling_twice_keeps_one_account(self, db, journals):
+        first = create_cash_account("aaaa1111", "Personal", conn=db)
+        assert create_cash_account("aaaa1111", "Personal", conn=db) == first
+        assert len(find_bank_accounts(conn=db)) == 1
+        assert self._journal_accounts(db, "aaaa1111") == [first]
+
+    def test_each_journal_gets_its_own(self, db, journals):
+        assert create_cash_account("aaaa1111", "Personal", conn=db) != create_cash_account(
+            "bbbb2222", "My LLC", conn=db
+        )
+
+    def test_finds_the_journals_cash_account(self, db, journals):
+        account_id = create_cash_account("aaaa1111", "Personal", conn=db)
+        create_cash_account("bbbb2222", "My LLC", conn=db)
+        assert find_cash_account_for_journal("aaaa1111", conn=db) == account_id
+
+    def test_raises_when_the_journal_has_none(self, db, journals):
+        with pytest.raises(ValueError, match="has no cash account"):
+            find_cash_account_for_journal("aaaa1111", conn=db)

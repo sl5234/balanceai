@@ -40,6 +40,8 @@ _BANK_SIDE_ACCOUNT = {
     BankAccountType.HSA: JournalAccount.INVESTMENTS,
     BankAccountType.COLLEGE_529: JournalAccount.INVESTMENTS,
     BankAccountType.OTHER_INVESTMENT: JournalAccount.INVESTMENTS,
+    # cash on hand
+    BankAccountType.CASH: JournalAccount.CASH,
 }
 
 

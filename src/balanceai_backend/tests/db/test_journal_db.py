@@ -16,6 +16,7 @@ from balanceai_backend.db.journal_db import (
     find_booked_raw_transactions,
     find_journal_lines,
     find_journals,
+    is_account_in_journal,
     save_journal,
     update_journal,
 )
@@ -788,3 +789,33 @@ class TestRemovingBankAccountsDeletesTheirEntries:
         self._set_bank_accounts(db, personal, [CHECKING, SAVINGS])
 
         assert _entry_ids(db, personal) == ["manual", "on-checking", "on-savings"]
+
+
+class TestFindJournalsByBankAccount:
+    @pytest.fixture
+    def journal_with_account(self, db):
+        upsert_bank_account(
+            BankAccount(
+                id="test_bank:checking:0000",
+                institution_name="Test Bank",
+                account_type=BankAccountType.CHECKING,
+                last4="0000",
+            ),
+            conn=db,
+        )
+        journal = Journal(
+            journal_id="j1", name="Personal", lines=[], bank_account_ids=["test_bank:checking:0000"]
+        )
+        save_journal(journal, conn=db)
+        save_journal(Journal(journal_id="j2", name="My LLC", lines=[]), conn=db)
+
+    def test_finds_the_journal_holding_the_account(self, db, journal_with_account):
+        [journal] = find_journals(bank_account_id="test_bank:checking:0000", conn=db)
+        assert journal.journal_id == "j1"
+
+    def test_account_in_no_journal(self, db, journal_with_account):
+        assert find_journals(bank_account_id="other:checking:1111", conn=db) == []
+
+    def test_is_account_in_journal(self, db, journal_with_account):
+        assert is_account_in_journal("test_bank:checking:0000", "j1", conn=db)
+        assert not is_account_in_journal("test_bank:checking:0000", "j2", conn=db)

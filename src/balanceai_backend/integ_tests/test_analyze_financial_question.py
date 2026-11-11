@@ -42,9 +42,9 @@ from mcp.server.elicitation import AcceptedElicitation
 
 from balanceai_backend.db.connection import create_schema
 from balanceai_backend.db.readonly_journal_connection import open_readonly_journal_connection
+from balanceai_backend.models.consent import ShareQueryRowsConsent
 from balanceai_backend.models.financial_query import REJECTION_MESSAGES, QueryRejection
 from balanceai_backend.servers.bookkeeping_server import (
-    ShareQueryRowsConsent,
     analyze_financial_question,
 )
 

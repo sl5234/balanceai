@@ -345,7 +345,7 @@ def _build_ai_input(
         "description": txn.description,
         "direction": "out" if txn.amount < 0 else "in",
         "bank_account_type": account_types.get(txn.account_id),
-        "plaid_category": txn.category,
+        "source_category": txn.category,
         "plaid_category_detailed": txn.category_detailed,
         "plaid_confidence": txn.category_confidence,
         "web_context": web_context.get(_normalize_description(txn.description)),

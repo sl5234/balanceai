@@ -52,6 +52,7 @@ class TestBankSideAccount:
             (BankAccountType.CREDIT_CARD, JournalAccount.CREDIT_CARD_PAYABLE),
             (BankAccountType.MORTGAGE, JournalAccount.LOANS_PAYABLE),
             (BankAccountType.RETIREMENT_401K, JournalAccount.INVESTMENTS),
+            (BankAccountType.CASH, JournalAccount.CASH),
         ],
     )
     def test_one_of_each_kind(self, account_type, expected):
