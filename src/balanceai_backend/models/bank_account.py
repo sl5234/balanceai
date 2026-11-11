@@ -34,6 +34,14 @@ class BankAccountType(str, Enum):
     COLLEGE_529 = "529"
     OTHER_INVESTMENT = "other_investment"
 
+    # physical cash (asset), e.g. a cash receipt; never from Plaid
+    CASH = "cash"
+
+
+# last4 for accounts with no card or account number, e.g. cash. Not digits, so
+# it never matches a card number on a receipt.
+PLACEHOLDER_LAST4 = "placeholder"
+
 
 def build_bank_account_id(institution_name: str, account_type: BankAccountType, last4: str) -> str:
     """

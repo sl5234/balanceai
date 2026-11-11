@@ -13,11 +13,11 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from mcp.server.fastmcp import Context, FastMCP
-from pydantic import BaseModel
 
 from balanceai_backend.config import settings
 from balanceai_backend.constants import FINANCIAL_QUERY_MODEL_ID
 from balanceai_backend.dagger.aws import AWSClients
+from balanceai_backend.db.bank_account_db import create_cash_account, find_bank_accounts
 from balanceai_backend.db.connection import conn
 from balanceai_backend.db.journal_db import (
     delete_journal as db_delete_journal,
@@ -35,19 +35,27 @@ from balanceai_backend.db.journal_db import (
     update_journal as db_update_journal,
 )
 from balanceai_backend.db.readonly_journal_connection import readonly_journal_conn
-from balanceai_backend.helpers.financial_query_helper import check_analyze_filters
+from balanceai_backend.helpers.financial_query_helper import (
+    check_analyze_filters,
+    hide_descriptions,
+)
 from balanceai_backend.helpers.journal_entry_helper import (
     handle_sync_journal_entries_from_bank_statement,
-    handle_sync_journal_entries_from_receipt,
     handle_sync_journal_entries_from_transactions,
 )
+from balanceai_backend.helpers.receipt_helper import receipt_consent_message
 from balanceai_backend.models import Bank, Journal
+from balanceai_backend.models.consent import (
+    BookReceiptConsent,
+    ShareJournalEntriesConsent,
+    ShareQueryRowsConsent,
+)
 from balanceai_backend.models.financial_query import (
     REJECTION_MESSAGES,
     UNANSWERABLE_MESSAGE,
     FinancialQuery,
 )
-from balanceai_backend.models.journal import JournalLine
+from balanceai_backend.models.receipt import AccountMatch, ReceiptAccount
 from balanceai_backend.models.report import ReportDefinition
 from balanceai_backend.prompts.financial_query_prompt import financial_query_system_prompt
 from balanceai_backend.prompts.report_definition_prompt import (
@@ -55,6 +63,14 @@ from balanceai_backend.prompts.report_definition_prompt import (
     report_definition_user_message,
 )
 from balanceai_backend.raw_transactions.book_raw_transactions import book_raw_transactions
+from balanceai_backend.raw_transactions.classify_raw_transactions import classify_raw_transactions
+from balanceai_backend.raw_transactions.sync_raw_transactions_from_receipt import (
+    check_receipt_account,
+    read_receipt,
+    resolve_receipt_path,
+    suggest_receipt_account,
+    sync_raw_transactions_from_receipt,
+)
 from balanceai_backend.reports.report_definition_db import (
     delete_report_definition as _delete_report_definition,
 )
@@ -67,6 +83,7 @@ from balanceai_backend.reports.report_definition_db import (
 from balanceai_backend.services import anthropic as anthropic_service
 from balanceai_backend.services.gemini import GeminiClient
 from balanceai_backend.services.gemini import converse as gemini_converse
+from balanceai_backend.utils.journal_line_util import date_range, entry_to_dict, group_into_entries
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -111,6 +128,11 @@ mcp = FastMCP(
                 <the merchant names call 1 returned>?"
     - If the user has more than one journal (list_journals), ask which one a
       question is about and pass its `journal_id`.
+    - For a receipt, the user puts the image in the receipts folder; call
+      `upload_receipt` with its file name. Don't open or read the image
+      yourself. If it asks which account paid (or the user declines because the account shown is wrong),
+      ask the user, find the account with list_bank_accounts, and call again
+      with `account_id`. For cash, pass the journal's `journal_id`.
     - Pass prior call results in the `context` argument when a follow-up query
       depends on previous results (e.g. for comparison or anomaly detection).
     - `create_report_definition` requires an `unparameterized_sql` from a prior
@@ -156,7 +178,7 @@ def create_journal(
 
     Returns:
         dict with the created journal (lines are omitted — use
-        list_journal_entries), plus "booking": {"booked", "matched"} for its
+        list_journal_entries), plus "booking": {"booked", "transfers_paired"} for its
         bank accounts' classified transactions, which are booked right away
 
     Raises:
@@ -169,6 +191,7 @@ def create_journal(
     except sqlite3.IntegrityError as e:
         _raise_if_duplicate_journal_name(e, name)
         raise
+    journal.bank_account_ids.append(create_cash_account(journal.journal_id, journal.name, conn))
     return {
         **journal.to_dict(redact_lines=True),
         "booking": book_raw_transactions(journal.journal_id, conn),
@@ -193,10 +216,11 @@ def update_journal(
         description: New description for the journal
         bank_account_ids: Replaces the journal's whole list of bank accounts —
             pass every account to keep, not just ones to add. [] removes all.
+            The journal's cash account always stays.
 
     Returns:
         dict with the updated journal (lines are omitted — use
-        list_journal_entries), plus "booking": {"booked", "matched"} for its
+        list_journal_entries), plus "booking": {"booked", "transfers_paired"} for its
         bank accounts' classified transactions not booked yet (e.g. an account
         just added). Entries of removed accounts are deleted.
 
@@ -215,7 +239,9 @@ def update_journal(
     if description is not None:
         journal.description = description
     if bank_account_ids is not None:
-        journal.bank_account_ids = bank_account_ids
+        # The journal's cash account always stays; it isn't the user's to remove.
+        cash = [a for a in journal.bank_account_ids if a.startswith("cash:cash:")]
+        journal.bank_account_ids = list(dict.fromkeys(bank_account_ids + cash))
 
     try:
         db_update_journal(journal, conn)
@@ -263,30 +289,67 @@ def list_journals() -> list[dict]:
 
 
 @mcp.tool()
-def sync_journal_entries_from_receipt(
-    journal_id: str,
-    input_local_path: str,
+async def upload_receipt(
+    ctx: Context,
+    file_name: str,
+    journal_id: str | None = None,
+    account_id: str | None = None,
 ) -> dict:
     """
-    Create or update journal entries from a receipt image.
+    Read a receipt image into a transaction and book it, after the user confirms.
 
-    Uses an LLM to perform OCR on the image and extract journal entries using
-    double-entry bookkeeping.
+    Receipts are read only from the receipts folder (balanceai_backend_secrets/
+    receipts by default); pass the file's name, not a path. Don't open or read
+    the receipt image yourself: its contents are shown only to the user, in the
+    confirmation prompt.
 
-    If a matching entry already exists (same date, account, and similar description),
-    the existing entry is updated with the latest values — preserving its original ID.
-    Otherwise, a new entry is created.
+    The paying account is found from the receipt: cash → the journal's cash
+    account (needs journal_id); card → the account an earlier receipt with the
+    same card was saved to, else the bank account with the same last 4. If it
+    can't be found, this raises asking for the account: ask the user, then call
+    again with account_id (from list_bank_accounts). If the user declines
+    because the account is wrong, do the same.
 
     Args:
-        journal_id: The journal ID to add or update entries in
-        input_local_path: Local path to the receipt image file
+        file_name: The receipt image's name in the receipts folder, e.g.
+            "blue_bottle.jpg" (.jpg, .png, .gif, .webp).
+        journal_id: Optional; the journal the receipt is for (from list_journals).
+            Needed for cash receipts unless account_id is given.
+        account_id: Optional; the account that paid (from list_bank_accounts).
 
     Returns:
-        dict with the updated journal
-    """
-    from pathlib import Path
+        dict with "booked" (False when the paying account isn't in a journal yet;
+        add it with update_journal) and "journal_id". No receipt details.
 
-    return handle_sync_journal_entries_from_receipt(journal_id, Path(input_local_path))
+    Raises:
+        ValueError: if the file isn't in the receipts folder or can't be read, or
+            the account can't be found or doesn't fit journal_id (the message
+            says what to ask the user).
+        PermissionError: if the user declines or cancels.
+    """
+    receipt = read_receipt(resolve_receipt_path(file_name))
+    if account_id:
+        check_receipt_account(account_id, journal_id, conn=conn)
+        found = ReceiptAccount(account_id, AccountMatch.USER)
+    else:
+        found = suggest_receipt_account(receipt, journal_id, conn=conn)
+
+    [account] = find_bank_accounts(id=found.account_id, conn=conn)
+    journals = db_find_journals(bank_account_id=found.account_id, conn=conn)
+    journal = journals[0] if journals else None
+
+    consent = await ctx.elicit(
+        message=receipt_consent_message(receipt, account, journal, found.match),
+        schema=BookReceiptConsent,
+    )
+    if consent.action != "accept":
+        raise PermissionError("User declined to book the receipt.")
+
+    sync_raw_transactions_from_receipt(receipt, found.account_id, conn=conn)
+    classify_raw_transactions(conn=conn)
+    if journal:
+        book_raw_transactions(journal.journal_id, conn)
+    return {"booked": journal is not None, "journal_id": journal.journal_id if journal else None}
 
 
 @mcp.tool()
@@ -345,14 +408,6 @@ def sync_journal_entries_from_bank_statement(
 # TODO: Add a tool that identifies a payment that needs to be made.  And proactively check debit account for sufficient funds.  And notifies.
 
 
-class ShareJournalEntriesConsent(BaseModel):
-    """Empty schema: the prompt is a plain accept/decline."""
-
-
-class ShareQueryRowsConsent(BaseModel):
-    """Empty schema: the prompt is a plain accept/decline."""
-
-
 @mcp.tool()
 async def list_journal_entries(
     ctx: Context, journal_id: str, date: date | None = None
@@ -376,40 +431,19 @@ async def list_journal_entries(
         PermissionError: if the user declines or cancels the approval prompt.
     """
     lines = db_find_journal_lines(journal_id, conn=conn)
-    entries = _group_into_entries(lines)
+    entries = group_into_entries(lines)
     if date is not None:
         entries = [e for e in entries if any(line.date == date for line in e)]
     if not entries:
         return []
 
     result = await ctx.elicit(
-        message=f"Share {len(entries)} journal entries ({_date_range(entries)}) with the assistant?",
+        message=f"Share {len(entries)} journal entries ({date_range(entries)}) with the assistant?",
         schema=ShareJournalEntriesConsent,
     )
     if result.action != "accept":
         raise PermissionError("User declined to share journal entries.")
-    return [_entry_to_dict(e) for e in entries]
-
-
-def _date_range(entries: list[list[JournalLine]]) -> str:
-    dates = [line.date for lines in entries for line in lines]
-    return f"{min(dates).isoformat()} to {max(dates).isoformat()}"
-
-
-def _group_into_entries(lines: list[JournalLine]) -> list[list[JournalLine]]:
-    """Group lines by journal_entry_id, keeping date order."""
-    entries: dict[str, list[JournalLine]] = {}
-    for line in lines:
-        entries.setdefault(line.journal_entry_id or line.journal_line_id, []).append(line)
-    return list(entries.values())
-
-
-def _entry_to_dict(lines: list[JournalLine]) -> dict:
-    return {
-        "journal_entry_id": lines[0].journal_entry_id,
-        "date": lines[0].date.isoformat(),
-        "lines": [line.to_dict(redact=True) for line in lines],
-    }
+    return [entry_to_dict(e) for e in entries]
 
 
 @mcp.tool()
@@ -454,30 +488,6 @@ def publish_journal(journal_id: str, output_dir: str) -> dict:
             writer.writerow(entry.to_dict())
 
     return {"output_path": str(out), "rows_written": len(journal.lines)}
-
-
-_HIDDEN = "[hidden description]"
-
-
-def _hide_descriptions(rows: list[dict]) -> list[dict]:
-    """Replace values that are a journal line's description (the bank's raw
-    text, e.g. 'SQ *BLUE BOTTLE 0423 OAKLAND') with _HIDDEN, whatever the
-    column is called (SBL-5). A description that's also a counterparty is kept:
-    it's the merchant's name, which is shared anyway. Only exact matches are
-    caught; consent (SBL-6) is the guard against unusual queries."""
-    descriptions = {
-        r[0]
-        for r in readonly_journal_conn.execute("SELECT DISTINCT description FROM journal_lines")
-    }
-    counterparties = {
-        r[0]
-        for r in readonly_journal_conn.execute("SELECT DISTINCT counterparty FROM journal_lines")
-    }
-    hidden = descriptions - counterparties
-    return [
-        {k: _HIDDEN if isinstance(v, str) and v in hidden else v for k, v in row.items()}
-        for row in rows
-    ]
 
 
 @mcp.tool()
@@ -609,10 +619,15 @@ async def analyze_financial_question(
     )
     if consent.action != "accept":
         raise PermissionError("User declined to share query results.")
-    result["rows"] = _hide_descriptions(rows)
+    result["rows"] = hide_descriptions(rows, conn=readonly_journal_conn)
     return result
 
 
+# TODO(SBL-2, BL-9): the report tools (create_report_definition,
+# list_report_definitions, delete_report_definition, generate_report) aren't
+# integrated with the new flow (raw transactions, booking, journal scoping,
+# read-only SQL, consent). Skipped until we know we want to maintain them; an
+# agent can save a question and re-run it through analyze_financial_question.
 @mcp.tool()
 def create_report_definition(
     name: str,

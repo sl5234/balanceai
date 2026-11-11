@@ -113,7 +113,10 @@ def create_schema(connection: sqlite3.Connection) -> None:
             category_detailed   TEXT,
             category_confidence TEXT,
             pending        INTEGER NOT NULL DEFAULT 0,
-            classification TEXT
+            classification TEXT,
+            card_last4     TEXT,
+            tax            TEXT,
+            tip            TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_raw_transactions_plaid_item_id ON raw_transactions(plaid_item_id);
@@ -138,6 +141,10 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         # The source's finer category and its confidence (Plaid's personal_finance_category)
         "ALTER TABLE raw_transactions ADD COLUMN category_detailed TEXT",
         "ALTER TABLE raw_transactions ADD COLUMN category_confidence TEXT",
+        # Receipt fields (BACKEND_IMPLEMENTATION_DECISIONS #18)
+        "ALTER TABLE raw_transactions ADD COLUMN card_last4 TEXT",
+        "ALTER TABLE raw_transactions ADD COLUMN tax TEXT",
+        "ALTER TABLE raw_transactions ADD COLUMN tip TEXT",
     ]
     for sql in migrations:
         try:

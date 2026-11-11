@@ -93,6 +93,10 @@ class RawTransaction:
     .confidence_level, e.g. "FOOD_AND_DRINK_RESTAURANT" / "LOW"). None for
     sources that don't provide them.
 
+    card_last4 / tax / tip: from a receipt (None for other sources). card_last4
+    is the card printed on it, used to find the paying account for later
+    receipts on the same card (BACKEND_IMPLEMENTATION_DECISIONS #18).
+
     classification: None until the transaction has been classified.
     """
 
@@ -112,12 +116,17 @@ class RawTransaction:
     category_detailed: str | None = None
     category_confidence: str | None = None
     pending: bool = False
+    card_last4: str | None = None
+    tax: Decimal | None = None
+    tip: Decimal | None = None
     classification: Classification | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d["posting_date"] = self.posting_date.isoformat()
         d["amount"] = str(self.amount)
+        d["tax"] = str(self.tax) if self.tax is not None else None
+        d["tip"] = str(self.tip) if self.tip is not None else None
         d["classification"] = self.classification.to_dict() if self.classification else None
         return d
 
@@ -136,6 +145,9 @@ class RawTransaction:
             category_detailed=d.get("category_detailed"),
             category_confidence=d.get("category_confidence"),
             pending=bool(d.get("pending", False)),
+            card_last4=d.get("card_last4"),
+            tax=Decimal(d["tax"]) if d.get("tax") is not None else None,
+            tip=Decimal(d["tip"]) if d.get("tip") is not None else None,
             classification=(
                 Classification.from_dict(d["classification"]) if d.get("classification") else None
             ),

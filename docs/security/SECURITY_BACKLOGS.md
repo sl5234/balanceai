@@ -119,3 +119,22 @@ assistant sent something else (e.g. after reading injected text). The AI's
 summary is no longer shown. Column details were dropped: they only catch SQL
 that doesn't match the question, which the `technical_query` rejection
 (SBL-1) makes less likely.
+
+## SBL-7 — upload_receipt could read any image on the machine
+
+**Added:** 2026-11-09
+**Status:** fixed 2026-11-09
+
+**Problem:** The receipt tool took any local path. The assistant could point
+it at another image (e.g. `~/Documents/passport.jpg`), which was sent for OCR
+before any prompt. The OCR error text could quote what it read and reach the
+assistant (as in SBL-1). The tool also returned the receipt's details to the
+assistant.
+
+**Fix (2026-11-09):** `upload_receipt` takes a file name and reads only from
+the receipts folder (`balanceai_backend_secrets/receipts` by default, which
+Claude Code is denied); `../`, absolute paths and symlinks out are rejected.
+OCR errors are logged locally and replaced with a plain message (`from None`).
+The tool returns only whether it booked; details are shown only to the user,
+in the confirmation prompt. The instructions ask the assistant not to open
+receipt images.

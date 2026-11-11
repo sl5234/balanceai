@@ -20,6 +20,7 @@ from balanceai_backend.raw_transactions.generate_journal_entry import generate_j
 from balanceai_backend.raw_transactions.raw_transaction_db import (
     delete_raw_transaction,
     find_raw_transactions,
+    find_receipt_account_ids_for_card_last4,
     update_raw_transaction_classification,
     upsert_raw_transaction,
 )
@@ -503,3 +504,83 @@ class TestCategoryDetailsColumnMigration:
         assert txn.description == "Starbucks"
         assert (txn.category_detailed, txn.category_confidence) == (None, None)
         conn.close()
+
+
+class TestReceiptFields:
+    def test_saves_and_loads_receipt_fields(self, db):
+        txn = RawTransaction(
+            id="receipt-1",
+            source="receipt",
+            account_id="acc-1",
+            posting_date=datetime.date(2026, 11, 8),
+            description="Blue Bottle Coffee",
+            amount=Decimal("-12.50"),
+            card_last4="1234",
+            tax=Decimal("1.02"),
+            tip=Decimal("2.00"),
+        )
+        upsert_raw_transaction(txn, conn=db)
+        [saved] = find_raw_transactions(id="receipt-1", conn=db)
+        assert (saved.card_last4, saved.tax, saved.tip) == (
+            "1234",
+            Decimal("1.02"),
+            Decimal("2.00"),
+        )
+
+    def test_receipt_fields_round_trip_through_dict(self):
+        txn = RawTransaction(
+            id="receipt-1",
+            source="receipt",
+            account_id="acc-1",
+            posting_date=datetime.date(2026, 11, 8),
+            description="Blue Bottle Coffee",
+            amount=Decimal("-12.50"),
+            card_last4="1234",
+            tax=Decimal("1.02"),
+        )
+        assert RawTransaction.from_dict(txn.to_dict()) == txn
+
+    def test_adds_columns_to_a_database_from_before_they_existed(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        create_schema(conn)
+        for column in ("card_last4", "tax", "tip"):
+            conn.execute(f"ALTER TABLE raw_transactions DROP COLUMN {column}")
+        conn.execute(
+            "INSERT INTO bank_accounts (id, institution_name, account_type, last4)"
+            " VALUES ('acc-1', 'Test Bank', 'checking', '0000')"
+        )
+        conn.execute(
+            "INSERT INTO raw_transactions (id, source, account_id, posting_date, description, amount)"
+            " VALUES ('txn-old', 'plaid', 'acc-1', '2026-08-19', 'Starbucks', '-4.50')"
+        )
+        conn.commit()
+
+        _apply_migrations(conn)
+
+        [txn] = find_raw_transactions(conn=conn)
+        assert (txn.card_last4, txn.tax, txn.tip) == (None, None, None)
+        conn.close()
+
+
+class TestFindReceiptAccountIdsForCardLast4:
+    def _receipt(self, id, account_id, card="1234", source="receipt"):
+        return RawTransaction(
+            id=id,
+            source=source,
+            account_id=account_id,
+            posting_date=datetime.date(2026, 11, 8),
+            description="Blue Bottle Coffee",
+            amount=Decimal("-12.50"),
+            card_last4=card,
+        )
+
+    def test_returns_each_account_once(self, db):
+        upsert_raw_transaction(self._receipt("r1", "acc-1"), conn=db)
+        upsert_raw_transaction(self._receipt("r2", "acc-1"), conn=db)
+        upsert_raw_transaction(self._receipt("r3", "acc-2", card="5678"), conn=db)
+        assert find_receipt_account_ids_for_card_last4("1234", conn=db) == ["acc-1"]
+
+    def test_only_reads_receipts(self, db):
+        upsert_raw_transaction(self._receipt("p1", "acc-1", source="plaid"), conn=db)
+        assert find_receipt_account_ids_for_card_last4("1234", conn=db) == []

@@ -2,6 +2,9 @@ import sqlite3
 from datetime import date
 
 from balanceai_backend.db.connection import conn as _default_conn
+from balanceai_backend.db.readonly_journal_connection import readonly_journal_conn
+
+HIDDEN = "[hidden description]"
 
 
 def check_analyze_filters(
@@ -36,3 +39,20 @@ def check_analyze_filters(
         ).fetchone()
     ):
         raise ValueError(f"Bank account {account_id} isn't in journal {journal_id}.")
+
+
+def hide_descriptions(
+    rows: list[dict], conn: sqlite3.Connection = readonly_journal_conn
+) -> list[dict]:
+    """Replace values that are a journal line's description (the bank's raw
+    text, e.g. 'SQ *BLUE BOTTLE 0423 OAKLAND') with HIDDEN, whatever the
+    column is called (SBL-5). A description that's also a counterparty is kept:
+    it's the merchant's name, which is shared anyway. Only exact matches are
+    caught; consent (SBL-6) is the guard against unusual queries."""
+    descriptions = {r[0] for r in conn.execute("SELECT DISTINCT description FROM journal_lines")}
+    counterparties = {r[0] for r in conn.execute("SELECT DISTINCT counterparty FROM journal_lines")}
+    hidden = descriptions - counterparties
+    return [
+        {k: HIDDEN if isinstance(v, str) and v in hidden else v for k, v in row.items()}
+        for row in rows
+    ]

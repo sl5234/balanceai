@@ -1,7 +1,11 @@
 import sqlite3
 
 from balanceai_backend.db.connection import conn as _default_conn
-from balanceai_backend.models.bank_account import BankAccount, BankAccountType
+from balanceai_backend.models.bank_account import (
+    PLACEHOLDER_LAST4,
+    BankAccount,
+    BankAccountType,
+)
 
 
 def _build_bank_account(row) -> BankAccount:
@@ -93,3 +97,46 @@ def upsert_bank_account(account: BankAccount, conn: sqlite3.Connection = _defaul
                 account.plaid_account_id,
             ),
         )
+
+
+def create_cash_account(
+    journal_id: str, journal_name: str, conn: sqlite3.Connection = _default_conn
+) -> str:
+    """Create the journal's own cash-on-hand account and add it to the journal.
+    Called when a journal is created. Safe to call again.
+    id: 'cash:cash:<journal_id>', unique per journal."""
+    account_id = f"cash:{BankAccountType.CASH.value}:{journal_id}"
+    upsert_bank_account(
+        BankAccount(
+            id=account_id,
+            institution_name="Cash",
+            account_type=BankAccountType.CASH,
+            last4=PLACEHOLDER_LAST4,
+            display_name=f"Cash on hand ({journal_name})",
+        ),
+        conn=conn,
+    )
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO journal_bank_accounts (journal_id, bank_account_id)"
+            " VALUES (?, ?)",
+            (journal_id, account_id),
+        )
+    return account_id
+
+
+def find_cash_account_for_journal(journal_id: str, conn: sqlite3.Connection = _default_conn) -> str:
+    """The journal's cash-on-hand account id. Every journal gets one when it's created.
+
+    Raises:
+        ValueError: if the journal has none.
+    """
+    row = conn.execute(
+        "SELECT b.id FROM bank_accounts b"
+        " JOIN journal_bank_accounts j ON j.bank_account_id = b.id"
+        " WHERE j.journal_id = ? AND b.account_type = ?",
+        (journal_id, BankAccountType.CASH.value),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"Journal {journal_id} has no cash account.")
+    return row["id"]

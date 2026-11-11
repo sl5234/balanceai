@@ -201,7 +201,7 @@ class TestClassifyRawTransactions:
                 "description": "Uber",
                 "direction": "out",
                 "bank_account_type": "credit_card",
-                "plaid_category": "TRANSPORTATION",
+                "source_category": "TRANSPORTATION",
                 "plaid_category_detailed": "TRANSPORTATION_TAXIS_AND_RIDE_SHARES",
                 "plaid_confidence": "VERY_HIGH",
             },

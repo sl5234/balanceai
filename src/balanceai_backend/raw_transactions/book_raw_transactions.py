@@ -40,8 +40,9 @@ def book_raw_transactions(journal_id: str, conn: sqlite3.Connection = _default_c
     Safe to call repeatedly.
 
     Returns:
-        dict with "booked" (transactions booked unmatched) and "matched"
-        (matched transfers booked).
+        dict with "booked" (every transaction booked, including both sides of
+        each transfer) and "transfers_paired" (transfers between the user's own
+        accounts, each booked as one entry from its two transactions).
 
     Raises:
         ValueError: if the journal doesn't exist.
@@ -65,7 +66,7 @@ def book_raw_transactions(journal_id: str, conn: sqlite3.Connection = _default_c
         logger.info("Matched transfers %s", [(o.id, i.id) for o, i in matches])
     if unmatched:
         logger.info("Booked transactions %s", [lines[0].raw_transaction_id for lines in unmatched])
-    return {"booked": len(unmatched), "matched": len(matches)}
+    return {"booked": len(unmatched) + 2 * len(matches), "transfers_paired": len(matches)}
 
 
 def _find_bank_account_types(

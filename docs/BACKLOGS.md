@@ -84,6 +84,13 @@ replace the old connection, which means reconciling three things:
 (re-authenticating the same item, keeping all ids) is the alternative for the
 broken-connection case.
 
+**Update 2026-11-10 — hit in practice, blocks syncing:** re-linking Chase made
+the new connection's checking account clash with the existing
+`chase:checking:<last4>` row (still tied to the old Plaid account id), so the
+account was skipped and the sync saved no raw transactions. Fixing only the
+account would re-save every transaction under new ids (BL-4), so do all three
+together. Priority: right after the receipt manual test.
+
 ## BL-6 — Skill for the end-to-end Plaid flow
 
 **Added:** 2026-10-06
@@ -136,12 +143,15 @@ mis-write entries booked the new way:
 - `prompts/report_definition_prompt.py` (`create_report_definition`), which
   writes SQL over `journal_lines`. (`prompts/financial_query_prompt.py` was
   rewritten for the new booking on 2026-11-03.)
-- The LLM entry tools — `sync_journal_entries_from_transactions`, `_from_receipt`,
+- The LLM entry tools — `sync_journal_entries_from_transactions` and
   `_from_bank_statement` — with `GeneratedJournalLine`'s field descriptions and
   `prompts/extract_journal_entry_prompt.py`. `GeneratedJournalLine.counterparty`'s
   description still teaches "Self" on the expense side and the merchant on the
   other; booking puts the same counterparty on both lines. `db/journal_db.py`'s
   `update_journal` still replaces every entry because they save through it.
+
+(Receipts moved to the new flow on 2026-11-09: `upload_receipt` makes a raw
+transaction and books it; BACKEND_IMPLEMENTATION_DECISIONS.md #18.)
 
 **Proposed fix:** rewire each onto the new accounts and rules, or retire it —
 the Plaid tool is replaced by booking classified raw transactions; receipts and
@@ -285,3 +295,102 @@ non_essential_expense with category null. Cause not checked yet.
 **Proposed fix:** require a category on every expense line when classifying
 (fall back to the closest default category, or book to 'unclassified' for
 review). Handle it in the Ollama classification work.
+
+
+## BL-14 — No tools to manage bank accounts outside Plaid
+
+**Added:** 2026-11-10
+**Related:** BL-1, BL-9; BACKEND_IMPLEMENTATION_DECISIONS.md #18
+
+**Problem:** `create_account` and `list_accounts` use the legacy `Account`
+store, not the `bank_accounts` table that journals, booking and receipts use.
+An account not linked through Plaid (e.g. a debit card used only on receipts)
+can't be added, so `upload_receipt` can't book to it.
+
+**Proposed fix:**
+- `create_bank_account(institution_name, account_type, last4, display_name?)`
+- `list_bank_accounts()`: lists all accounts (drop the "Plaid only" wording).
+- `update_bank_account(id, display_name)`: rename only; changing institution,
+  type or last 4 changes the id (BL-1).
+- `delete_bank_account(id)`: only if no transactions use it and it's in no
+  journal; otherwise raise and say why.
+- Legacy `create_account` / `list_accounts` stay until roadmap step 7.
+
+**Priority:** right after BL-5.
+
+## BL-15 — Receipts and Plaid transactions for the same purchase aren't matched
+
+**Added:** 2026-11-10
+**Related:** BACKEND_IMPLEMENTATION_DECISIONS.md #18; BL-4, BL-5
+
+**Problem:** A card receipt and the Plaid charge for the same purchase are both
+booked, so the purchase counts twice. Example (made up): a receipt "Blue Bottle
+Coffee Roasters", 2026-10-24, −12.50 on a card, and Plaid's "Blue Bottle
+Coffee", 2026-10-25, −12.50 on the same card.
+
+**Proposed fix:** match both ways — on receipt upload (against Plaid rows) and
+on every Plaid sync (against receipts) — so arrival order doesn't matter. The
+receipt wins (#18): the Plaid row is linked to it (e.g. a `receipt_id` column)
+and not booked; if already booked, its entry is removed. v1 rules (no AI):
+- same account;
+- amount: exact; for dining, the charge may be up to 30% above the receipt (tip);
+- date: Plaid date from 2 days before to 7 days after the receipt date;
+- merchant: normalized names where one contains the other, or the first word
+  matches (e.g. "blue bottle coffee roasters" / "blue bottle coffee");
+- exactly one candidate, else leave unmatched and log it.
+
+Uses the separate ids from BL-16.
+
+**Priority:** right after the first round of receipt testing.
+
+## BL-16 — Raw transactions use Plaid's id as their own id
+
+**Added:** 2026-11-10
+**Related:** BL-4, BL-5, BL-15
+
+**Problem:** A Plaid row's `raw_transactions.id` is Plaid's `transaction_id`;
+a receipt's is our own hash. So ids have two formats, and a re-link (new Plaid
+ids for the same purchases) can't keep the same row.
+
+**Proposed fix:** every raw transaction gets our own generated id; Plaid's id
+moves to a `plaid_transaction_id` column (unique, null for other sources).
+Plaid sync finds rows by `plaid_transaction_id` for added / modified / removed.
+`journal_lines.raw_transaction_id` keeps pointing at our id. A re-link then
+updates `plaid_transaction_id` on the matched row instead of adding a new one
+(BL-4, BL-5). Existing data: `journal_lines.raw_transaction_id` (plain text,
+no foreign key) still holds the old Plaid ids, so a migration must rewrite it
+to the new ids along with `raw_transactions.id`; or wipe the DB and rebook,
+since booking rebuilds every line from raw transactions.
+
+**Priority:** with BL-5 and BL-15.
+
+## BL-17 — Rename raw_transactions.id to raw_transaction_id
+
+**Added:** 2026-11-10
+**Related:** BL-16
+
+**Problem:** The column is `id` in `raw_transactions` but `raw_transaction_id`
+in `journal_lines`, though they hold the same value. Other tables use the
+long form (`journal_id`, `journal_line_id`).
+
+**Proposed fix:** rename `raw_transactions.id` → `raw_transaction_id` (and
+`RawTransaction.id`), so the names match across tables. Do it in the same
+migration as BL-16.
+
+## BL-18 — Tables don't record when rows were created or last changed
+
+**Added:** 2026-11-10
+**Related:** BL-16, BL-17
+
+**Problem:** Only `journals`, `plaid_items` and `report_definitions` have
+`created_at`, and no table has `updated_at`. `raw_transactions`,
+`journal_lines`, `bank_accounts`, `journal_bank_accounts` and
+`plaid_sync_cursors` have neither, so there's no way to tell when a
+transaction arrived, was reclassified, or when an entry was booked.
+
+**Proposed fix:** `created_at` and `updated_at` (UTC ISO 8601 text) on every
+table. Set both on insert; on update, change only `updated_at` (upserts must
+keep the original `created_at` on conflict). SQLite can't add a column with a
+`CURRENT_TIMESTAMP` default to an existing table, so set them in code (or with
+triggers). Existing rows: null, or do it in the same migration / DB wipe as
+BL-16.
