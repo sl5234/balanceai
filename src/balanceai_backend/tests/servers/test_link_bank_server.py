@@ -285,7 +285,7 @@ def _make_ctx(elicit_result) -> MagicMock:
 
 def _make_txn(txn_id: str, posting_date: datetime.date) -> RawTransaction:
     return RawTransaction(
-        id=txn_id,
+        raw_transaction_id=txn_id,
         source="plaid",
         plaid_item_id="item-1",
         account_id="plaid-acc-1",

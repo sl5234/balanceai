@@ -1,7 +1,9 @@
 import datetime
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from decimal import Decimal
 from enum import Enum
+
+from appdevcommons.unique_id import UniqueIdGenerator
 
 from balanceai_backend.models.journal import JournalAccount
 
@@ -68,11 +70,14 @@ class RawTransaction:
     by line), there's no previous_balance/new_balance here — not every source
     has that concept, so it's left out entirely rather than made nullable.
 
-    id: for Plaid, this is Plaid's own transaction_id (not our hash-based
-    Transaction.generate_id — it needs to stay stable across
-    added -> modified -> removed for the same real-world transaction, which a
-    content hash wouldn't survive once a field like amount changes). Other
-    sources should use whatever stable identifier makes sense for them.
+    raw_transaction_id: ours (UniqueIdGenerator), for every source, and never
+    changes; journal_lines.raw_transaction_id points at it. Generated when the
+    object is made; when saving a Plaid row that already exists (same
+    plaid_transaction_id), the stored id is kept instead.
+
+    plaid_transaction_id: Plaid's own transaction_id, stable across
+    added -> modified -> removed; Plaid sync finds rows by it. None for other
+    sources. A re-link issues new ones for the same purchases (BL-5).
 
     account_id: our BankAccount id, for every source. Plaid transactions are
     mapped from Plaid's own account id to it at sync time.
@@ -98,9 +103,11 @@ class RawTransaction:
     receipts on the same card (BACKEND_IMPLEMENTATION_DECISIONS #18).
 
     classification: None until the transaction has been classified.
+
+    created_at / updated_at: set by the database when saved (UTC ISO 8601);
+    ignored when saving.
     """
 
-    id: str
     source: str  # "plaid" | "receipt" | "bank_statement"
     account_id: str
     posting_date: datetime.date
@@ -120,6 +127,10 @@ class RawTransaction:
     tax: Decimal | None = None
     tip: Decimal | None = None
     classification: Classification | None = None
+    raw_transaction_id: str = field(default_factory=UniqueIdGenerator.generate_id)
+    plaid_transaction_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -133,7 +144,8 @@ class RawTransaction:
     @classmethod
     def from_dict(cls, d: dict) -> "RawTransaction":
         return cls(
-            id=d["id"],
+            raw_transaction_id=d["raw_transaction_id"],
+            plaid_transaction_id=d.get("plaid_transaction_id"),
             source=d["source"],
             plaid_item_id=d.get("plaid_item_id"),
             plaid_account_id=d.get("plaid_account_id"),
@@ -151,4 +163,6 @@ class RawTransaction:
             classification=(
                 Classification.from_dict(d["classification"]) if d.get("classification") else None
             ),
+            created_at=d.get("created_at"),
+            updated_at=d.get("updated_at"),
         )

@@ -5,6 +5,7 @@ from decimal import Decimal
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.models import Journal
 from balanceai_backend.models.journal import COUNTERPARTY_SELF, JournalAccount, JournalLine
+from balanceai_backend.utils.general_util import utc_now_iso
 
 
 def _build_line(r) -> JournalLine:
@@ -21,6 +22,8 @@ def _build_line(r) -> JournalLine:
         journal_entry_id=r["journal_entry_id"],
         raw_transaction_id=r["raw_transaction_id"],
         bank_account_id=r["bank_account_id"],
+        created_at=r["created_at"],
+        updated_at=r["updated_at"],
     )
 
 
@@ -30,6 +33,7 @@ def _build_journal(row, entry_rows, bank_account_ids: list[str]) -> Journal:
         name=row["name"],
         description=row["description"],
         created_at=row["created_at"],
+        updated_at=row["updated_at"],
         lines=[_build_line(r) for r in entry_rows],
         bank_account_ids=bank_account_ids,
     )
@@ -104,10 +108,14 @@ def find_journal_lines(
 def _insert_journal_lines(
     journal_id: str, entries: list[JournalLine], conn: sqlite3.Connection
 ) -> None:
+    # A line loaded from the database keeps its timestamps when re-inserted
+    # (update_journal replaces every line; BL-9).
+    now = utc_now_iso()
     conn.executemany(
         "INSERT INTO journal_lines (journal_line_id, journal_id, date, account,"
         " description, debit, credit, category, tax, counterparty, journal_entry_id,"
-        " raw_transaction_id, bank_account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " raw_transaction_id, bank_account_id, created_at, updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             (
                 entry.journal_line_id,
@@ -123,6 +131,8 @@ def _insert_journal_lines(
                 entry.journal_entry_id,
                 entry.raw_transaction_id,
                 entry.bank_account_id,
+                entry.created_at or now,
+                entry.updated_at or now,
             )
             for entry in entries
         ],
@@ -232,10 +242,19 @@ def _save_bank_accounts(journal: Journal, conn: sqlite3.Connection) -> None:
             raise ValueError(
                 f"Bank account {bank_account_id} is already in journal {other['name']!r}"
             )
-    conn.execute("DELETE FROM journal_bank_accounts WHERE journal_id = ?", (journal.journal_id,))
+    # Only removed links are deleted and only new ones inserted, so kept links
+    # keep their created_at.
+    wanted = list(dict.fromkeys(journal.bank_account_ids))
+    current = set(_current_bank_account_ids(journal.journal_id, conn))
     conn.executemany(
-        "INSERT INTO journal_bank_accounts (journal_id, bank_account_id) VALUES (?, ?)",
-        [(journal.journal_id, b) for b in dict.fromkeys(journal.bank_account_ids)],
+        "DELETE FROM journal_bank_accounts WHERE journal_id = ? AND bank_account_id = ?",
+        [(journal.journal_id, b) for b in current - set(wanted)],
+    )
+    now = utc_now_iso()
+    conn.executemany(
+        "INSERT INTO journal_bank_accounts (journal_id, bank_account_id, created_at, updated_at)"
+        " VALUES (?, ?, ?, ?)",
+        [(journal.journal_id, b, now, now) for b in wanted if b not in current],
     )
 
 
@@ -243,11 +262,13 @@ def save_journal(journal: Journal, conn: sqlite3.Connection = _default_conn) -> 
     """Insert a new journal into storage."""
     with conn:
         conn.execute(
-            "INSERT INTO journals (journal_id, name, description, created_at) VALUES (?,?,?,?)",
+            "INSERT INTO journals (journal_id, name, description, created_at, updated_at)"
+            " VALUES (?,?,?,?,?)",
             (
                 journal.journal_id,
                 journal.name,
                 journal.description,
+                journal.created_at,
                 journal.created_at,
             ),
         )
@@ -272,10 +293,11 @@ def update_journal(updated: Journal, conn: sqlite3.Connection = _default_conn) -
             updated.bank_account_ids
         )
         conn.execute(
-            "UPDATE journals SET name=?, description=? WHERE journal_id=?",
+            "UPDATE journals SET name=?, description=?, updated_at=? WHERE journal_id=?",
             (
                 updated.name,
                 updated.description,
+                utc_now_iso(),
                 updated.journal_id,
             ),
         )

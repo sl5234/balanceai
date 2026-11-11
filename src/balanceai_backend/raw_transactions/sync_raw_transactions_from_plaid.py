@@ -22,7 +22,7 @@ from balanceai_backend.helpers.plaid_helper import sync_bank_accounts_from_plaid
 from balanceai_backend.models.plaid_sync_cursor import PlaidSyncCursor
 from balanceai_backend.models.raw_transaction import RawTransaction
 from balanceai_backend.raw_transactions.raw_transaction_db import (
-    delete_raw_transaction,
+    delete_raw_transaction_by_plaid_id,
     upsert_raw_transaction,
 )
 from balanceai_backend.services.plaid import get_client
@@ -70,7 +70,7 @@ def _to_raw_transaction(
     description = getattr(txn, "merchant_name", None) or txn.name
 
     return RawTransaction(
-        id=txn.transaction_id,
+        plaid_transaction_id=txn.transaction_id,
         source="plaid",
         plaid_item_id=item_id,
         account_id=bank_account_id,
@@ -111,7 +111,7 @@ def _apply_sync_page(
             _to_raw_transaction(txn, item_id, bank_account_id_by_plaid_account_id), conn=conn
         )
     for removed_txn in removed:
-        delete_raw_transaction(removed_txn.transaction_id, conn=conn)
+        delete_raw_transaction_by_plaid_id(removed_txn.transaction_id, conn=conn)
 
     return {"added": len(added), "modified": len(modified), "removed": len(removed)}
 

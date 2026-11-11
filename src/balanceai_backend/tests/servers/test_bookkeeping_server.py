@@ -315,7 +315,7 @@ class TestUploadReceipt:
         def classify(conn):
             for txn in find_raw_transactions(unclassified=True, conn=conn):
                 update_raw_transaction_classification(
-                    txn.id,
+                    txn.raw_transaction_id,
                     Classification(
                         counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
                         category="dining",
@@ -528,7 +528,7 @@ class TestJournalTools:
     def _add_purchase(db, txn_id: str, account_id: str) -> None:
         upsert_raw_transaction(
             RawTransaction(
-                id=txn_id,
+                raw_transaction_id=txn_id,
                 source="plaid",
                 account_id=account_id,
                 posting_date=datetime.date(2026, 10, 1),

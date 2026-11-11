@@ -197,6 +197,9 @@ class JournalLine(GeneratedJournalLine):
     # Where this line came from, when generated from a raw transaction.
     raw_transaction_id: str | None = None
     bank_account_id: str | None = None
+    # Set by the database when saved (UTC ISO 8601).
+    created_at: str | None = None
+    updated_at: str | None = None
 
     def __lt__(self, other: "JournalLine") -> bool:
         return self.date < other.date
@@ -215,6 +218,8 @@ class JournalLine(GeneratedJournalLine):
             "journal_entry_id": self.journal_entry_id,
             "raw_transaction_id": self.raw_transaction_id,
             "bank_account_id": self.bank_account_id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
         }
 
     @classmethod
@@ -232,6 +237,8 @@ class JournalLine(GeneratedJournalLine):
             journal_entry_id=d.get("journal_entry_id"),
             raw_transaction_id=d.get("raw_transaction_id"),
             bank_account_id=d.get("bank_account_id"),
+            created_at=d.get("created_at"),
+            updated_at=d.get("updated_at"),
         )
 
 
@@ -245,6 +252,7 @@ class Journal:
     description: str = ""
     journal_id: str = field(default_factory=UniqueIdGenerator.generate_id)
     created_at: str = field(default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat())
+    updated_at: str | None = None  # set by the database when saved
     lines: list[JournalLine] = field(default_factory=list)
     bank_account_ids: list[str] = field(default_factory=list)  # whose transactions belong here
 
@@ -254,6 +262,7 @@ class Journal:
             "name": self.name,
             "description": self.description,
             "created_at": self.created_at,
+            "updated_at": self.updated_at,
             "bank_account_ids": list(self.bank_account_ids),
             "lines": [] if redact_lines else [e.to_dict() for e in self.lines],
         }

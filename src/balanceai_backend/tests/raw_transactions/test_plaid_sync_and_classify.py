@@ -165,13 +165,25 @@ def _sent(fake_ai) -> list[str]:
     )
 
 
+def _find(db, txn_id: str) -> RawTransaction:
+    """A transaction by the id Plaid sent, or by our id for ones saved directly."""
+    found = find_raw_transactions(plaid_transaction_id=txn_id, conn=db) or find_raw_transactions(
+        raw_transaction_id=txn_id, conn=db
+    )
+    return found[0]
+
+
+def _our_id(db, txn_id: str) -> str:
+    return _find(db, txn_id).raw_transaction_id
+
+
 def _classification(db, txn_id: str) -> Classification | None:
-    return find_raw_transactions(id=txn_id, conn=db)[0].classification
+    return _find(db, txn_id).classification
 
 
-def _set(db, txn_id: str, category: str, classified_by: ClassifiedBy) -> None:
+def _set(db, plaid_id: str, category: str, classified_by: ClassifiedBy) -> None:
     update_raw_transaction_classification(
-        txn_id,
+        _our_id(db, plaid_id),
         Classification(
             counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
             category=category,
@@ -261,7 +273,7 @@ def test_5_pending_waits_until_it_posts(db, linked_item, fake_ai):
 
     assert _sent(fake_ai) == ["Blue Bottle"]
     assert result == {"classified": 1, **_DONE}
-    assert [t.id for t in find_raw_transactions(conn=db)] == ["posted-1"]
+    assert [t.plaid_transaction_id for t in find_raw_transactions(conn=db)] == ["posted-1"]
 
 
 def test_6_after_a_failed_batch_only_whats_left_is_asked(db, linked_item, fake_ai):
@@ -383,7 +395,7 @@ def _link_other_bank(db) -> None:
 
 def _other_bank_txn(txn_id: str, description: str) -> RawTransaction:
     return RawTransaction(
-        id=txn_id,
+        raw_transaction_id=txn_id,
         source="plaid",
         plaid_item_id="item-2",
         account_id=OTHER_BANK_CHECKING,

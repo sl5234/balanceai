@@ -55,15 +55,20 @@ def book_raw_transactions(journal_id: str, conn: sqlite3.Connection = _default_c
     # late-classified transaction that would have tied undoes the match
     # (decision #16).
     matches = find_matched_transfers(_find_matchable(txns, booked), account_types)
-    matched_ids = {t.id for match in matches for t in match}
+    matched_ids = {t.raw_transaction_id for match in matches for t in match}
 
     skip = booked.keys() | matched_ids
-    unmatched = _build_unmatched_entries([t for t in txns if t.id not in skip], account_types)
+    unmatched = _build_unmatched_entries(
+        [t for t in txns if t.raw_transaction_id not in skip], account_types
+    )
     replaced = [booked[i] for i in matched_ids if i in booked]
     _save(journal_id, replaced, _build_matched_entries(matches, account_types) + unmatched, conn)
 
     if matches:
-        logger.info("Matched transfers %s", [(o.id, i.id) for o, i in matches])
+        logger.info(
+            "Matched transfers %s",
+            [(o.raw_transaction_id, i.raw_transaction_id) for o, i in matches],
+        )
     if unmatched:
         logger.info("Booked transactions %s", [lines[0].raw_transaction_id for lines in unmatched])
     return {"booked": len(unmatched) + 2 * len(matches), "transfers_paired": len(matches)}
@@ -100,7 +105,11 @@ def _find_matchable(txns: list[RawTransaction], booked: dict[str, str]) -> list[
     """The transactions that can still match: unbooked, or booked unmatched.
     A booked entry with two transactions is already a matched transfer."""
     txns_per_entry = Counter(booked.values())
-    return [t for t in txns if t.id not in booked or txns_per_entry[booked[t.id]] == 1]
+    return [
+        t
+        for t in txns
+        if t.raw_transaction_id not in booked or txns_per_entry[booked[t.raw_transaction_id]] == 1
+    ]
 
 
 def _build_matched_entries(

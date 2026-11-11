@@ -113,7 +113,7 @@ def classify_raw_transactions(
     # groups of one.
     groups: dict[tuple, list[RawTransaction]] = {}
     for txn in _find_unclassified_posted_transactions(plaid_item_id, conn):
-        key = _build_match_key(txn, account_types) or ("single", txn.id)
+        key = _build_match_key(txn, account_types) or ("single", txn.raw_transaction_id)
         groups.setdefault(key, []).append(txn)
 
     classified = 0
@@ -233,7 +233,7 @@ def _index_answers(
         if earlier is not None and earlier != classified and 0 <= classified.index < len(batch):
             logger.warning(
                 "The AI gave conflicting answers for transactions %s: %s, then %s; using the last",
-                [txn.id for txn in batch[classified.index]],
+                [txn.raw_transaction_id for txn in batch[classified.index]],
                 earlier.model_dump(),
                 classified.model_dump(),
             )
@@ -242,7 +242,7 @@ def _index_answers(
 
 
 def _transaction_ids(groups: list[list[RawTransaction]]) -> list[str]:
-    return [txn.id for group in groups for txn in group]
+    return [txn.raw_transaction_id for group in groups for txn in group]
 
 
 def _count_transactions(groups: list[list[RawTransaction]]) -> int:
@@ -324,12 +324,14 @@ def _search_web(txns: list[RawTransaction]) -> dict[str, str]:
         try:
             results[key] = tavily_service.search(query)
         except Exception:
-            logger.warning("Web search failed for transaction %s", txn.id, exc_info=True)
+            logger.warning(
+                "Web search failed for transaction %s", txn.raw_transaction_id, exc_info=True
+            )
             results[key] = None
             continue
         logger.debug(
             "Web search for transaction %s | query: %s | result: %s",
-            txn.id,
+            txn.raw_transaction_id,
             query,
             (results[key] or "")[:_LOGGED_RESULT_CHARS] or None,
         )
@@ -364,7 +366,7 @@ def _save_classification_to_all(
     couldn't tell what the money was for, so its counter account is a guess."""
     for txn in group:
         update_raw_transaction_classification(
-            txn.id,
+            txn.raw_transaction_id,
             Classification(
                 counter_account=source.counter_account,
                 category=source.category,

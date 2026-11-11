@@ -33,7 +33,7 @@ def _txn(
     counter_account: JournalAccount | None = JournalAccount.CASH,
 ) -> RawTransaction:
     return RawTransaction(
-        id=txn_id,
+        raw_transaction_id=txn_id,
         source="plaid",
         account_id=account_id,
         posting_date=datetime.date(2026, 10, day),
@@ -53,7 +53,10 @@ def _txn(
 
 
 def _match_ids(txns: list[RawTransaction]) -> list[tuple[str, str]]:
-    return [(o.id, i.id) for o, i in find_matched_transfers(txns, ACCOUNT_TYPES)]
+    return [
+        (o.raw_transaction_id, i.raw_transaction_id)
+        for o, i in find_matched_transfers(txns, ACCOUNT_TYPES)
+    ]
 
 
 class TestFindMatchedTransfers:

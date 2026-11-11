@@ -20,7 +20,7 @@ def _txn(
     account_id: str = "test_bank:checking:0000",
 ) -> RawTransaction:
     return RawTransaction(
-        id="txn-1",
+        raw_transaction_id="txn-1",
         source="plaid",
         account_id=account_id,
         posting_date=datetime.date(2026, 9, 8),

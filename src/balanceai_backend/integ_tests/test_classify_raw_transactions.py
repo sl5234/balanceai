@@ -141,7 +141,7 @@ def classified() -> dict[str, JournalAccount]:
     for txn_id, description, amount, account_id, category, _ in _CASES:
         upsert_raw_transaction(
             RawTransaction(
-                id=txn_id,
+                raw_transaction_id=txn_id,
                 source="plaid",
                 account_id=account_id,
                 posting_date=datetime.date(2026, 10, 1),
