@@ -10,7 +10,6 @@ from balanceai_backend.db.connection import create_schema
 from balanceai_backend.db.journal_db import save_journal
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.journal import Journal
-from balanceai_backend.models.raw_transaction import RawTransaction
 from balanceai_backend.models.receipt import (
     AccountMatch,
     PaymentMethod,
@@ -18,17 +17,18 @@ from balanceai_backend.models.receipt import (
     ReceiptExtraction,
     ReceiptKind,
 )
-from balanceai_backend.raw_transactions.raw_transaction_db import (
-    find_raw_transactions,
-    upsert_raw_transaction,
+from balanceai_backend.models.source_transaction import SourceTransaction
+from balanceai_backend.source_transactions.source_transaction_db import (
+    find_source_transactions,
+    upsert_source_transaction,
 )
-from balanceai_backend.raw_transactions.sync_raw_transactions_from_receipt import (
+from balanceai_backend.source_transactions.sync_source_transactions_from_receipt import (
     check_receipt_account,
     normalize_last4,
     read_receipt,
     resolve_receipt_path,
     suggest_receipt_account,
-    sync_raw_transactions_from_receipt,
+    sync_source_transactions_from_receipt,
 )
 
 CHECKING = "test_bank:checking:0000"
@@ -84,9 +84,9 @@ def _receipt(**overrides) -> ReceiptExtraction:
 
 
 def _earlier_receipt(db, account_id, card="1234", id="earlier"):
-    upsert_raw_transaction(
-        RawTransaction(
-            raw_transaction_id=id,
+    upsert_source_transaction(
+        SourceTransaction(
+            source_transaction_id=id,
             source="receipt",
             account_id=account_id,
             posting_date=datetime.date(2026, 10, 1),
@@ -173,13 +173,16 @@ class TestCheckReceiptAccount:
             check_receipt_account(OTHER_CHECKING, "j1", conn=db)
 
 
-class TestSyncRawTransactionsFromReceipt:
+class TestSyncSourceTransactionsFromReceipt:
     def test_purchase_is_money_out(self, db):
-        txn = sync_raw_transactions_from_receipt(
+        txn = sync_source_transactions_from_receipt(
             _receipt(tax=Decimal("1.02"), tip=Decimal("2.00")), CHECKING, conn=db
         )
-        [saved] = find_raw_transactions(raw_transaction_id=txn.raw_transaction_id, conn=db)
-        assert len(saved.raw_transaction_id) == 32 and saved.plaid_transaction_id is None
+        [saved] = find_source_transactions(source_transaction_id=txn.source_transaction_id, conn=db)
+        assert (
+            saved.source_transaction_id.startswith("receipt-")
+            and saved.plaid_transaction_id is None
+        )
         assert saved.source == "receipt"
         assert saved.amount == Decimal("-12.50")
         assert saved.description == "Blue Bottle Coffee"
@@ -190,17 +193,19 @@ class TestSyncRawTransactionsFromReceipt:
         )
 
     def test_refund_is_money_in(self, db):
-        txn = sync_raw_transactions_from_receipt(_receipt(kind=ReceiptKind.REFUND), CARD, conn=db)
+        txn = sync_source_transactions_from_receipt(
+            _receipt(kind=ReceiptKind.REFUND), CARD, conn=db
+        )
         assert txn.amount == Decimal("12.50")
 
     def test_saving_the_same_receipt_twice_adds_two_rows(self, db):
         """Ids are random, so duplicates aren't caught here (BL-15)."""
-        sync_raw_transactions_from_receipt(_receipt(), CHECKING, conn=db)
-        sync_raw_transactions_from_receipt(_receipt(), CHECKING, conn=db)
-        assert len(find_raw_transactions(source="receipt", conn=db)) == 2
+        sync_source_transactions_from_receipt(_receipt(), CHECKING, conn=db)
+        sync_source_transactions_from_receipt(_receipt(), CHECKING, conn=db)
+        assert len(find_source_transactions(source="receipt", conn=db)) == 2
 
     def test_keeps_the_category_hint(self, db):
-        txn = sync_raw_transactions_from_receipt(_receipt(category="dining"), CHECKING, conn=db)
+        txn = sync_source_transactions_from_receipt(_receipt(category="dining"), CHECKING, conn=db)
         assert txn.category == "dining"
 
 
@@ -247,7 +252,7 @@ def test_read_receipt_hides_the_ai_error_text(tmp_path):
     image = tmp_path / "receipt.jpg"
     image.write_bytes(b"fake image")
     with patch(
-        "balanceai_backend.raw_transactions.sync_raw_transactions_from_receipt.OcrUtil"
+        "balanceai_backend.source_transactions.sync_source_transactions_from_receipt.OcrUtil"
     ) as ocr:
         ocr.executeWithAnthropic.side_effect = ValueError("Blue Bottle Coffee 12.50 ...")
         with pytest.raises(ValueError) as error:
@@ -260,7 +265,7 @@ def test_read_receipt_sends_the_image_to_ocr(tmp_path):
     image = tmp_path / "receipt.jpg"
     image.write_bytes(b"fake image")
     with patch(
-        "balanceai_backend.raw_transactions.sync_raw_transactions_from_receipt.OcrUtil"
+        "balanceai_backend.source_transactions.sync_source_transactions_from_receipt.OcrUtil"
     ) as ocr:
         ocr.executeWithAnthropic.return_value = _receipt()
         assert read_receipt(Path(image)) == _receipt()

@@ -13,7 +13,7 @@ from balanceai_backend.journals.merchant_cache import (
     save_merchant_context_cache,
 )
 from balanceai_backend.models.journal import GeneratedJournalEntrySet, GeneratedJournalLine
-from balanceai_backend.models.transaction import Transaction
+from balanceai_backend.models.legacy_transaction import LegacyTransaction
 from balanceai_backend.prompts.extract_journal_entry_prompt import (
     categorize_journal_entry_prompt,
     extract_journal_entries_prompt,
@@ -58,7 +58,7 @@ def generate_transaction_category(entry: GeneratedJournalLine) -> GeneratedJourn
     return result
 
 
-def extract_journal_lines_from_bank_statement_transaction(transaction: Transaction) -> list:
+def extract_journal_lines_from_bank_statement_transaction(transaction: LegacyTransaction) -> list:
     """
     Extract journal entries from a single parsed bank statement transaction using Claude.
 

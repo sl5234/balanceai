@@ -48,16 +48,19 @@ _FIELDS = """\
 
 _INPUT = """\
 ## INPUT
-A JSON list of transactions. Each has: index, description, direction
-("out" = money left the account: a purchase, bill, or transfer out; on a credit
-card, a charge. "in" = money came in: income, a refund, or a transfer in; on a
-credit card, a payment or refund),
-bank_account_type (e.g. checking, credit_card), and, when known,
-source_category (Plaid's, e.g. FOOD_AND_DRINK, or a receipt's, e.g. groceries),
-plaid_category_detailed, plaid_confidence (VERY_HIGH, HIGH, MEDIUM, LOW,
-UNKNOWN), and web_context (a web search result about the description). The
-source's category is a strong hint but can be wrong, especially at LOW
-confidence. Don't guess a business type from its name alone.
+A JSON list of transactions. Each has an index and sources: the same
+transaction as reported by one or more sources (e.g. the bank via Plaid, and a
+receipt). Classify the transaction once, using every source. Each source has:
+source (plaid, receipt, or bank_statement), description, direction ("out" =
+money left the account: a purchase, bill, or transfer out; on a credit card, a
+charge. "in" = money came in: income, a refund, or a transfer in; on a credit
+card, a payment or refund), bank_account_type (e.g. checking, credit_card),
+and, when known, source_category (Plaid's, e.g. FOOD_AND_DRINK, or a
+receipt's, e.g. groceries), plaid_category_detailed, plaid_confidence
+(VERY_HIGH, HIGH, MEDIUM, LOW, UNKNOWN), and web_context (a web search result
+about the description). A source's category is a strong hint but can be wrong,
+especially at LOW confidence. Don't guess a business type from its name alone.
+The examples below show one source each.
 """
 
 _EXAMPLES = """\

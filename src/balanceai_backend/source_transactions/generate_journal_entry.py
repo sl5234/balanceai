@@ -1,4 +1,4 @@
-"""Turn a classified raw transaction into a journal entry, by rule.
+"""Turn a classified transaction into a journal entry, by rule.
 
 One line is the bank account the transaction happened in, from its account
 type; the other is the classification's counter account. The amount's sign
@@ -11,7 +11,7 @@ from appdevcommons.unique_id import UniqueIdGenerator
 
 from balanceai_backend.models.bank_account import BankAccountType
 from balanceai_backend.models.journal import JournalAccount, JournalLine
-from balanceai_backend.models.raw_transaction import RawTransaction
+from balanceai_backend.models.transaction import Transaction
 
 _BANK_SIDE_ACCOUNT = {
     # depository
@@ -50,13 +50,13 @@ def bank_side_account(account_type: BankAccountType) -> JournalAccount:
     return _BANK_SIDE_ACCOUNT[account_type]
 
 
-def generate_journal_entry(txn: RawTransaction, account_type: BankAccountType) -> list[JournalLine]:
+def generate_journal_entry(txn: Transaction, account_type: BankAccountType) -> list[JournalLine]:
     """
-    The two lines of the journal entry for a classified raw transaction: the
+    The two lines of the journal entry for a classified transaction: the
     bank side (from account_type) and the counter account (from the
     classification). Money out credits the bank side and debits the counter
     account; money in does the opposite. Both lines carry the transaction's
-    date, description, category, counterparty, raw transaction id, and one
+    date, description, category, counterparty, source transaction id, and one
     shared entry id. Only the bank side names the bank account — the counter
     side's account, if it's a bank account at all, isn't known from one
     transaction (decision #9).
@@ -68,7 +68,7 @@ def generate_journal_entry(txn: RawTransaction, account_type: BankAccountType) -
         ValueError: if the transaction isn't classified.
     """
     if txn.classification is None:
-        raise ValueError(f"Raw transaction {txn.raw_transaction_id} isn't classified")
+        raise ValueError(f"Transaction {txn.transaction_id} isn't classified")
     amount = abs(txn.amount)
     if amount == 0:
         return []
@@ -87,9 +87,9 @@ def generate_journal_entry(txn: RawTransaction, account_type: BankAccountType) -
 
 
 def generate_matched_transfer_entry(
-    out_side: RawTransaction,
+    out_side: Transaction,
     out_type: BankAccountType,
-    in_side: RawTransaction,
+    in_side: Transaction,
     in_type: BankAccountType,
 ) -> list[JournalLine]:
     """
@@ -103,7 +103,7 @@ def generate_matched_transfer_entry(
     """
     for txn in (out_side, in_side):
         if txn.classification is None:
-            raise ValueError(f"Raw transaction {txn.raw_transaction_id} isn't classified")
+            raise ValueError(f"Transaction {txn.transaction_id} isn't classified")
     amount = abs(out_side.amount)
     journal_entry_id = UniqueIdGenerator.generate_id()
     return [
@@ -122,7 +122,7 @@ def generate_matched_transfer_entry(
 
 
 def _line(
-    txn: RawTransaction,
+    txn: Transaction,
     account: JournalAccount,
     amount: Decimal,
     is_debit: bool,
@@ -133,7 +133,7 @@ def _line(
     assert txn.classification is not None
     return JournalLine(
         journal_line_id=UniqueIdGenerator.generate_id(),
-        date=txn.posting_date,
+        date=txn.transaction_date,
         account=account,
         description=txn.description,
         debit=amount if is_debit else Decimal(0),
@@ -141,6 +141,6 @@ def _line(
         category=txn.classification.category,
         counterparty=txn.classification.counterparty or txn.description,
         journal_entry_id=journal_entry_id,
-        raw_transaction_id=txn.raw_transaction_id,
+        transaction_id=txn.transaction_id,
         bank_account_id=bank_account_id,
     )

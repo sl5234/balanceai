@@ -2,7 +2,7 @@ import json
 import logging
 
 from balanceai_backend.db.connection import DATA_DIR
-from balanceai_backend.models import Account, Transaction
+from balanceai_backend.models import Account, LegacyTransaction
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -44,7 +44,7 @@ def save_account(account: Account) -> None:
         json.dump({acc_id: acc.to_dict() for acc_id, acc in accounts.items()}, f, indent=2)
 
 
-def _load_all_transactions() -> dict[str, list[Transaction]]:
+def _load_all_transactions() -> dict[str, list[LegacyTransaction]]:
     """Load all transactions from storage, grouped by account_id."""
     _ensure_data_dir()
     path = DATA_DIR / "transactions.json"
@@ -57,11 +57,12 @@ def _load_all_transactions() -> dict[str, list[Transaction]]:
         data = json.load(f)
 
     return {
-        account_id: [Transaction.from_dict(t) for t in txns] for account_id, txns in data.items()
+        account_id: [LegacyTransaction.from_dict(t) for t in txns]
+        for account_id, txns in data.items()
     }
 
 
-def _save_all_transactions(all_transactions: dict[str, list[Transaction]]) -> None:
+def _save_all_transactions(all_transactions: dict[str, list[LegacyTransaction]]) -> None:
     """Save all transactions to storage."""
     _ensure_data_dir()
     path = DATA_DIR / "transactions.json"
@@ -77,7 +78,7 @@ def _save_all_transactions(all_transactions: dict[str, list[Transaction]]) -> No
         )
 
 
-def load_transactions_by_account(account_id: str | None = None) -> list[Transaction]:
+def load_transactions_by_account(account_id: str | None = None) -> list[LegacyTransaction]:
     """Load transactions from storage, optionally filtered by account_id."""
     all_transactions = _load_all_transactions()
 
@@ -89,8 +90,8 @@ def load_transactions_by_account(account_id: str | None = None) -> list[Transact
 
 
 def save_transactions_by_account(
-    account_id: str, transactions: list[Transaction]
-) -> tuple[list[Transaction], int]:
+    account_id: str, transactions: list[LegacyTransaction]
+) -> tuple[list[LegacyTransaction], int]:
     """
     Save transactions for an account, skipping duplicates. Transactions are sorted by date.
 

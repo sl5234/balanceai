@@ -1,4 +1,4 @@
-"""Book a journal's classified raw transactions as journal entries; see
+"""Book a journal's classified transactions as journal entries; see
 docs/BACKEND_IMPLEMENTATION_DECISIONS.md #7, #9, #13 and #15."""
 
 import logging
@@ -10,25 +10,25 @@ from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.db.journal_db import (
     add_journal_entries,
     delete_journal_entries,
-    find_booked_raw_transactions,
+    find_booked_transactions,
     find_journals,
 )
+from balanceai_backend.db.transaction_db import find_transactions
 from balanceai_backend.models.bank_account import BankAccountType
 from balanceai_backend.models.journal import JournalLine
-from balanceai_backend.models.raw_transaction import RawTransaction
-from balanceai_backend.raw_transactions.generate_journal_entry import (
+from balanceai_backend.models.transaction import Transaction
+from balanceai_backend.source_transactions.generate_journal_entry import (
     generate_journal_entry,
     generate_matched_transfer_entry,
 )
-from balanceai_backend.raw_transactions.match_transfers import Match, find_matched_transfers
-from balanceai_backend.raw_transactions.raw_transaction_db import find_raw_transactions
+from balanceai_backend.source_transactions.match_transfers import Match, find_matched_transfers
 
 logger = logging.getLogger(__name__)
 
 
-def book_raw_transactions(journal_id: str, conn: sqlite3.Connection = _default_conn) -> dict:
+def book_transactions(journal_id: str, conn: sqlite3.Connection = _default_conn) -> dict:
     """
-    Book the classified raw transactions in a journal's bank accounts that
+    Book the classified transactions in a journal's bank accounts that
     aren't booked yet.
 
     Transfers are matched among the unbooked and the booked-but-unmatched
@@ -49,17 +49,17 @@ def book_raw_transactions(journal_id: str, conn: sqlite3.Connection = _default_c
     """
     account_types = _find_bank_account_types(journal_id, conn)
     txns = _find_classified_transactions(account_types, conn)
-    booked = find_booked_raw_transactions(journal_id, conn)
+    booked = find_booked_transactions(journal_id, conn)
 
     # TODO: also re-match booked matched transfers in the window, so a
     # late-classified transaction that would have tied undoes the match
     # (decision #16).
     matches = find_matched_transfers(_find_matchable(txns, booked), account_types)
-    matched_ids = {t.raw_transaction_id for match in matches for t in match}
+    matched_ids = {t.transaction_id for match in matches for t in match}
 
     skip = booked.keys() | matched_ids
     unmatched = _build_unmatched_entries(
-        [t for t in txns if t.raw_transaction_id not in skip], account_types
+        [t for t in txns if t.transaction_id not in skip], account_types
     )
     replaced = [booked[i] for i in matched_ids if i in booked]
     _save(journal_id, replaced, _build_matched_entries(matches, account_types) + unmatched, conn)
@@ -67,10 +67,10 @@ def book_raw_transactions(journal_id: str, conn: sqlite3.Connection = _default_c
     if matches:
         logger.info(
             "Matched transfers %s",
-            [(o.raw_transaction_id, i.raw_transaction_id) for o, i in matches],
+            [(o.transaction_id, i.transaction_id) for o, i in matches],
         )
     if unmatched:
-        logger.info("Booked transactions %s", [lines[0].raw_transaction_id for lines in unmatched])
+        logger.info("Booked transactions %s", [lines[0].transaction_id for lines in unmatched])
     return {"booked": len(unmatched) + 2 * len(matches), "transfers_paired": len(matches)}
 
 
@@ -91,24 +91,23 @@ def _find_bank_account_types(
 
 def _find_classified_transactions(
     account_types: dict[str, BankAccountType], conn: sqlite3.Connection
-) -> list[RawTransaction]:
-    """The classified raw transactions in these bank accounts."""
+) -> list[Transaction]:
+    """The classified transactions in these bank accounts."""
     return [
         t
-        for bank_account_id in account_types
-        for t in find_raw_transactions(account_id=bank_account_id, conn=conn)
+        for t in find_transactions(account_ids=list(account_types), conn=conn)
         if t.classification is not None
     ]
 
 
-def _find_matchable(txns: list[RawTransaction], booked: dict[str, str]) -> list[RawTransaction]:
+def _find_matchable(txns: list[Transaction], booked: dict[str, str]) -> list[Transaction]:
     """The transactions that can still match: unbooked, or booked unmatched.
     A booked entry with two transactions is already a matched transfer."""
     txns_per_entry = Counter(booked.values())
     return [
         t
         for t in txns
-        if t.raw_transaction_id not in booked or txns_per_entry[booked[t.raw_transaction_id]] == 1
+        if t.transaction_id not in booked or txns_per_entry[booked[t.transaction_id]] == 1
     ]
 
 
@@ -125,7 +124,7 @@ def _build_matched_entries(
 
 
 def _build_unmatched_entries(
-    txns: list[RawTransaction], account_types: dict[str, BankAccountType]
+    txns: list[Transaction], account_types: dict[str, BankAccountType]
 ) -> list[list[JournalLine]]:
     """One entry per transaction; a zero amount has none."""
     entries = []

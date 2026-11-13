@@ -1,4 +1,4 @@
-"""Everything that runs after new raw transactions arrive: classify them, then
+"""Everything that runs after new source transactions arrive: classify them, then
 book them into their journals."""
 
 import logging
@@ -7,13 +7,15 @@ import sqlite3
 from balanceai_backend.db.bank_account_db import find_bank_accounts
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.db.journal_db import find_journals
-from balanceai_backend.raw_transactions.book_raw_transactions import book_raw_transactions
-from balanceai_backend.raw_transactions.classify_raw_transactions import classify_raw_transactions
+from balanceai_backend.source_transactions.book_transactions import book_transactions
+from balanceai_backend.source_transactions.classify_transactions import (
+    classify_transactions,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def classify_and_book_raw_transactions(
+def classify_and_book_transactions(
     plaid_item_id: str | None = None, conn: sqlite3.Connection = _default_conn
 ) -> dict:
     """
@@ -25,10 +27,10 @@ def classify_and_book_raw_transactions(
     journal's failure doesn't stop the others or lose the classification.
 
     Returns:
-        dict with "classification" (see classify_raw_transactions) and
+        dict with "classification" (see classify_transactions) and
         "booking": {journal_id: {"booked", "transfers_paired"} or {"error"}}.
     """
-    classification = classify_raw_transactions(plaid_item_id, conn)
+    classification = classify_transactions(plaid_item_id, conn)
     booking = _book_journals(plaid_item_id, conn)
     return {"classification": classification, "booking": booking}
 
@@ -45,7 +47,7 @@ def _book_journals(plaid_item_id: str | None, conn: sqlite3.Connection) -> dict:
     booking: dict = {}
     for journal_id in _find_journal_ids(plaid_item_id, conn):
         try:
-            booking[journal_id] = book_raw_transactions(journal_id, conn)
+            booking[journal_id] = book_transactions(journal_id, conn)
         except (ValueError, sqlite3.Error) as e:
             logger.exception("Couldn't book journal %s", journal_id)
             booking[journal_id] = {"error": str(e)}

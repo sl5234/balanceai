@@ -9,7 +9,7 @@ from balanceai_backend.bank_link.link import LinkExitedError
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.consent import ShareTransactionsConsent
 from balanceai_backend.models.plaid_item import PlaidItem
-from balanceai_backend.models.raw_transaction import RawTransaction
+from balanceai_backend.models.source_transaction import SourceTransaction
 from balanceai_backend.servers.link_bank_server import (
     get_bank_transactions,
     link_bank,
@@ -189,14 +189,14 @@ class TestSyncBankTransactions:
         """Never run the real classifier and booking here: they would use the
         real database and call the AI."""
         with patch(
-            "balanceai_backend.servers.link_bank_server.classify_and_book_raw_transactions",
+            "balanceai_backend.servers.link_bank_server.classify_and_book_transactions",
             return_value=_CLASSIFIED_AND_BOOKED,
         ) as mock:
             yield mock
 
     def test_delegates_to_sync_transactions_by_item_id(self):
         with patch(
-            "balanceai_backend.servers.link_bank_server.sync_raw_transactions_from_plaid",
+            "balanceai_backend.servers.link_bank_server.sync_source_transactions_from_plaid",
             return_value={"added": 3, "modified": 1, "removed": 0},
         ) as mock_sync:
             result = sync_bank_transactions("item-1")
@@ -215,7 +215,7 @@ class TestSyncBankTransactions:
             lambda item_id: calls.append("classify") or _CLASSIFIED_AND_BOOKED
         )
         with patch(
-            "balanceai_backend.servers.link_bank_server.sync_raw_transactions_from_plaid",
+            "balanceai_backend.servers.link_bank_server.sync_source_transactions_from_plaid",
             side_effect=lambda item_id: calls.append("pull") or {"added": 1},
         ):
             sync_bank_transactions("item-1")
@@ -226,7 +226,7 @@ class TestSyncBankTransactions:
     def test_does_not_classify_when_the_pull_fails(self, fake_classifier):
         with (
             patch(
-                "balanceai_backend.servers.link_bank_server.sync_raw_transactions_from_plaid",
+                "balanceai_backend.servers.link_bank_server.sync_source_transactions_from_plaid",
                 side_effect=ValueError("No bank account for Plaid account"),
             ),
             pytest.raises(ValueError),
@@ -243,7 +243,7 @@ class TestSyncBankTransactions:
                 return_value=[item],
             ),
             patch(
-                "balanceai_backend.servers.link_bank_server.sync_raw_transactions_from_plaid",
+                "balanceai_backend.servers.link_bank_server.sync_source_transactions_from_plaid",
                 return_value={"added": 0, "modified": 0, "removed": 0},
             ) as mock_sync,
         ):
@@ -283,9 +283,9 @@ def _make_ctx(elicit_result) -> MagicMock:
     return ctx
 
 
-def _make_txn(txn_id: str, posting_date: datetime.date) -> RawTransaction:
-    return RawTransaction(
-        raw_transaction_id=txn_id,
+def _make_txn(txn_id: str, posting_date: datetime.date) -> SourceTransaction:
+    return SourceTransaction(
+        source_transaction_id=txn_id,
         source="plaid",
         plaid_item_id="item-1",
         account_id="plaid-acc-1",
@@ -304,7 +304,7 @@ class TestGetBankTransactions:
         ]
         ctx = _make_ctx(AcceptedElicitation(data=ShareTransactionsConsent()))
         with patch(
-            "balanceai_backend.servers.link_bank_server.db_find_raw_transactions",
+            "balanceai_backend.servers.link_bank_server.db_find_source_transactions",
             return_value=txns,
         ) as mock_find:
             result = asyncio.run(
@@ -332,7 +332,7 @@ class TestGetBankTransactions:
         ctx = _make_ctx(elicit_result)
         with (
             patch(
-                "balanceai_backend.servers.link_bank_server.db_find_raw_transactions",
+                "balanceai_backend.servers.link_bank_server.db_find_source_transactions",
                 return_value=[_make_txn("txn-1", datetime.date(2026, 8, 19))],
             ),
             pytest.raises(PermissionError, match="declined"),
@@ -344,7 +344,7 @@ class TestGetBankTransactions:
         ctx.elicit = AsyncMock(side_effect=RuntimeError("elicitation not supported"))
         with (
             patch(
-                "balanceai_backend.servers.link_bank_server.db_find_raw_transactions",
+                "balanceai_backend.servers.link_bank_server.db_find_source_transactions",
                 return_value=[_make_txn("txn-1", datetime.date(2026, 8, 19))],
             ),
             pytest.raises(RuntimeError),
@@ -354,7 +354,7 @@ class TestGetBankTransactions:
     def test_returns_empty_list_without_asking_when_no_transactions_synced(self):
         ctx = _make_ctx(DeclinedElicitation())
         with patch(
-            "balanceai_backend.servers.link_bank_server.db_find_raw_transactions",
+            "balanceai_backend.servers.link_bank_server.db_find_source_transactions",
             return_value=[],
         ):
             assert asyncio.run(get_bank_transactions(ctx)) == []

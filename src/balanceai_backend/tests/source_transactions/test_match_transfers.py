@@ -6,11 +6,15 @@ from decimal import Decimal
 import pytest
 from balanceai_backend.models.bank_account import BankAccountType
 from balanceai_backend.models.journal import JournalAccount
-from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
-from balanceai_backend.raw_transactions.generate_journal_entry import (
+from balanceai_backend.models.source_transaction import (
+    Classification,
+    ClassifiedBy,
+)
+from balanceai_backend.models.transaction import Transaction
+from balanceai_backend.source_transactions.generate_journal_entry import (
     generate_matched_transfer_entry,
 )
-from balanceai_backend.raw_transactions.match_transfers import find_matched_transfers
+from balanceai_backend.source_transactions.match_transfers import find_matched_transfers
 
 CHECKING = "chase:checking:0000"
 SAVINGS = "chase:savings:1111"
@@ -31,12 +35,11 @@ def _txn(
     amount: str,
     day: int,
     counter_account: JournalAccount | None = JournalAccount.CASH,
-) -> RawTransaction:
-    return RawTransaction(
-        raw_transaction_id=txn_id,
-        source="plaid",
+) -> Transaction:
+    return Transaction(
+        transaction_id=txn_id,
         account_id=account_id,
-        posting_date=datetime.date(2026, 10, day),
+        transaction_date=datetime.date(2026, 10, day),
         description=f"Transfer {txn_id}",
         amount=Decimal(amount),
         classification=(
@@ -52,10 +55,9 @@ def _txn(
     )
 
 
-def _match_ids(txns: list[RawTransaction]) -> list[tuple[str, str]]:
+def _match_ids(txns: list[Transaction]) -> list[tuple[str, str]]:
     return [
-        (o.raw_transaction_id, i.raw_transaction_id)
-        for o, i in find_matched_transfers(txns, ACCOUNT_TYPES)
+        (o.transaction_id, i.transaction_id) for o, i in find_matched_transfers(txns, ACCOUNT_TYPES)
     ]
 
 
@@ -197,12 +199,12 @@ class TestGenerateMatchedTransferEntry:
             out_side, BankAccountType.CHECKING, in_side, BankAccountType.SAVINGS
         )
 
-        assert (credit.date, credit.raw_transaction_id, credit.bank_account_id) == (
+        assert (credit.date, credit.transaction_id, credit.bank_account_id) == (
             datetime.date(2026, 10, 1),
             "out",
             CHECKING,
         )
-        assert (debit.date, debit.raw_transaction_id, debit.bank_account_id) == (
+        assert (debit.date, debit.transaction_id, debit.bank_account_id) == (
             datetime.date(2026, 10, 2),
             "in",
             SAVINGS,

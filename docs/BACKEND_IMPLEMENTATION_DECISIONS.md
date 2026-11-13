@@ -2,6 +2,12 @@
 
 <!-- INSTRUCTIONS: Keep entries concise, but with enough detail to understand the decision on its own later. Prefer a concrete example over explanation. Keep grounded facts to the few that drove the decision; leave out supporting detail. -->
 
+> **Naming (2026-11-12):** "raw transaction" (`raw_transactions`,
+> `RawTransaction`) is now "source transaction" (`source_transactions`,
+> `SourceTransaction`), and the grouping called "purchase" is now
+> "transaction" (`transactions`, `Transaction`). Older entries keep their
+> original wording.
+
 ## #1 — 2026-08-20 — External SDK clients use lazy, memoized construction via `functools.lru_cache`, co-located with their service
 
 **Category:** system (technical)
@@ -256,3 +262,47 @@ linked to it and not booked.
 - [unverified] Open: how matches are found (rules, an AI pass, or both), and
   what happens to an already-booked Plaid entry when its receipt arrives
   (remove or update its lines).
+
+## #19 — 2026-11-12 — A transaction groups each source's transaction
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #2, #18; BL-15, BL-16
+
+**Short description:** A `transactions` table holds one row per real
+transaction (a purchase, income, a transfer side, a refund); each source's
+transaction (`source_transactions`: Plaid, receipt, statement) points to it, at
+most one per source. Journal lines point to the transaction. A field goes on
+the transaction when there must be one answer across sources (our
+classification now; merged date, amount, etc. later), and on the source
+transaction when it's what one source said. Members share one account; split
+payments stay separate transactions for now.
+**Short example:** A Blue Bottle Coffee charge from Plaid and its receipt are
+two source transactions under one transaction, booked as one entry with one
+classification.
+
+**Grounded facts:**
+- [verified] Classification and journal lines need one home that survives
+  re-links, postings and new sources.
+- [unverified] Until matching exists, each transaction has exactly one source
+  transaction.
+
+## #20 — 2026-11-12 — Users correct receipts before saving, transactions after
+
+**Category:** product
+**Status:** accepted
+**One-way door:** no
+**Related:** #17, #19; BL-10, BL-20
+
+**Short description:** Source transactions are written only by their source;
+for a receipt, the source includes the user's confirmation at upload. So a
+misread receipt is corrected before it's saved, and anything found wrong after
+saving is corrected on the transaction, never on a source transaction. Users
+see and edit transactions only.
+**Short example:** OCR reads $12.80 for a $12.50 total: fixed in the upload
+prompt. Noticed a week later: corrected on the transaction ("amount: set by you").
+
+**Grounded facts:**
+- [verified] Keeping source transactions as the source wrote them means
+  re-syncs never conflict with user edits.

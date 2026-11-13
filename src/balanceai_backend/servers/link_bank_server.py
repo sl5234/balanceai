@@ -23,18 +23,18 @@ from balanceai_backend.constants import DEFAULT_CATEGORIES
 from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.db.bank_account_db import find_bank_accounts as db_find_bank_accounts
 from balanceai_backend.helpers.plaid_helper import save_linked_plaid_item
-from balanceai_backend.models import Account, AccountType, Bank, Category, Transaction
+from balanceai_backend.models import Account, AccountType, Bank, Category, LegacyTransaction
 from balanceai_backend.models.consent import ShareTransactionsConsent
 from balanceai_backend.parsers import get_parser
 from balanceai_backend.prompts.categorizer import build_categorization_prompt
-from balanceai_backend.raw_transactions.process_raw_transactions import (
-    classify_and_book_raw_transactions,
+from balanceai_backend.source_transactions.process_source_transactions import (
+    classify_and_book_transactions,
 )
-from balanceai_backend.raw_transactions.raw_transaction_db import (
-    find_raw_transactions as db_find_raw_transactions,
+from balanceai_backend.source_transactions.source_transaction_db import (
+    find_source_transactions as db_find_source_transactions,
 )
-from balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid import (
-    sync_raw_transactions_from_plaid,
+from balanceai_backend.source_transactions.sync_source_transactions_from_plaid import (
+    sync_source_transactions_from_plaid,
 )
 from balanceai_backend.statements.storage import (
     load_accounts,
@@ -305,7 +305,7 @@ def categorize_transaction(account: dict, transaction: dict, category: str | Non
         dict with success status
     """
     acct = Account.from_dict(account)
-    txn = Transaction.from_dict(transaction)
+    txn = LegacyTransaction.from_dict(transaction)
     valid_names = {c.name for c in acct.categories}
 
     if category is not None:
@@ -448,11 +448,11 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
         if len(items) > 1:
             raise ValueError("Multiple banks are linked — specify item_id (see list_linked_banks).")
         item_id = items[0].item_id
-    result = sync_raw_transactions_from_plaid(item_id)
+    result = sync_source_transactions_from_plaid(item_id)
     # TODO: classifying and booking here makes a first sync with a lot of history one long
     # tool call. Move it to event-driven syncing or a workflow engine.
     # See docs/BACKLOGS.md BL-7.
-    result.update(classify_and_book_raw_transactions(item_id))
+    result.update(classify_and_book_transactions(item_id))
     return result
 
 
@@ -478,7 +478,7 @@ async def get_bank_transactions(
     Raises:
         PermissionError: if the user declines or cancels the approval prompt.
     """
-    transactions = db_find_raw_transactions(
+    transactions = db_find_source_transactions(
         plaid_item_id=item_id, account_id=account_id, source="plaid"
     )
     if not transactions:

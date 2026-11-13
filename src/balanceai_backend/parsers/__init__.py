@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 
-from balanceai_backend.models import Account, Bank, Transaction
+from balanceai_backend.models import Account, Bank, LegacyTransaction
 
 
 class StatementParser(ABC):
     """Base class for bank statement parsers."""
 
     @abstractmethod
-    def parse(self, file_path: str) -> tuple[Account, list[Transaction]]:
+    def parse(self, file_path: str) -> tuple[Account, list[LegacyTransaction]]:
         """
         Parse a bank statement PDF.
 

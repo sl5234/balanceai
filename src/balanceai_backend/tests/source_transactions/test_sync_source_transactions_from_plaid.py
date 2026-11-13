@@ -5,7 +5,7 @@ reasoning as test_link.py: Plaid's real generated SDK models raise
 ApiAttributeError on unset optional fields instead of returning None, and
 SimpleNamespace matches that "attribute genuinely absent" behavior.
 
-Every sync_raw_transactions_from_plaid() call below passes conn=db explicitly — its default
+Every sync_source_transactions_from_plaid() call below passes conn=db explicitly — its default
 argument is bound once at function-definition time, so patching the storage
 modules' module-level _default_conn after the fact would silently do nothing
 and these tests would otherwise hit the real data/balanceai.db.
@@ -23,16 +23,16 @@ from balanceai_backend.bank_link.plaid_item_db import save_plaid_item
 from balanceai_backend.bank_link.plaid_sync_cursor_db import get_plaid_sync_cursor
 from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import create_schema
+from balanceai_backend.db.transaction_db import find_transactions, update_transaction
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.journal import JournalAccount
 from balanceai_backend.models.plaid_item import PlaidItem
-from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy
-from balanceai_backend.raw_transactions.raw_transaction_db import (
-    find_raw_transactions,
-    update_raw_transaction_classification,
+from balanceai_backend.models.source_transaction import Classification, ClassifiedBy
+from balanceai_backend.source_transactions.source_transaction_db import (
+    find_source_transactions,
 )
-from balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid import (
-    sync_raw_transactions_from_plaid,
+from balanceai_backend.source_transactions.sync_source_transactions_from_plaid import (
+    sync_source_transactions_from_plaid,
 )
 
 BANK_ACCOUNT_ID = "tartan_bank:checking:0000"
@@ -52,7 +52,7 @@ def mock_sync_bank_accounts():
     """Bank-account creation has its own tests (tests/helpers/test_plaid_helper.py);
     stub it here so these tests only exercise the transaction loop."""
     with patch(
-        "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.sync_bank_accounts_from_plaid",
+        "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.sync_bank_accounts_from_plaid",
         return_value={"saved": [], "skipped": []},
     ) as mock:
         yield mock
@@ -102,7 +102,7 @@ def _plaid_txn(
 class TestSyncTransactions:
     def test_raises_when_item_not_found(self, db):
         with pytest.raises(ValueError, match="item-missing"):
-            sync_raw_transactions_from_plaid("item-missing", conn=db)
+            sync_source_transactions_from_plaid("item-missing", conn=db)
 
     def test_first_sync_omits_cursor(self, db, linked_item):
         mock_client = MagicMock()
@@ -111,10 +111,10 @@ class TestSyncTransactions:
         )
 
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            sync_raw_transactions_from_plaid("item-1", conn=db)
+            sync_source_transactions_from_plaid("item-1", conn=db)
 
         request = mock_client.transactions_sync.call_args[0][0]
         assert not hasattr(request, "cursor")
@@ -131,10 +131,10 @@ class TestSyncTransactions:
         )
 
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            counts = sync_raw_transactions_from_plaid("item-1", conn=db)
+            counts = sync_source_transactions_from_plaid("item-1", conn=db)
 
         assert counts == {
             "added": 1,
@@ -142,7 +142,7 @@ class TestSyncTransactions:
             "removed": 0,
             "bank_accounts": {"saved": 0, "skipped": 0},
         }
-        [txn] = find_raw_transactions(conn=db)
+        [txn] = find_source_transactions(conn=db)
         assert txn.plaid_transaction_id == "txn-1"
         assert txn.account_id == BANK_ACCOUNT_ID  # our id, not Plaid's "plaid-acc-1"
         assert txn.plaid_account_id == "plaid-acc-1"
@@ -161,12 +161,12 @@ class TestSyncTransactions:
         )
 
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            sync_raw_transactions_from_plaid("item-1", conn=db)
+            sync_source_transactions_from_plaid("item-1", conn=db)
 
-        [txn] = find_raw_transactions(conn=db)
+        [txn] = find_source_transactions(conn=db)
         assert txn.amount == Decimal("1000.0")  # Plaid negative (deposit) -> our positive (credit)
         assert txn.description == "PAYROLL"  # falls back to name when merchant_name is None
 
@@ -182,10 +182,10 @@ class TestSyncTransactions:
             ),
         ]
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            sync_raw_transactions_from_plaid("item-1", conn=db)
+            sync_source_transactions_from_plaid("item-1", conn=db)
 
         mock_client.transactions_sync.side_effect = [
             SimpleNamespace(
@@ -197,10 +197,10 @@ class TestSyncTransactions:
             ),
         ]
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            counts = sync_raw_transactions_from_plaid("item-1", conn=db)
+            counts = sync_source_transactions_from_plaid("item-1", conn=db)
 
         assert counts == {
             "added": 0,
@@ -208,7 +208,7 @@ class TestSyncTransactions:
             "removed": 0,
             "bank_accounts": {"saved": 0, "skipped": 0},
         }
-        transactions = find_raw_transactions(conn=db)
+        transactions = find_source_transactions(conn=db)
         assert len(transactions) == 1
         assert transactions[0].amount == Decimal("-4.75")
 
@@ -218,10 +218,10 @@ class TestSyncTransactions:
             added=[_plaid_txn()], modified=[], removed=[], next_cursor="cursor-A", has_more=False
         )
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            sync_raw_transactions_from_plaid("item-1", conn=db)
+            sync_source_transactions_from_plaid("item-1", conn=db)
 
         mock_client.transactions_sync.return_value = SimpleNamespace(
             added=[],
@@ -231,10 +231,10 @@ class TestSyncTransactions:
             has_more=False,
         )
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            counts = sync_raw_transactions_from_plaid("item-1", conn=db)
+            counts = sync_source_transactions_from_plaid("item-1", conn=db)
 
         assert counts == {
             "added": 0,
@@ -242,7 +242,7 @@ class TestSyncTransactions:
             "removed": 1,
             "bank_accounts": {"saved": 0, "skipped": 0},
         }
-        assert find_raw_transactions(conn=db) == []
+        assert find_source_transactions(conn=db) == []
 
     def test_loops_while_has_more_and_persists_cursor_each_page(self, db, linked_item):
         mock_client = MagicMock()
@@ -264,10 +264,10 @@ class TestSyncTransactions:
         ]
 
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            counts = sync_raw_transactions_from_plaid("item-1", conn=db)
+            counts = sync_source_transactions_from_plaid("item-1", conn=db)
 
         assert counts == {
             "added": 2,
@@ -286,19 +286,19 @@ class TestSyncTransactions:
             added=[], modified=[], removed=[], next_cursor="cursor-A", has_more=False
         )
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            sync_raw_transactions_from_plaid("item-1", conn=db)
+            sync_source_transactions_from_plaid("item-1", conn=db)
 
         mock_client.transactions_sync.return_value = SimpleNamespace(
             added=[], modified=[], removed=[], next_cursor="cursor-B", has_more=False
         )
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            sync_raw_transactions_from_plaid("item-1", conn=db)
+            sync_source_transactions_from_plaid("item-1", conn=db)
 
         second_call_request = mock_client.transactions_sync.call_args_list[1][0][0]
         assert second_call_request.cursor == "cursor-A"
@@ -313,10 +313,10 @@ def _sync_one_page(db, **page):
         has_more=False,
     )
     with patch(
-        "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+        "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
         return_value=mock_client,
     ):
-        sync_raw_transactions_from_plaid("item-1", conn=db)
+        sync_source_transactions_from_plaid("item-1", conn=db)
 
 
 class TestModifiedTransactionClassification:
@@ -331,14 +331,17 @@ class TestModifiedTransactionClassification:
 
     def test_modified_amount_keeps_and_flags_a_users_classification(self, db, linked_item):
         _sync_one_page(db, added=[_plaid_txn(amount=4.50)])
-        [synced] = find_raw_transactions(conn=db)
-        update_raw_transaction_classification(
-            synced.raw_transaction_id, self._classification(ClassifiedBy.USER), conn=db
-        )
+        [synced] = find_source_transactions(conn=db)
+        with db:
+            update_transaction(
+                synced.transaction_id,
+                classification=self._classification(ClassifiedBy.USER),
+                conn=db,
+            )
 
         _sync_one_page(db, modified=[_plaid_txn(amount=5.25)])
 
-        [txn] = find_raw_transactions(conn=db)
+        [txn] = find_transactions(conn=db)
         assert txn.amount == Decimal("-5.25")
         assert txn.classification == dataclasses.replace(
             self._classification(ClassifiedBy.USER), needs_user_review=True
@@ -346,14 +349,17 @@ class TestModifiedTransactionClassification:
 
     def test_modified_amount_clears_the_ais_classification(self, db, linked_item):
         _sync_one_page(db, added=[_plaid_txn(amount=4.50)])
-        [synced] = find_raw_transactions(conn=db)
-        update_raw_transaction_classification(
-            synced.raw_transaction_id, self._classification(ClassifiedBy.AI), conn=db
-        )
+        [synced] = find_source_transactions(conn=db)
+        with db:
+            update_transaction(
+                synced.transaction_id,
+                classification=self._classification(ClassifiedBy.AI),
+                conn=db,
+            )
 
         _sync_one_page(db, modified=[_plaid_txn(amount=5.25)])
 
-        [txn] = find_raw_transactions(conn=db)
+        [txn] = find_transactions(conn=db)
         assert txn.classification is None
 
 
@@ -364,7 +370,7 @@ class TestPlaidCategoryDetails:
         )
         _sync_one_page(db, added=[_plaid_txn(personal_finance_category=pfc)])
 
-        [txn] = find_raw_transactions(conn=db)
+        [txn] = find_source_transactions(conn=db)
         assert txn.category == "FOOD_AND_DRINK"
         assert txn.category_detailed == "FOOD_AND_DRINK_COFFEE"
         assert txn.category_confidence == "LOW"
@@ -374,7 +380,7 @@ class TestPlaidCategoryDetails:
         del plaid_txn.personal_finance_category  # unset, as Plaid's SDK model would have it
         _sync_one_page(db, added=[plaid_txn])
 
-        [txn] = find_raw_transactions(conn=db)
+        [txn] = find_source_transactions(conn=db)
         assert (txn.category, txn.category_detailed, txn.category_confidence) == (None, None, None)
 
 
@@ -392,10 +398,10 @@ class TestSyncBankAccounts:
         )
 
         with patch(
-            "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+            "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
             return_value=mock_client,
         ):
-            counts = sync_raw_transactions_from_plaid("item-1", conn=db)
+            counts = sync_source_transactions_from_plaid("item-1", conn=db)
 
         [call] = mock_sync_bank_accounts.call_args_list
         assert call.args[0].item_id == "item-1"
@@ -418,35 +424,35 @@ class TestUnknownPlaidAccount:
 
         with (
             patch(
-                "balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid.get_client",
+                "balanceai_backend.source_transactions.sync_source_transactions_from_plaid.get_client",
                 return_value=mock_client,
             ),
             pytest.raises(ValueError, match="plaid-acc-skipped"),
         ):
-            sync_raw_transactions_from_plaid("item-1", conn=db)
+            sync_source_transactions_from_plaid("item-1", conn=db)
 
-        assert find_raw_transactions(conn=db) == []
+        assert find_source_transactions(conn=db) == []
         assert get_plaid_sync_cursor("item-1", conn=db) is None
 
 
 class TestOurOwnIds:
-    """BL-16: our raw_transaction_id never changes; Plaid's id is stored apart."""
+    """BL-16: our source_transaction_id never changes; Plaid's id is stored apart."""
 
     def test_stores_plaids_id_apart_from_ours(self, db, linked_item):
         _sync_one_page(db, added=[_plaid_txn()])
-        [txn] = find_raw_transactions(conn=db)
+        [txn] = find_source_transactions(conn=db)
         assert txn.plaid_transaction_id == "txn-1"
-        assert len(txn.raw_transaction_id) == 32 and txn.raw_transaction_id != "txn-1"
+        assert txn.source_transaction_id.startswith("plaid-")
 
     def test_modified_keeps_our_id(self, db, linked_item):
         _sync_one_page(db, added=[_plaid_txn(amount=4.50)])
-        [first] = find_raw_transactions(conn=db)
+        [first] = find_source_transactions(conn=db)
         _sync_one_page(db, modified=[_plaid_txn(amount=5.25)])
-        [txn] = find_raw_transactions(conn=db)
-        assert txn.raw_transaction_id == first.raw_transaction_id
+        [txn] = find_source_transactions(conn=db)
+        assert txn.source_transaction_id == first.source_transaction_id
         assert txn.amount == Decimal("-5.25")
 
     def test_removed_deletes_by_plaids_id(self, db, linked_item):
         _sync_one_page(db, added=[_plaid_txn()])
         _sync_one_page(db, removed=[SimpleNamespace(transaction_id="txn-1")])
-        assert find_raw_transactions(conn=db) == []
+        assert find_source_transactions(conn=db) == []

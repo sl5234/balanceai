@@ -1,0 +1,56 @@
+import datetime
+from dataclasses import asdict, dataclass
+from decimal import Decimal
+from hashlib import sha256
+
+
+@dataclass
+class LegacyTransaction:
+    """A transaction from the legacy bank-statement PDF flow (statements/,
+    parsers/). Retire with the legacy tools (docs/BACKLOGS.md BL-9,
+    docs/security/SECURITY_BACKLOGS.md SBL-3)."""
+
+    id: str
+    account_id: str
+    posting_date: datetime.date
+    description: str
+    amount: Decimal  # negative = debit, positive = credit
+    previous_balance: Decimal
+    new_balance: Decimal
+    category: str | None = None
+    transaction_date: datetime.date | None = None
+
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        d["posting_date"] = self.posting_date.isoformat()
+        d["transaction_date"] = self.transaction_date.isoformat() if self.transaction_date else None
+        d["amount"] = str(self.amount)
+        d["previous_balance"] = str(self.previous_balance)
+        d["new_balance"] = str(self.new_balance)
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "LegacyTransaction":
+        txn_date_str = d.get("transaction_date")
+        return cls(
+            id=d["id"],
+            account_id=d["account_id"],
+            posting_date=datetime.date.fromisoformat(d["posting_date"]),
+            description=d["description"],
+            amount=Decimal(d["amount"]),
+            previous_balance=Decimal(d["previous_balance"]),
+            new_balance=Decimal(d["new_balance"]),
+            category=d.get("category"),
+            transaction_date=datetime.date.fromisoformat(txn_date_str) if txn_date_str else None,
+        )
+
+    def __lt__(self, other: "LegacyTransaction") -> bool:
+        """Enable sorting by posting date."""
+        return self.posting_date < other.posting_date
+
+    @staticmethod
+    def generate_id(
+        account_id: str, txn_date: datetime.date, description: str, amount: Decimal
+    ) -> str:
+        raw = f"{account_id}|{txn_date.isoformat()}|{description}|{amount}"
+        return sha256(raw.encode()).hexdigest()[:16]

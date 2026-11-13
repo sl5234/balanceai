@@ -13,7 +13,7 @@ from balanceai_backend.models.journal import (
     GeneratedJournalLine,
     JournalAccount,
 )
-from balanceai_backend.models.transaction import Transaction
+from balanceai_backend.models.legacy_transaction import LegacyTransaction
 from balanceai_backend.utils.journal_entry_util import (
     extract_journal_lines_from_bank_statement_transaction,
     generate_transaction_category,
@@ -237,7 +237,7 @@ class TestGenerateTransactionCategory:
 
 @pytest.fixture
 def sample_transaction():
-    return Transaction(
+    return LegacyTransaction(
         id="txn-1",
         account_id="acct-1",
         posting_date=datetime.date(2026, 1, 25),

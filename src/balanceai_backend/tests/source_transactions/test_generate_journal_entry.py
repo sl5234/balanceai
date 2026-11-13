@@ -1,4 +1,4 @@
-"""Tests for generate_journal_entry: a classified raw transaction -> two lines."""
+"""Tests for generate_journal_entry: a classified source transaction -> two lines."""
 
 import datetime
 from decimal import Decimal
@@ -6,8 +6,12 @@ from decimal import Decimal
 import pytest
 from balanceai_backend.models.bank_account import BankAccountType
 from balanceai_backend.models.journal import JournalAccount
-from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
-from balanceai_backend.raw_transactions.generate_journal_entry import (
+from balanceai_backend.models.source_transaction import (
+    Classification,
+    ClassifiedBy,
+)
+from balanceai_backend.models.transaction import Transaction
+from balanceai_backend.source_transactions.generate_journal_entry import (
     bank_side_account,
     generate_journal_entry,
 )
@@ -18,12 +22,11 @@ def _txn(
     counter_account: JournalAccount,
     counterparty: str | None = "Starbucks",
     account_id: str = "test_bank:checking:0000",
-) -> RawTransaction:
-    return RawTransaction(
-        raw_transaction_id="txn-1",
-        source="plaid",
+) -> Transaction:
+    return Transaction(
+        transaction_id="txn-1",
         account_id=account_id,
-        posting_date=datetime.date(2026, 9, 8),
+        transaction_date=datetime.date(2026, 9, 8),
         description="STARBUCKS #123",
         amount=Decimal(amount),
         classification=Classification(
@@ -139,7 +142,7 @@ class TestGenerateJournalEntry:
             assert e.category == "dining"
             assert e.counterparty == "Starbucks"
             assert e.tax == Decimal(0)
-            assert e.raw_transaction_id == "txn-1"
+            assert e.transaction_id == "txn-1"
         assert entries[0].journal_line_id != entries[1].journal_line_id
 
     def test_both_lines_share_one_entry_id(self):

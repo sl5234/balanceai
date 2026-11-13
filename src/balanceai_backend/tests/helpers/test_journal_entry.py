@@ -15,7 +15,7 @@ from balanceai_backend.models.journal import (
     JournalAccount,
     JournalLine,
 )
-from balanceai_backend.models.transaction import Transaction
+from balanceai_backend.models.legacy_transaction import LegacyTransaction
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -311,7 +311,7 @@ class TestHandleCreateOrUpdateJournalEntriesForTransactions:
 
 @pytest.fixture
 def sample_transaction():
-    return Transaction(
+    return LegacyTransaction(
         id="txn-id-1",
         account_id="acct-1",
         posting_date=datetime.date(2026, 1, 25),
@@ -496,7 +496,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
     def test_multiple_transactions_all_entries_accumulated(
         self, empty_journal, expense_entry_data, cash_entry_data
     ):
-        txn1 = Transaction(
+        txn1 = LegacyTransaction(
             id="txn-1",
             account_id="acct-1",
             posting_date=datetime.date(2026, 1, 25),
@@ -505,7 +505,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             previous_balance=Decimal("1000.00"),
             new_balance=Decimal("988.00"),
         )
-        txn2 = Transaction(
+        txn2 = LegacyTransaction(
             id="txn-2",
             account_id="acct-1",
             posting_date=datetime.date(2026, 1, 26),
@@ -626,7 +626,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
         mock_parser.parse.assert_called_once_with(file_path)
 
     def test_extract_entries_called_once_per_transaction(self, empty_journal, expense_entry_data):
-        txn1 = Transaction(
+        txn1 = LegacyTransaction(
             id="txn-1",
             account_id="acct-1",
             posting_date=datetime.date(2026, 1, 25),
@@ -635,7 +635,7 @@ class TestHandleSyncJournalEntriesFromBankStatement:
             previous_balance=Decimal("1000.00"),
             new_balance=Decimal("988.00"),
         )
-        txn2 = Transaction(
+        txn2 = LegacyTransaction(
             id="txn-2",
             account_id="acct-1",
             posting_date=datetime.date(2026, 1, 26),

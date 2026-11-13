@@ -39,3 +39,22 @@ Bottle Coffee".
   3. `git branch -d <merged branch>` (and `git push origin --delete <merged branch>`
      if GitHub didn't delete it)
   4. `git checkout -b feature/<next topic>`
+
+## Subtask lists
+
+When asked for a subtask list, use this format:
+
+- A one-line intro naming the scope (e.g. "for this PR: one PR, one DB wipe at
+  the end").
+- One bold heading per step: `**Step N: <what it achieves>**`, in the order
+  they'll be done.
+- Under each step, Markdown checkboxes (`- [ ]`), one per concrete change,
+  naming the file, function or column, and a short note after a semicolon or
+  colon (e.g. "`upsert_source_transaction`: a new row creates its transaction; an
+  update keeps it").
+- End each step with a `Tests:` checkbox listing what the tests cover.
+- Mark undecided items inline in bold (e.g. "**Not decided yet.**").
+- A final "docs, checks" step (docs, DEVELOPMENT.md checklist, audit, squash,
+  push) and any steps for the user (e.g. "You: wipe the DB…").
+- A "Later, separate PRs" section for follow-ups.
+- Close with one line on what to do first.

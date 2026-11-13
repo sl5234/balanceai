@@ -8,8 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import create_schema
-from balanceai_backend.db.journal_db import find_booked_raw_transactions
+from balanceai_backend.db.journal_db import find_booked_transactions
 from balanceai_backend.db.readonly_journal_connection import open_readonly_journal_connection
+from balanceai_backend.db.transaction_db import find_transactions, update_transaction
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.consent import (
     BookReceiptConsent,
@@ -27,12 +28,11 @@ from balanceai_backend.models.journal import (
     JournalAccount,
     JournalLine,
 )
-from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy, RawTransaction
 from balanceai_backend.models.receipt import PaymentMethod, ReceiptExtraction, ReceiptKind
-from balanceai_backend.raw_transactions.raw_transaction_db import (
-    find_raw_transactions,
-    update_raw_transaction_classification,
-    upsert_raw_transaction,
+from balanceai_backend.models.source_transaction import (
+    Classification,
+    ClassifiedBy,
+    SourceTransaction,
 )
 from balanceai_backend.servers.bookkeeping_server import (
     analyze_financial_question,
@@ -42,6 +42,10 @@ from balanceai_backend.servers.bookkeeping_server import (
     list_journals,
     update_journal,
     upload_receipt,
+)
+from balanceai_backend.source_transactions.source_transaction_db import (
+    find_source_transactions,
+    upsert_source_transaction,
 )
 from mcp.server.elicitation import (
     AcceptedElicitation,
@@ -313,23 +317,24 @@ class TestUploadReceipt:
 
     def _upload(self, db, ctx, receipt=None, **kwargs):
         def classify(conn):
-            for txn in find_raw_transactions(unclassified=True, conn=conn):
-                update_raw_transaction_classification(
-                    txn.raw_transaction_id,
-                    Classification(
-                        counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
-                        category="dining",
-                        counterparty="Blue Bottle Coffee",
-                        classified_by=ClassifiedBy.AI,
-                    ),
-                    conn=conn,
-                )
+            for txn in find_transactions(unclassified=True, conn=conn):
+                with conn:
+                    update_transaction(
+                        txn.transaction_id,
+                        classification=Classification(
+                            counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+                            category="dining",
+                            counterparty="Blue Bottle Coffee",
+                            classified_by=ClassifiedBy.AI,
+                        ),
+                        conn=conn,
+                    )
 
         server = "balanceai_backend.servers.bookkeeping_server"
         with (
             patch(f"{server}.resolve_receipt_path"),
             patch(f"{server}.read_receipt", return_value=receipt or self._receipt()),
-            patch(f"{server}.classify_raw_transactions", side_effect=classify),
+            patch(f"{server}.classify_transactions", side_effect=classify),
         ):
             return asyncio.run(upload_receipt(ctx, "receipt.jpg", **kwargs))
 
@@ -339,13 +344,13 @@ class TestUploadReceipt:
         assert result == {"booked": True, "journal_id": journal_id}  # no receipt details
         message = ctx.elicit.await_args.kwargs["message"]
         assert "Blue Bottle Coffee" in message and "matched the account's last 4" in message
-        assert len(find_booked_raw_transactions(journal_id, conn=db)) == 1
+        assert len(find_booked_transactions(journal_id, conn=db)) == 1
 
     @pytest.mark.parametrize("elicit_result", [DeclinedElicitation(), CancelledElicitation()])
     def test_saves_nothing_when_declined(self, db, journal_id, elicit_result):
         with pytest.raises(PermissionError):
             self._upload(db, _make_ctx(elicit_result))
-        assert find_raw_transactions(source="receipt", conn=db) == []
+        assert find_source_transactions(source="receipt", conn=db) == []
 
     def test_account_given_by_the_user(self, db, journal_id):
         ctx = _make_ctx(AcceptedElicitation(data=BookReceiptConsent()))
@@ -370,7 +375,7 @@ class TestUploadReceipt:
         result = self._upload(db, ctx)
         assert result["booked"] is False and result["journal_id"] is None
         assert "won't be booked" in ctx.elicit.await_args.kwargs["message"]
-        assert len(find_raw_transactions(source="receipt", conn=db)) == 1
+        assert len(find_source_transactions(source="receipt", conn=db)) == 1
 
 
 class TestJournalTools:
@@ -526,27 +531,37 @@ class TestJournalTools:
 
     @staticmethod
     def _add_purchase(db, txn_id: str, account_id: str) -> None:
-        upsert_raw_transaction(
-            RawTransaction(
-                raw_transaction_id=txn_id,
+        upsert_source_transaction(
+            SourceTransaction(
+                source_transaction_id=txn_id,
                 source="plaid",
                 account_id=account_id,
                 posting_date=datetime.date(2026, 10, 1),
                 description="STARBUCKS",
                 amount=Decimal("-4.33"),
+            ),
+            conn=db,
+        )
+        [source] = find_source_transactions(source_transaction_id=txn_id, conn=db)
+        with db:
+            update_transaction(
+                source.transaction_id,
                 classification=Classification(
                     counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
                     category="dining",
                     counterparty="Starbucks",
                     classified_by=ClassifiedBy.AI,
                 ),
-            ),
-            conn=db,
-        )
+                conn=db,
+            )
 
     @staticmethod
     def _booked_txns(db, journal_id: str) -> set[str]:
-        return set(find_booked_raw_transactions(journal_id, db))
+        """Booked source transaction ids, via their purchases."""
+        raw_id = {
+            t.transaction_id: t.source_transaction_id for t in find_source_transactions(conn=db)
+        }
+        return {raw_id[p] for p in find_booked_transactions(journal_id, db)}
 
     def test_create_journal_books_its_accounts(self, db, bank_accounts):
         checking, _, card = bank_accounts

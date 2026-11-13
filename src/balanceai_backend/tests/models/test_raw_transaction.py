@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 from balanceai_backend.models.journal import JournalAccount
-from balanceai_backend.models.raw_transaction import Classification, ClassifiedBy
+from balanceai_backend.models.source_transaction import Classification, ClassifiedBy
 
 
 @pytest.mark.parametrize("classified_by", [ClassifiedBy.AI, ClassifiedBy.USER])

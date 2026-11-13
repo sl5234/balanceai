@@ -11,9 +11,9 @@ from balanceai_backend.db.journal_db import (
     delete_journal,
     delete_journal_entries,
     delete_journal_entries_for_bank_account,
-    delete_journal_entries_for_raw_transaction,
+    delete_journal_entries_for_transaction,
     delete_journal_entry,
-    find_booked_raw_transactions,
+    find_booked_transactions,
     find_journal_lines,
     find_journals,
     is_account_in_journal,
@@ -598,18 +598,18 @@ class TestJournalBankAccounts:
 
 
 class TestEntrySource:
-    def test_entry_raw_transaction_and_bank_account_ids_round_trip(self, db, sample_journal):
+    def test_entry_source_transaction_and_bank_account_ids_round_trip(self, db, sample_journal):
         save_journal(sample_journal, db)
         entry = _make_entry("entry-1", datetime.date(2026, 9, 8), Decimal("4.33"))
         entry.journal_entry_id = "e-1"
-        entry.raw_transaction_id = "txn-1"
+        entry.transaction_id = "txn-1"
         entry.bank_account_id = CHECKING
         sample_journal.lines = [entry]
 
         update_journal(sample_journal, db)
 
         [found] = find_journal_lines(sample_journal.journal_id, conn=db)
-        assert (found.journal_entry_id, found.raw_transaction_id, found.bank_account_id) == (
+        assert (found.journal_entry_id, found.transaction_id, found.bank_account_id) == (
             "e-1",
             "txn-1",
             CHECKING,
@@ -622,20 +622,20 @@ class TestEntrySource:
         update_journal(sample_journal, db)
 
         [found] = find_journal_lines(sample_journal.journal_id, conn=db)
-        assert (found.journal_entry_id, found.raw_transaction_id, found.bank_account_id) == (
+        assert (found.journal_entry_id, found.transaction_id, found.bank_account_id) == (
             None,
             None,
             None,
         )
 
 
-def _lines(journal_entry_id: str, *raw_transaction_ids: str | None) -> list[JournalLine]:
-    """One entry's lines, one per raw transaction id."""
+def _lines(journal_entry_id: str, *transaction_ids: str | None) -> list[JournalLine]:
+    """One entry's lines, one per source transaction id."""
     lines = []
-    for n, raw_transaction_id in enumerate(raw_transaction_ids):
+    for n, transaction_id in enumerate(transaction_ids):
         line = _make_entry(f"{journal_entry_id}-{n}", datetime.date(2026, 9, 8), Decimal("4.33"))
         line.journal_entry_id = journal_entry_id
-        line.raw_transaction_id = raw_transaction_id
+        line.transaction_id = transaction_id
         lines.append(line)
     return lines
 
@@ -670,7 +670,7 @@ class TestBookedEntries:
 
         assert _entry_ids(db, sample_journal) == ["e-1", "e-2"]
 
-    def test_find_booked_raw_transactions(self, db, sample_journal):
+    def test_find_booked_transactions(self, db, sample_journal):
         other = Journal(name="Other")
         save_journal(sample_journal, db)
         save_journal(other, db)
@@ -686,7 +686,7 @@ class TestBookedEntries:
             )
             add_journal_entry(other.journal_id, _lines("e-9", "txn-9", "txn-9"), db)
 
-        assert find_booked_raw_transactions(sample_journal.journal_id, db) == {
+        assert find_booked_transactions(sample_journal.journal_id, db) == {
             "txn-1": "e-1",
             "out": "match",
             "in": "match",
@@ -724,7 +724,7 @@ class TestBookedEntries:
 
         assert _entry_ids(db, sample_journal) == ["e-2"]
 
-    def test_deleting_for_a_raw_transaction_removes_the_whole_match(self, db, sample_journal):
+    def test_deleting_for_a_source_transaction_removes_the_whole_match(self, db, sample_journal):
         save_journal(sample_journal, db)
         with db:
             add_journal_entries(
@@ -734,7 +734,7 @@ class TestBookedEntries:
             )
 
         with db:
-            delete_journal_entries_for_raw_transaction("in", db)
+            delete_journal_entries_for_transaction("in", db)
 
         assert _entry_ids(db, sample_journal) == ["e-2"]
 

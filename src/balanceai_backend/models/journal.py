@@ -194,8 +194,9 @@ class JournalLine(GeneratedJournalLine):
     journal_line_id: str
     # The entry this line belongs to; an entry's lines share it.
     journal_entry_id: str | None = None
-    # Where this line came from, when generated from a raw transaction.
-    raw_transaction_id: str | None = None
+    # The transaction this line was booked from. A matched transfer's two
+    # lines each carry their own side's transaction.
+    transaction_id: str | None = None
     bank_account_id: str | None = None
     # Set by the database when saved (UTC ISO 8601).
     created_at: str | None = None
@@ -216,7 +217,7 @@ class JournalLine(GeneratedJournalLine):
             "tax": str(self.tax),
             "counterparty": None if redact else self.counterparty,
             "journal_entry_id": self.journal_entry_id,
-            "raw_transaction_id": self.raw_transaction_id,
+            "transaction_id": self.transaction_id,
             "bank_account_id": self.bank_account_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -235,7 +236,7 @@ class JournalLine(GeneratedJournalLine):
             tax=Decimal(d.get("tax", "0")),
             counterparty=d.get("counterparty", COUNTERPARTY_SELF),
             journal_entry_id=d.get("journal_entry_id"),
-            raw_transaction_id=d.get("raw_transaction_id"),
+            transaction_id=d.get("transaction_id"),
             bank_account_id=d.get("bank_account_id"),
             created_at=d.get("created_at"),
             updated_at=d.get("updated_at"),

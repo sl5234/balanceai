@@ -16,8 +16,15 @@ def test_a_new_database_passes_the_schema_check():
     connection._check_schema_is_current(db)
 
 
-def test_a_database_from_before_bl16_is_rejected():
+@pytest.mark.parametrize(
+    "columns",
+    [
+        "id TEXT PRIMARY KEY, source TEXT",  # before BL-16
+        "raw_transaction_id TEXT PRIMARY KEY, source TEXT",  # before source transactions
+    ],
+)
+def test_an_older_database_is_rejected(columns):
     db = sqlite3.connect(":memory:")
-    db.execute("CREATE TABLE raw_transactions (id TEXT PRIMARY KEY, source TEXT)")
-    with pytest.raises(RuntimeError, match="predates BL-16"):
+    db.execute(f"CREATE TABLE raw_transactions ({columns})")
+    with pytest.raises(RuntimeError, match="predates source transactions"):
         connection._check_schema_is_current(db)
