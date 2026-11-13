@@ -3,6 +3,12 @@
 Deferred engineering work. Code that's affected carries a `TODO` pointing back
 to the entry by its id.
 
+> **Naming (2026-11-12):** "raw transaction" (`raw_transactions`,
+> `RawTransaction`) is now "source transaction" (`source_transactions`,
+> `SourceTransaction`), and the grouping called "purchase" is now
+> "transaction" (`transactions`, `Transaction`). Older entries keep their
+> original wording.
+
 ## BL-1 — Bank account id doesn't follow changed last 4 / type / institution
 
 **Added:** 2026-10-04
@@ -240,6 +246,11 @@ and edit rules across sessions (stored in the DB, listing asks before sharing).
 **Priority:** do this right after the current pass of fixing classifications
 on real transactions, before the next sync.
 
+**Update 2026-11-12:** the classification lives on the transaction
+(update_transaction). User corrections to other fields found after saving are a
+user override on the transaction, never an edit to a source transaction
+(BACKEND_IMPLEMENTATION_DECISIONS.md #20).
+
 ## BL-11 — Refunds aren't linked to their purchases
 
 **Added:** 2026-11-05
@@ -358,6 +369,13 @@ Uses the separate ids from BL-16.
 
 **Priority:** right after the first round of receipt testing.
 
+**Update 2026-11-12:** matching now means putting source transactions under one
+transaction (BACKEND_IMPLEMENTATION_DECISIONS.md #19); the classifier already
+sends all of a transaction's sources and reuses classifications per source.
+When the posted Plaid version of a pending charge arrives, it should join the
+pending one's transaction (Plaid's pending_transaction_id) or the receipt's,
+rather than start a new one (TODO(BL-15) in classify_transactions.py).
+
 ## BL-16 — Raw transactions use Plaid's id as their own id (and its column is `id`)
 
 **Added:** 2026-11-10
@@ -409,3 +427,43 @@ keep the original `created_at` on conflict). SQLite can't add a column with a
 `CURRENT_TIMESTAMP` default to an existing table, so set them in code (or with
 triggers). Existing rows: null, or do it in the same migration / DB wipe as
 BL-16.
+
+## BL-19 — Avoid AI cost on re-syncs and re-uploaded receipts
+
+**Added:** 2026-11-11
+**Related:** BL-7, BL-15
+
+**Problem:** AI calls cost money, and some flows may repeat them for nothing:
+- Plaid re-sync with no changes: classification runs on every unclassified
+  transaction, so ones that failed or were skipped before are sent to the AI
+  (and the web search) again on every sync.
+- Re-uploading the same receipt: the image is read by the AI (OCR) before
+  anything checks whether it was already uploaded.
+
+**Proposed fix:**
+- Audit every AI and web-search call (classification, OCR, analyze) for when
+  it can repeat without new data; add a test per flow that a no-change re-run
+  makes no AI call.
+- Plaid: classify only transactions added or changed in this sync, plus a
+  capped retry for earlier failures (e.g. retry count / last tried at).
+- Receipts, before OCR: a hash of the file's bytes (SHA-256), stored on the
+  receipt's raw transaction; the same file again is skipped with no AI call.
+  A re-taken photo of the same receipt has different bytes: catch it after
+  OCR with BL-15's matching (same account, date, total, merchant), which
+  still costs one OCR call. A perceptual image hash could catch near-identical
+  photos without OCR; worth trying if re-takes are common.
+
+## BL-20 — The receipt consent prompt can't fix misread values
+
+**Added:** 2026-11-12
+**Related:** BACKEND_IMPLEMENTATION_DECISIONS.md #20; BL-19
+
+**Problem:** `upload_receipt`'s prompt is accept/decline only. If OCR misread a
+value (total, date, merchant), the user can only decline.
+
+**Proposed fix:** make the prompt a form prefilled with the OCR result (date,
+counterparty, total, tax, tip, card last 4), so the user checks both what's
+shared and that the values are right, edits any field, then approves. The
+corrected values are what's saved. Values stay between the user and the server;
+the assistant doesn't see them. First check that Claude Code shows the
+prefilled values (MCP elicitation defaults).

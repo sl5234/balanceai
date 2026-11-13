@@ -7,7 +7,7 @@ from typing import NamedTuple
 import pdfplumber
 from appdevcommons.hash_generator import HashGenerator
 
-from balanceai_backend.models import Account, AccountType, Bank, Transaction
+from balanceai_backend.models import Account, AccountType, Bank, LegacyTransaction
 from balanceai_backend.parsers import StatementParser, register_parser
 
 logging.basicConfig(
@@ -51,7 +51,7 @@ class ChaseParser(StatementParser):
     like OpenAI directly for additional security.
     """
 
-    def parse(self, file_path: str) -> tuple[Account, list[Transaction]]:
+    def parse(self, file_path: str) -> tuple[Account, list[LegacyTransaction]]:
         with pdfplumber.open(file_path) as pdf:
             all_text = ""
             for page in pdf.pages:
@@ -219,21 +219,21 @@ class ChaseParser(StatementParser):
 
         return transactions
 
-    def _parse_transactions(self, text: str, account_id: str) -> list[Transaction]:
+    def _parse_transactions(self, text: str, account_id: str) -> list[LegacyTransaction]:
         period = self._parse_statement_period(text)
-        raw_transactions = self._parse_transactions_from_text(text, period)
+        source_transactions = self._parse_transactions_from_text(text, period)
 
         # Sort by date
-        raw_transactions.sort(key=lambda t: t["posting_date"])
+        source_transactions.sort(key=lambda t: t["posting_date"])
 
         transactions = []
-        for txn_data in raw_transactions:
-            txn_id = Transaction.generate_id(
+        for txn_data in source_transactions:
+            txn_id = LegacyTransaction.generate_id(
                 account_id, txn_data["posting_date"], txn_data["description"], txn_data["amount"]
             )
 
             transactions.append(
-                Transaction(
+                LegacyTransaction(
                     id=txn_id,
                     account_id=account_id,
                     posting_date=txn_data["posting_date"],
@@ -249,7 +249,10 @@ class ChaseParser(StatementParser):
         return transactions
 
     def _validate_balances(
-        self, beginning_balance: Decimal, transactions: list[Transaction], ending_balance: Decimal
+        self,
+        beginning_balance: Decimal,
+        transactions: list[LegacyTransaction],
+        ending_balance: Decimal,
     ) -> None:
         logger.debug("\nBeginning balance: \n%s", beginning_balance)
         logger.debug("\nEnding balance: \n%s", ending_balance)

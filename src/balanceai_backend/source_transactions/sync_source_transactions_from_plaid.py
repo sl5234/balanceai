@@ -1,6 +1,6 @@
 """Keep local transaction data in sync with Plaid via /transactions/sync.
 
-Run as: python -m balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid <item_id>
+Run as: python -m balanceai_backend.source_transactions.sync_source_transactions_from_plaid <item_id>
 (syncs only; doesn't classify — the sync_bank_transactions tool does both).
 """
 
@@ -20,19 +20,20 @@ from balanceai_backend.db.bank_account_db import find_bank_accounts
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.helpers.plaid_helper import sync_bank_accounts_from_plaid
 from balanceai_backend.models.plaid_sync_cursor import PlaidSyncCursor
-from balanceai_backend.models.raw_transaction import RawTransaction
-from balanceai_backend.raw_transactions.raw_transaction_db import (
-    delete_raw_transaction_by_plaid_id,
-    upsert_raw_transaction,
-)
+from balanceai_backend.models.source_transaction import SourceTransaction
 from balanceai_backend.services.plaid import get_client
+from balanceai_backend.source_transactions.source_transaction_db import (
+    delete_source_transaction_by_plaid_id,
+    upsert_source_transaction,
+)
+from balanceai_backend.utils.general_util import IdPrefix, generate_id
 
 
-def _to_raw_transaction(
+def _to_source_transaction(
     txn: PlaidTransaction, item_id: str, bank_account_id_by_plaid_account_id: dict[str, str]
-) -> RawTransaction:
+) -> SourceTransaction:
     """
-    Convert a Plaid Transaction into our RawTransaction.
+    Convert a Plaid Transaction into our SourceTransaction.
 
     Amount sign is flipped: Plaid's own convention (verified against the SDK's
     embedded docs, sourced from Plaid's API reference) is positive = money out
@@ -40,7 +41,7 @@ def _to_raw_transaction(
     (negative = debit, positive = credit).
 
     bank_account_id_by_plaid_account_id maps Plaid's account_id to our
-    BankAccount id. Both are stored on the RawTransaction.
+    BankAccount id. Both are stored on the SourceTransaction.
 
     Raises:
         ValueError: if the transaction's Plaid account has no BankAccount (it
@@ -69,7 +70,10 @@ def _to_raw_transaction(
     # what classification sends to the AI and to the web search.
     description = getattr(txn, "merchant_name", None) or txn.name
 
-    return RawTransaction(
+    return SourceTransaction(
+        # A new id each time; upsert_source_transaction keeps the stored one when
+        # this Plaid transaction already exists.
+        source_transaction_id=generate_id(IdPrefix.PLAID),
         plaid_transaction_id=txn.transaction_id,
         source="plaid",
         plaid_item_id=item_id,
@@ -77,7 +81,7 @@ def _to_raw_transaction(
         plaid_account_id=txn.account_id,
         posting_date=txn.date,
         description=description,
-        # Plaid: positive = money out. Ours: negative = money out (see RawTransaction.amount).
+        # Plaid: positive = money out. Ours: negative = money out (see SourceTransaction.amount).
         amount=-Decimal(str(txn.amount)),
         category=category,
         category_detailed=category_detailed,
@@ -93,7 +97,7 @@ def _apply_sync_page(
     conn: sqlite3.Connection,
 ) -> dict[str, int]:
     """
-    Apply one /transactions/sync page to raw_transactions: upsert added and
+    Apply one /transactions/sync page to source_transactions: upsert added and
     modified transactions, delete removed ones.
 
     Returns:
@@ -103,20 +107,20 @@ def _apply_sync_page(
     modified = getattr(response, "modified", None) or []
     removed = getattr(response, "removed", None) or []
 
-    # TODO: raw transactions are kept when a Plaid item is unlinked, so re-linking
+    # TODO: source transactions are kept when a Plaid item is unlinked, so re-linking
     # the same bank saves them again under new Plaid transaction ids.
     # See docs/BACKLOGS.md BL-4.
     for txn in added + modified:
-        upsert_raw_transaction(
-            _to_raw_transaction(txn, item_id, bank_account_id_by_plaid_account_id), conn=conn
+        upsert_source_transaction(
+            _to_source_transaction(txn, item_id, bank_account_id_by_plaid_account_id), conn=conn
         )
     for removed_txn in removed:
-        delete_raw_transaction_by_plaid_id(removed_txn.transaction_id, conn=conn)
+        delete_source_transaction_by_plaid_id(removed_txn.transaction_id, conn=conn)
 
     return {"added": len(added), "modified": len(modified), "removed": len(removed)}
 
 
-def sync_raw_transactions_from_plaid(
+def sync_source_transactions_from_plaid(
     item_id: str, conn: sqlite3.Connection = _default_conn
 ) -> dict:
     """
@@ -125,7 +129,7 @@ def sync_raw_transactions_from_plaid(
     Loops /transactions/sync while has_more, persisting the cursor after each
     page so an interruption mid-batch doesn't lose progress — not just once at
     the end. Added and modified transactions both go through
-    raw_transaction_db.upsert_raw_transaction (one call handles "new" and
+    source_transaction_db.upsert_source_transaction (one call handles "new" and
     "changed", and keeps, drops, or flags a changed transaction's
     classification); removed transactions are deleted.
 
@@ -181,11 +185,11 @@ def sync_raw_transactions_from_plaid(
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print(
-            "Usage: python -m balanceai_backend.raw_transactions.sync_raw_transactions_from_plaid <item_id>"
+            "Usage: python -m balanceai_backend.source_transactions.sync_source_transactions_from_plaid <item_id>"
         )
         raise SystemExit(2)
 
-    result = sync_raw_transactions_from_plaid(sys.argv[1])
+    result = sync_source_transactions_from_plaid(sys.argv[1])
     print(
         f"Synced: {result['added']} added, {result['modified']} modified, "
         f"{result['removed']} removed"

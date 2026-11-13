@@ -1,52 +1,94 @@
 import datetime
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from decimal import Decimal
-from hashlib import sha256
+
+from balanceai_backend.models.source_transaction import Classification
 
 
 @dataclass
 class Transaction:
-    id: str
+    """One real transaction (a purchase, income, a transfer side, a refund).
+    Each source's version of it (a source transaction: Plaid, receipt,
+    statement) points here; journal entries are booked per transaction. For now
+    each transaction has one source transaction; matching will group them
+    (docs/BACKEND_IMPLEMENTATION_DECISIONS.md #19).
+
+    The fields are merged from the source transactions (refresh_transaction);
+    for now, copied from the only one. A saved transaction always has its
+    account, date, amount and description: it's created and filled from its
+    first source transaction in the same database transaction.
+
+    transaction_date: when it happened (shown to the user).
+    posted_date: when the bank posted it; None without a bank source.
+    category: the source's category hint, not our classification.
+    classification: ours (counter account, category, counterparty, who set it,
+    needs review); None until classified. Set with update_transaction.
+    created_at / updated_at: set by the database when saved (UTC ISO 8601).
+    """
+
+    transaction_id: str
     account_id: str
-    posting_date: datetime.date
+    transaction_date: datetime.date
+    amount: Decimal
     description: str
-    amount: Decimal  # negative = debit, positive = credit
-    previous_balance: Decimal
-    new_balance: Decimal
+    posted_date: datetime.date | None = None
     category: str | None = None
-    transaction_date: datetime.date | None = None
+    card_last4: str | None = None
+    tax: Decimal | None = None
+    tip: Decimal | None = None
+    classification: Classification | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
     def to_dict(self) -> dict:
-        d = asdict(self)
-        d["posting_date"] = self.posting_date.isoformat()
-        d["transaction_date"] = self.transaction_date.isoformat() if self.transaction_date else None
-        d["amount"] = str(self.amount)
-        d["previous_balance"] = str(self.previous_balance)
-        d["new_balance"] = str(self.new_balance)
-        return d
+        return {
+            "transaction_id": self.transaction_id,
+            "account_id": self.account_id,
+            "transaction_date": self.transaction_date.isoformat(),
+            "posted_date": _iso(self.posted_date),
+            "amount": str(self.amount),
+            "description": self.description,
+            "category": self.category,
+            "card_last4": self.card_last4,
+            "tax": _str(self.tax),
+            "tip": _str(self.tip),
+            "classification": self.classification.to_dict() if self.classification else None,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Transaction":
-        txn_date_str = d.get("transaction_date")
         return cls(
-            id=d["id"],
+            transaction_id=d["transaction_id"],
             account_id=d["account_id"],
-            posting_date=datetime.date.fromisoformat(d["posting_date"]),
-            description=d["description"],
+            transaction_date=datetime.date.fromisoformat(d["transaction_date"]),
             amount=Decimal(d["amount"]),
-            previous_balance=Decimal(d["previous_balance"]),
-            new_balance=Decimal(d["new_balance"]),
+            description=d["description"],
+            posted_date=_date(d.get("posted_date")),
             category=d.get("category"),
-            transaction_date=datetime.date.fromisoformat(txn_date_str) if txn_date_str else None,
+            card_last4=d.get("card_last4"),
+            tax=_decimal(d.get("tax")),
+            tip=_decimal(d.get("tip")),
+            classification=(
+                Classification.from_dict(d["classification"]) if d.get("classification") else None
+            ),
+            created_at=d.get("created_at"),
+            updated_at=d.get("updated_at"),
         )
 
-    def __lt__(self, other: "Transaction") -> bool:
-        """Enable sorting by posting date."""
-        return self.posting_date < other.posting_date
 
-    @staticmethod
-    def generate_id(
-        account_id: str, txn_date: datetime.date, description: str, amount: Decimal
-    ) -> str:
-        raw = f"{account_id}|{txn_date.isoformat()}|{description}|{amount}"
-        return sha256(raw.encode()).hexdigest()[:16]
+def _iso(value: datetime.date | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _str(value: Decimal | None) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _date(value: str | None) -> datetime.date | None:
+    return datetime.date.fromisoformat(value) if value else None
+
+
+def _decimal(value: str | None) -> Decimal | None:
+    return Decimal(value) if value is not None else None

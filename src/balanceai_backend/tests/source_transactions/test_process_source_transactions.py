@@ -1,4 +1,4 @@
-"""Tests for classify_and_book_raw_transactions, with classification and booking mocked."""
+"""Tests for classify_and_book_transactions, with classification and booking mocked."""
 
 import sqlite3
 from unittest.mock import patch
@@ -11,9 +11,9 @@ from balanceai_backend.db.journal_db import save_journal
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.journal import Journal
 from balanceai_backend.models.plaid_item import PlaidItem
-from balanceai_backend.raw_transactions import process_raw_transactions as process_module
-from balanceai_backend.raw_transactions.process_raw_transactions import (
-    classify_and_book_raw_transactions,
+from balanceai_backend.source_transactions import process_source_transactions as process_module
+from balanceai_backend.source_transactions.process_source_transactions import (
+    classify_and_book_transactions,
 )
 
 CLASSIFIED = {"classified": 1, "unclassified": 0, "errors": []}
@@ -64,32 +64,32 @@ def calls():
     with (
         patch.object(
             process_module,
-            "classify_raw_transactions",
+            "classify_transactions",
             side_effect=lambda item_id, conn: log.append("classify") or CLASSIFIED,
         ),
         patch.object(
             process_module,
-            "book_raw_transactions",
+            "book_transactions",
             side_effect=lambda journal_id, conn: log.append(journal_id) or BOOKED,
         ),
     ):
         yield log
 
 
-class TestClassifyAndBookRawTransactions:
+class TestClassifyAndBookSourceTransactions:
     def test_classifies_then_books(self, db, calls):
-        result = classify_and_book_raw_transactions("ally", db)
+        result = classify_and_book_transactions("ally", db)
 
         assert calls == ["classify", "personal"]
         assert result == {"classification": CLASSIFIED, "booking": {"personal": BOOKED}}
 
     def test_books_every_journal_holding_the_banks_accounts(self, db, calls):
-        result = classify_and_book_raw_transactions("chase", db)
+        result = classify_and_book_transactions("chase", db)
 
         assert set(result["booking"]) == {"personal", "llc"}
 
     def test_no_bank_books_every_journal_with_accounts(self, db, calls):
-        result = classify_and_book_raw_transactions(conn=db)
+        result = classify_and_book_transactions(conn=db)
 
         assert set(result["booking"]) == {"personal", "llc"}
 
@@ -99,8 +99,8 @@ class TestClassifyAndBookRawTransactions:
                 raise sqlite3.OperationalError("database is locked")
             return BOOKED
 
-        with patch.object(process_module, "book_raw_transactions", side_effect=book):
-            result = classify_and_book_raw_transactions("chase", db)
+        with patch.object(process_module, "book_transactions", side_effect=book):
+            result = classify_and_book_transactions("chase", db)
 
         assert result["booking"] == {
             "personal": {"error": "database is locked"},

@@ -31,7 +31,8 @@ def create_schema(connection: sqlite3.Connection) -> None:
             category          TEXT,
             tax               REAL NOT NULL DEFAULT 0,
             counterparty      TEXT,
-            raw_transaction_id  TEXT,   -- raw_transactions.raw_transaction_id it was booked from
+            transaction_id      TEXT,   -- transactions.transaction_id it was booked from (NULL for
+                                        -- the legacy entry tools, BL-9)
             bank_account_id     TEXT,
             journal_entry_id    TEXT,
             created_at          TEXT NOT NULL,
@@ -43,7 +44,7 @@ def create_schema(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_lines_category         ON journal_lines(category);
         CREATE INDEX IF NOT EXISTS idx_lines_account          ON journal_lines(account);
         CREATE INDEX IF NOT EXISTS idx_lines_counterparty     ON journal_lines(counterparty);
-        CREATE INDEX IF NOT EXISTS idx_lines_raw_txn          ON journal_lines(raw_transaction_id);
+        CREATE INDEX IF NOT EXISTS idx_lines_transaction_id      ON journal_lines(transaction_id);
         CREATE INDEX IF NOT EXISTS idx_lines_journal_entry_id ON journal_lines(journal_entry_id);
 
         -- Which bank accounts' transactions belong in which journal. UNIQUE keeps
@@ -111,9 +112,28 @@ def create_schema(connection: sqlite3.Connection) -> None:
             WHERE plaid_item_id = OLD.item_id;
         END;
 
-        CREATE TABLE IF NOT EXISTS raw_transactions (
-            raw_transaction_id    TEXT PRIMARY KEY,   -- ours (UniqueIdGenerator), every source
+        -- One real transaction. Each source's source transaction for it points here
+        -- (for now one each; matching will group them).
+        CREATE TABLE IF NOT EXISTS transactions (
+            transaction_id  TEXT PRIMARY KEY,      -- 'txn-<uuid>'
+            account_id        TEXT REFERENCES bank_accounts(id) ON UPDATE CASCADE,
+            transaction_date  TEXT,   -- when it happened (shown to the user)
+            posted_date       TEXT,   -- when the bank posted it; NULL without a bank source
+            amount            TEXT,
+            description       TEXT,
+            category          TEXT,   -- the source's category hint
+            card_last4        TEXT,
+            tax               TEXT,
+            tip               TEXT,
+            classification    TEXT,   -- ours, as JSON; NULL until classified
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS source_transactions (
+            source_transaction_id    TEXT PRIMARY KEY,   -- ours, prefixed by source ('plaid-<uuid>')
             plaid_transaction_id  TEXT UNIQUE,        -- Plaid's transaction_id; NULL for other sources
+            transaction_id           TEXT NOT NULL REFERENCES transactions(transaction_id),
             source         TEXT NOT NULL,
             plaid_item_id  TEXT REFERENCES plaid_items(item_id) ON DELETE SET NULL,
             account_id     TEXT NOT NULL REFERENCES bank_accounts(id) ON UPDATE CASCADE,
@@ -125,7 +145,6 @@ def create_schema(connection: sqlite3.Connection) -> None:
             category_detailed   TEXT,
             category_confidence TEXT,
             pending        INTEGER NOT NULL DEFAULT 0,
-            classification TEXT,
             card_last4     TEXT,
             tax            TEXT,
             tip            TEXT,
@@ -133,29 +152,31 @@ def create_schema(connection: sqlite3.Connection) -> None:
             updated_at     TEXT NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_raw_transactions_plaid_item_id ON raw_transactions(plaid_item_id);
-        CREATE INDEX IF NOT EXISTS idx_raw_transactions_account_id    ON raw_transactions(account_id);
-        CREATE INDEX IF NOT EXISTS idx_raw_transactions_posting_date  ON raw_transactions(posting_date);
-        CREATE INDEX IF NOT EXISTS idx_raw_transactions_source        ON raw_transactions(source);
-        CREATE INDEX IF NOT EXISTS idx_raw_transactions_plaid_transaction_id
-            ON raw_transactions(plaid_transaction_id);
+        CREATE INDEX IF NOT EXISTS idx_source_transactions_plaid_item_id ON source_transactions(plaid_item_id);
+        CREATE INDEX IF NOT EXISTS idx_source_transactions_account_id    ON source_transactions(account_id);
+        CREATE INDEX IF NOT EXISTS idx_source_transactions_posting_date  ON source_transactions(posting_date);
+        CREATE INDEX IF NOT EXISTS idx_source_transactions_source        ON source_transactions(source);
+        CREATE INDEX IF NOT EXISTS idx_source_transactions_plaid_transaction_id
+            ON source_transactions(plaid_transaction_id);
+        CREATE INDEX IF NOT EXISTS idx_source_transactions_transaction_id ON source_transactions(transaction_id);
     """)
 
 
 def _check_schema_is_current(connection: sqlite3.Connection) -> None:
-    """Stop on a database from before BL-16 (raw_transactions keyed by Plaid's
-    id): it has to be deleted and re-synced, not migrated. Runs before
-    create_schema, whose new indexes would fail on the old table; a new
-    database (no raw_transactions yet) passes.
+    """Stop on a database from before source transactions and transactions
+    (it has a raw_transactions table): it has to be deleted and re-synced, not
+    migrated. Runs before create_schema; a new database passes.
 
     Raises:
-        RuntimeError: if raw_transactions has no raw_transaction_id column.
+        RuntimeError: if the database has the old raw_transactions table.
     """
-    columns = {r[1] for r in connection.execute("PRAGMA table_info(raw_transactions)")}
-    if columns and "raw_transaction_id" not in columns:
+    old = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'raw_transactions'"
+    ).fetchone()
+    if old:
         raise RuntimeError(
-            "The database predates BL-16 (raw transaction ids). Delete it and "
-            "re-sync (link_bank, sync_bank_transactions, create_journal)."
+            "The database predates source transactions. Delete it and re-sync "
+            "(link_bank, sync_bank_transactions, create_journal)."
         )
 
 

@@ -1,4 +1,4 @@
-"""Integration test for classify_raw_transactions against the real AI.
+"""Integration test for classify_transactions against the real AI.
 
 Known transactions, close to but not copies of the prompt's examples, so this
 checks the prompt's rules rather than its examples. Only the counter account
@@ -8,7 +8,7 @@ All descriptions differ and Plaid's confidence is HIGH, so this is one AI call
 and no web search.
 
 Run with:
-    pytest integ_tests/test_classify_raw_transactions.py -v
+    pytest integ_tests/test_classify_transactions.py -v
 
 Requires a configured Anthropic API key (via settings).
 """
@@ -24,14 +24,17 @@ from balanceai_backend.config import settings
 from balanceai_backend.dagger.aws import AWSClients
 from balanceai_backend.db.bank_account_db import upsert_bank_account
 from balanceai_backend.db.connection import create_schema
+from balanceai_backend.db.transaction_db import find_transactions
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.journal import JournalAccount
-from balanceai_backend.models.raw_transaction import RawTransaction
-from balanceai_backend.raw_transactions import classify_raw_transactions as classify_module
-from balanceai_backend.raw_transactions.classify_raw_transactions import classify_raw_transactions
-from balanceai_backend.raw_transactions.raw_transaction_db import (
-    find_raw_transactions,
-    upsert_raw_transaction,
+from balanceai_backend.models.source_transaction import SourceTransaction
+from balanceai_backend.source_transactions import classify_transactions as classify_module
+from balanceai_backend.source_transactions.classify_transactions import (
+    classify_transactions,
+)
+from balanceai_backend.source_transactions.source_transaction_db import (
+    find_source_transactions,
+    upsert_source_transaction,
 )
 
 CHECKING = "test_bank:checking:0000"
@@ -139,9 +142,9 @@ def classified() -> dict[str, JournalAccount]:
             conn=conn,
         )
     for txn_id, description, amount, account_id, category, _ in _CASES:
-        upsert_raw_transaction(
-            RawTransaction(
-                raw_transaction_id=txn_id,
+        upsert_source_transaction(
+            SourceTransaction(
+                source_transaction_id=txn_id,
                 source="plaid",
                 account_id=account_id,
                 posting_date=datetime.date(2026, 10, 1),
@@ -155,13 +158,16 @@ def classified() -> dict[str, JournalAccount]:
 
     # Confidence is HIGH, so no search should run; patched in case one does.
     with patch.object(classify_module.tavily_service, "search", return_value=None):
-        result = classify_raw_transactions(conn=conn)
+        result = classify_transactions(conn=conn)
 
     assert result["errors"] == []
+    classification_by_txn = {
+        t.transaction_id: t.classification for t in find_transactions(conn=conn)
+    }
     classified = {
-        t.id: t.classification.counter_account
-        for t in find_raw_transactions(conn=conn)
-        if t.classification is not None
+        s.source_transaction_id: classification_by_txn[s.transaction_id].counter_account
+        for s in find_source_transactions(conn=conn)
+        if classification_by_txn.get(s.transaction_id) is not None
     }
     conn.close()
     return classified

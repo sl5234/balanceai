@@ -1,5 +1,5 @@
 """
-Receipts become raw transactions, booked by the same rules as Plaid
+Receipts become source transactions, booked by the same rules as Plaid
 (docs/BACKEND_IMPLEMENTATION_DECISIONS.md #18). The tool reads the receipt,
 finds or checks the paying account, asks the user to confirm, then saves it
 here.
@@ -13,7 +13,6 @@ from pathlib import Path
 from balanceai_backend.db.bank_account_db import find_bank_accounts, find_cash_account_for_journal
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.db.journal_db import is_account_in_journal
-from balanceai_backend.models.raw_transaction import RawTransaction
 from balanceai_backend.models.receipt import (
     AccountMatch,
     PaymentMethod,
@@ -21,12 +20,13 @@ from balanceai_backend.models.receipt import (
     ReceiptExtraction,
     ReceiptKind,
 )
+from balanceai_backend.models.source_transaction import SourceTransaction
 from balanceai_backend.paths import RECEIPTS_DIR
-from balanceai_backend.raw_transactions.raw_transaction_db import (
+from balanceai_backend.source_transactions.source_transaction_db import (
     find_receipt_account_ids_for_card_last4,
-    upsert_raw_transaction,
+    upsert_source_transaction,
 )
-from balanceai_backend.utils.general_util import get_mime_type
+from balanceai_backend.utils.general_util import IdPrefix, generate_id, get_mime_type
 from balanceai_backend.utils.ocr_util import OcrUtil
 
 logger = logging.getLogger(__name__)
@@ -126,13 +126,14 @@ def check_receipt_account(
         raise ValueError(f"Bank account {account_id} isn't in journal {journal_id}.")
 
 
-def sync_raw_transactions_from_receipt(
+def sync_source_transactions_from_receipt(
     receipt: ReceiptExtraction, account_id: str, conn: sqlite3.Connection = _default_conn
-) -> RawTransaction:
-    """Save the receipt as a raw transaction (source="receipt"). Saving the same
+) -> SourceTransaction:
+    """Save the receipt as a source transaction (source="receipt"). Saving the same
     receipt again adds a second row (catching duplicates is part of BL-15)."""
     amount = -receipt.total if receipt.kind is ReceiptKind.PURCHASE else receipt.total
-    txn = RawTransaction(
+    txn = SourceTransaction(
+        source_transaction_id=generate_id(IdPrefix.RECEIPT),
         source="receipt",
         account_id=account_id,
         posting_date=receipt.date,
@@ -143,7 +144,7 @@ def sync_raw_transactions_from_receipt(
         tax=receipt.tax,
         tip=receipt.tip,
     )
-    upsert_raw_transaction(txn, conn=conn)
+    upsert_source_transaction(txn, conn=conn)
     return txn
 
 

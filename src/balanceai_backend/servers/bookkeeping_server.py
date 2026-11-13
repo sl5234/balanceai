@@ -62,15 +62,6 @@ from balanceai_backend.prompts.report_definition_prompt import (
     report_definition_system_prompt,
     report_definition_user_message,
 )
-from balanceai_backend.raw_transactions.book_raw_transactions import book_raw_transactions
-from balanceai_backend.raw_transactions.classify_raw_transactions import classify_raw_transactions
-from balanceai_backend.raw_transactions.sync_raw_transactions_from_receipt import (
-    check_receipt_account,
-    read_receipt,
-    resolve_receipt_path,
-    suggest_receipt_account,
-    sync_raw_transactions_from_receipt,
-)
 from balanceai_backend.reports.report_definition_db import (
     delete_report_definition as _delete_report_definition,
 )
@@ -83,6 +74,17 @@ from balanceai_backend.reports.report_definition_db import (
 from balanceai_backend.services import anthropic as anthropic_service
 from balanceai_backend.services.gemini import GeminiClient
 from balanceai_backend.services.gemini import converse as gemini_converse
+from balanceai_backend.source_transactions.book_transactions import book_transactions
+from balanceai_backend.source_transactions.classify_transactions import (
+    classify_transactions,
+)
+from balanceai_backend.source_transactions.sync_source_transactions_from_receipt import (
+    check_receipt_account,
+    read_receipt,
+    resolve_receipt_path,
+    suggest_receipt_account,
+    sync_source_transactions_from_receipt,
+)
 from balanceai_backend.utils.journal_line_util import date_range, entry_to_dict, group_into_entries
 
 logger = logging.getLogger(__name__)
@@ -194,7 +196,7 @@ def create_journal(
     journal.bank_account_ids.append(create_cash_account(journal.journal_id, journal.name, conn))
     return {
         **journal.to_dict(redact_lines=True),
-        "booking": book_raw_transactions(journal.journal_id, conn),
+        "booking": book_transactions(journal.journal_id, conn),
     }
 
 
@@ -251,7 +253,7 @@ def update_journal(
 
     return {
         **journal.to_dict(redact_lines=True),
-        "booking": book_raw_transactions(journal.journal_id, conn),
+        "booking": book_transactions(journal.journal_id, conn),
     }
 
 
@@ -345,10 +347,10 @@ async def upload_receipt(
     if consent.action != "accept":
         raise PermissionError("User declined to book the receipt.")
 
-    sync_raw_transactions_from_receipt(receipt, found.account_id, conn=conn)
-    classify_raw_transactions(conn=conn)
+    sync_source_transactions_from_receipt(receipt, found.account_id, conn=conn)
+    classify_transactions(conn=conn)
     if journal:
-        book_raw_transactions(journal.journal_id, conn)
+        book_transactions(journal.journal_id, conn)
     return {"booked": journal is not None, "journal_id": journal.journal_id if journal else None}
 
 
@@ -625,7 +627,7 @@ async def analyze_financial_question(
 
 # TODO(SBL-2, BL-9): the report tools (create_report_definition,
 # list_report_definitions, delete_report_definition, generate_report) aren't
-# integrated with the new flow (raw transactions, booking, journal scoping,
+# integrated with the new flow (source transactions, booking, journal scoping,
 # read-only SQL, consent). Skipped until we know we want to maintain them; an
 # agent can save a question and re-run it through analyze_financial_question.
 @mcp.tool()

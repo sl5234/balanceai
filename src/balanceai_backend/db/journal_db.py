@@ -20,7 +20,7 @@ def _build_line(r) -> JournalLine:
         tax=Decimal(str(r["tax"])),
         counterparty=r["counterparty"] or COUNTERPARTY_SELF,
         journal_entry_id=r["journal_entry_id"],
-        raw_transaction_id=r["raw_transaction_id"],
+        transaction_id=r["transaction_id"],
         bank_account_id=r["bank_account_id"],
         created_at=r["created_at"],
         updated_at=r["updated_at"],
@@ -114,7 +114,7 @@ def _insert_journal_lines(
     conn.executemany(
         "INSERT INTO journal_lines (journal_line_id, journal_id, date, account,"
         " description, debit, credit, category, tax, counterparty, journal_entry_id,"
-        " raw_transaction_id, bank_account_id, created_at, updated_at)"
+        " transaction_id, bank_account_id, created_at, updated_at)"
         " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             (
@@ -129,7 +129,7 @@ def _insert_journal_lines(
                 str(entry.tax),
                 entry.counterparty,
                 entry.journal_entry_id,
-                entry.raw_transaction_id,
+                entry.transaction_id,
                 entry.bank_account_id,
                 entry.created_at or now,
                 entry.updated_at or now,
@@ -139,16 +139,17 @@ def _insert_journal_lines(
     )
 
 
-def find_booked_raw_transactions(
+def find_booked_transactions(
     journal_id: str, conn: sqlite3.Connection = _default_conn
 ) -> dict[str, str]:
-    """The raw transactions booked in a journal, each mapped to its entry's journal_entry_id."""
+    """The transactions booked in a journal, each mapped to its entry's
+    journal_entry_id. An entry with two transactions is a matched transfer."""
     rows = conn.execute(
-        "SELECT DISTINCT raw_transaction_id, journal_entry_id FROM journal_lines"
-        " WHERE journal_id = ? AND raw_transaction_id IS NOT NULL",
+        "SELECT DISTINCT transaction_id, journal_entry_id FROM journal_lines"
+        " WHERE journal_id = ? AND transaction_id IS NOT NULL",
         (journal_id,),
     ).fetchall()
-    return {r["raw_transaction_id"]: r["journal_entry_id"] for r in rows}
+    return {r["transaction_id"]: r["journal_entry_id"] for r in rows}
 
 
 def add_journal_entry(
@@ -183,16 +184,16 @@ def delete_journal_entries(
         delete_journal_entry(journal_entry_id, conn)
 
 
-def delete_journal_entries_for_raw_transaction(
-    raw_transaction_id: str, conn: sqlite3.Connection = _default_conn
+def delete_journal_entries_for_transaction(
+    transaction_id: str, conn: sqlite3.Connection = _default_conn
 ) -> None:
-    """Delete every entry with a line from this raw transaction, all lines of
-    each, so a matched transfer's other side is left unbooked. Doesn't commit; call inside
-    the caller's transaction."""
+    """Delete every entry with a line from this transaction, all lines of each, so
+    a matched transfer's other side is left unbooked. Doesn't commit; call
+    inside the caller's transaction."""
     conn.execute(
         "DELETE FROM journal_lines WHERE journal_entry_id IN"
-        " (SELECT journal_entry_id FROM journal_lines WHERE raw_transaction_id = ?)",
-        (raw_transaction_id,),
+        " (SELECT journal_entry_id FROM journal_lines WHERE transaction_id = ?)",
+        (transaction_id,),
     )
 
 

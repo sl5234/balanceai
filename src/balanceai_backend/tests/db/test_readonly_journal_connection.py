@@ -23,7 +23,7 @@ def test_allows_ctes_and_subqueries():
     [
         "SELECT access_token FROM plaid_items",
         "SELECT (SELECT access_token FROM plaid_items)",
-        "SELECT description FROM raw_transactions",
+        "SELECT description FROM source_transactions",
         "SELECT * FROM sqlite_master",
         "DELETE FROM journal_lines",
         "UPDATE journals SET name = 'x'",

@@ -142,7 +142,7 @@ def save_linked_plaid_item(item: PlaidItem, conn: sqlite3.Connection = _default_
     Save a newly linked Plaid item, then create its BankAccounts.
 
     The item is saved first, so if creating the accounts fails the link isn't
-    lost — the next sync_raw_transactions_from_plaid retries it.
+    lost — the next sync_source_transactions_from_plaid retries it.
 
     Returns:
         sync_bank_accounts_from_plaid's {"saved", "skipped"} result.
