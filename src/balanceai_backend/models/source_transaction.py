@@ -1,9 +1,16 @@
 import datetime
 from dataclasses import asdict, dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import Enum, StrEnum
 
 from balanceai_backend.models.journal import JournalAccount
+
+
+class MatchedBy(StrEnum):
+    """How a source transaction came to be merged into another transaction."""
+
+    RULE = "rule"  # matching merged it (e.g. a receipt and its Plaid charge)
+    USER = "user"  # the user said they're the same
 
 
 class ClassifiedBy(str, Enum):
@@ -103,8 +110,12 @@ class SourceTransaction:
 
     Our classification isn't here: it's the transaction's (Transaction.classification).
 
-    transaction_id: the transaction this belongs to; set when first saved, then
-    never changes.
+    transaction_id: the transaction this belongs to; set when first saved, and
+    changed only when its transaction is merged into another.
+
+    matched_to_transaction_by / matched_to_transaction_at: how and when this
+    was merged into another transaction; None if it's still in the one it
+    started. Set by merge_transactions; a re-sync from the source leaves them.
 
     created_at / updated_at: set by the database when saved (UTC ISO 8601);
     ignored when saving.
@@ -113,13 +124,16 @@ class SourceTransaction:
     source_transaction_id: str
     source: str  # "plaid" | "receipt" | "bank_statement"
     account_id: str
-    posting_date: datetime.date
     description: str
     # Required of every source (Plaid, statements, receipts): negative = money out of
     # this account, positive = money in. On a credit card, a charge is negative and a
     # payment or refund is positive. Plaid's sign is the opposite, so sync flips it;
     # a statement or receipt parser must convert to this before storing.
     amount: Decimal
+    # When it was paid (a receipt's date, Plaid's authorized_date) and when the
+    # bank posted it (Plaid's date; None for a receipt). At least one is set.
+    transaction_date: datetime.date | None = None
+    posting_date: datetime.date | None = None
     plaid_item_id: str | None = None
     plaid_account_id: str | None = None
     category: str | None = None
@@ -131,12 +145,18 @@ class SourceTransaction:
     tip: Decimal | None = None
     plaid_transaction_id: str | None = None
     transaction_id: str | None = None
+    matched_to_transaction_by: MatchedBy | None = None
+    matched_to_transaction_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
-        d["posting_date"] = self.posting_date.isoformat()
+        d["matched_to_transaction_by"] = (
+            self.matched_to_transaction_by.value if self.matched_to_transaction_by else None
+        )
+        d["transaction_date"] = _iso(self.transaction_date)
+        d["posting_date"] = _iso(self.posting_date)
         d["amount"] = str(self.amount)
         d["tax"] = str(self.tax) if self.tax is not None else None
         d["tip"] = str(self.tip) if self.tip is not None else None
@@ -148,11 +168,18 @@ class SourceTransaction:
             source_transaction_id=d["source_transaction_id"],
             plaid_transaction_id=d.get("plaid_transaction_id"),
             transaction_id=d.get("transaction_id"),
+            matched_to_transaction_by=(
+                MatchedBy(d["matched_to_transaction_by"])
+                if d.get("matched_to_transaction_by")
+                else None
+            ),
+            matched_to_transaction_at=d.get("matched_to_transaction_at"),
             source=d["source"],
             plaid_item_id=d.get("plaid_item_id"),
             plaid_account_id=d.get("plaid_account_id"),
             account_id=d["account_id"],
-            posting_date=datetime.date.fromisoformat(d["posting_date"]),
+            transaction_date=_date(d.get("transaction_date")),
+            posting_date=_date(d.get("posting_date")),
             description=d["description"],
             amount=Decimal(d["amount"]),
             category=d.get("category"),
@@ -165,3 +192,11 @@ class SourceTransaction:
             created_at=d.get("created_at"),
             updated_at=d.get("updated_at"),
         )
+
+
+def _iso(value: datetime.date | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _date(value: str | None) -> datetime.date | None:
+    return datetime.date.fromisoformat(value) if value else None

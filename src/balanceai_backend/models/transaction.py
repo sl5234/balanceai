@@ -1,5 +1,5 @@
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 from balanceai_backend.models.source_transaction import Classification
@@ -13,13 +13,18 @@ class Transaction:
     each transaction has one source transaction; matching will group them
     (docs/BACKEND_IMPLEMENTATION_DECISIONS.md #19).
 
-    The fields are merged from the source transactions (refresh_transaction);
-    for now, copied from the only one. A saved transaction always has its
-    account, date, amount and description: it's created and filled from its
-    first source transaction in the same database transaction.
+    The fields are merged from the source transactions (refresh_transaction):
+    for each, the first source with a value, preferring the bank's record
+    (Plaid, then a statement, then a receipt); the transaction date prefers the
+    receipt. field_sources says which source each field came from. A saved
+    transaction always has its account, amount and description, and at least
+    one date: it's created and filled from its first source transaction in the
+    same database transaction.
 
-    transaction_date: when it happened (shown to the user).
+    transaction_date: when it was paid (a receipt's date, else Plaid's
+    authorized_date); None if no source knows.
     posted_date: when the bank posted it; None without a bank source.
+    booking_date: the date it's booked and reported under.
     category: the source's category hint, not our classification.
     classification: ours (counter account, category, counterparty, who set it,
     needs review); None until classified. Set with update_transaction.
@@ -28,23 +33,31 @@ class Transaction:
 
     transaction_id: str
     account_id: str
-    transaction_date: datetime.date
     amount: Decimal
     description: str
+    transaction_date: datetime.date | None = None
     posted_date: datetime.date | None = None
     category: str | None = None
     card_last4: str | None = None
     tax: Decimal | None = None
     tip: Decimal | None = None
     classification: Classification | None = None
+    field_sources: dict[str, str] = field(default_factory=dict)
     created_at: str | None = None
     updated_at: str | None = None
+
+    @property
+    def booking_date(self) -> datetime.date:
+        """When it was paid, else when the bank posted it."""
+        date = self.transaction_date or self.posted_date
+        assert date is not None, f"Transaction {self.transaction_id} has no date"
+        return date
 
     def to_dict(self) -> dict:
         return {
             "transaction_id": self.transaction_id,
             "account_id": self.account_id,
-            "transaction_date": self.transaction_date.isoformat(),
+            "transaction_date": _iso(self.transaction_date),
             "posted_date": _iso(self.posted_date),
             "amount": str(self.amount),
             "description": self.description,
@@ -53,6 +66,7 @@ class Transaction:
             "tax": _str(self.tax),
             "tip": _str(self.tip),
             "classification": self.classification.to_dict() if self.classification else None,
+            "field_sources": dict(self.field_sources),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -62,7 +76,7 @@ class Transaction:
         return cls(
             transaction_id=d["transaction_id"],
             account_id=d["account_id"],
-            transaction_date=datetime.date.fromisoformat(d["transaction_date"]),
+            transaction_date=_date(d.get("transaction_date")),
             amount=Decimal(d["amount"]),
             description=d["description"],
             posted_date=_date(d.get("posted_date")),
@@ -73,6 +87,7 @@ class Transaction:
             classification=(
                 Classification.from_dict(d["classification"]) if d.get("classification") else None
             ),
+            field_sources=dict(d.get("field_sources") or {}),
             created_at=d.get("created_at"),
             updated_at=d.get("updated_at"),
         )

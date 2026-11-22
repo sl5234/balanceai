@@ -22,7 +22,7 @@ def _is_candidate(
     return (
         out_side.account_id != in_side.account_id
         and out_side.amount == -in_side.amount
-        and abs((out_side.transaction_date - in_side.transaction_date).days) <= _MAX_DAYS_APART
+        and abs((out_side.booking_date - in_side.booking_date).days) <= _MAX_DAYS_APART
         and out_side.classification.counter_account
         == bank_side_account(account_types[in_side.account_id])
         and in_side.classification.counter_account
@@ -50,7 +50,7 @@ def find_matched_transfers(
     outs = [t for t in usable if t.amount < 0]
     ins = [t for t in usable if t.amount > 0]
     candidates = [
-        (abs((o.transaction_date - i.transaction_date).days), o, i)
+        (abs((o.booking_date - i.booking_date).days), o, i)
         for o in outs
         for i in ins
         if _is_candidate(o, i, account_types)
@@ -76,7 +76,7 @@ def find_matched_transfers(
         candidates,
         key=lambda c: (
             c[0],
-            c[1].transaction_date,
+            c[1].booking_date,
             c[1].transaction_id,
             c[2].transaction_id,
         ),

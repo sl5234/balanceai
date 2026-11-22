@@ -14,6 +14,7 @@ from balanceai_backend.db.transaction_db import (
 from balanceai_backend.models.source_transaction import (
     Classification,
     ClassifiedBy,
+    MatchedBy,
     SourceTransaction,
 )
 from balanceai_backend.utils.general_util import utc_now_iso
@@ -24,11 +25,18 @@ def _build_source_transaction(row) -> SourceTransaction:
         source_transaction_id=row["source_transaction_id"],
         plaid_transaction_id=row["plaid_transaction_id"],
         transaction_id=row["transaction_id"],
+        matched_to_transaction_by=(
+            MatchedBy(row["matched_to_transaction_by"])
+            if row["matched_to_transaction_by"]
+            else None
+        ),
+        matched_to_transaction_at=row["matched_to_transaction_at"],
         source=row["source"],
         plaid_item_id=row["plaid_item_id"],
         plaid_account_id=row["plaid_account_id"],
         account_id=row["account_id"],
-        posting_date=datetime.date.fromisoformat(row["posting_date"]),
+        transaction_date=_date(row["transaction_date"]),
+        posting_date=_date(row["posting_date"]),
         description=row["description"],
         amount=Decimal(row["amount"]),
         category=row["category"],
@@ -74,7 +82,7 @@ def find_source_transactions(
     if transaction_id is not None:
         query += " AND transaction_id = ?"
         params.append(transaction_id)
-    query += " ORDER BY posting_date"
+    query += " ORDER BY COALESCE(transaction_date, posting_date)"
     rows = conn.execute(query, params).fetchall()
     return [_build_source_transaction(row) for row in rows]
 
@@ -160,25 +168,34 @@ def upsert_source_transaction(
         before = _classification_of(existing[0].transaction_id, conn) if existing else None
         classification = _classification_to_keep(existing[0], before, txn) if existing else None
         if existing and (
+            existing[0].transaction_date,
             existing[0].posting_date,
             existing[0].amount,
             existing[0].description,
             existing[0].account_id,
-        ) != (txn.posting_date, txn.amount, txn.description, txn.account_id):
+        ) != (
+            txn.transaction_date,
+            txn.posting_date,
+            txn.amount,
+            txn.description,
+            txn.account_id,
+        ):
             assert txn.transaction_id is not None  # copied from the stored row above
             delete_journal_entries_for_transaction(txn.transaction_id, conn)
         now = utc_now_iso()
         conn.execute(
             "INSERT INTO source_transactions"
             " (source_transaction_id, plaid_transaction_id, transaction_id, source, plaid_item_id,"
-            "  account_id, plaid_account_id, posting_date, description, amount, category,"
+            "  account_id, plaid_account_id, transaction_date, posting_date, description,"
+            "  amount, category,"
             "  category_detailed, category_confidence, pending, card_last4,"
             "  tax, tip, created_at, updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(source_transaction_id) DO UPDATE SET"
             "  plaid_transaction_id=excluded.plaid_transaction_id,"
             "  source=excluded.source, plaid_item_id=excluded.plaid_item_id,"
             "  account_id=excluded.account_id, plaid_account_id=excluded.plaid_account_id,"
+            "  transaction_date=excluded.transaction_date,"
             "  posting_date=excluded.posting_date, description=excluded.description,"
             "  amount=excluded.amount, category=excluded.category,"
             "  category_detailed=excluded.category_detailed,"
@@ -193,7 +210,8 @@ def upsert_source_transaction(
                 txn.plaid_item_id,
                 txn.account_id,
                 txn.plaid_account_id,
-                txn.posting_date.isoformat(),
+                txn.transaction_date.isoformat() if txn.transaction_date else None,
+                txn.posting_date.isoformat() if txn.posting_date else None,
                 txn.description,
                 str(txn.amount),
                 txn.category,
@@ -260,3 +278,28 @@ def delete_source_transaction_by_plaid_id(
     found = find_source_transactions(plaid_transaction_id=plaid_transaction_id, conn=conn)
     if found:
         delete_source_transaction(found[0].source_transaction_id, conn=conn)
+
+
+def replace_pending_plaid_transaction(
+    pending_plaid_transaction_id: str,
+    posted_plaid_transaction_id: str,
+    conn: sqlite3.Connection = _default_conn,
+) -> None:
+    """When a pending Plaid transaction posts, Plaid sends the posted one under
+    a new id (its pending_transaction_id names the pending one) and removes the
+    pending one. Give the pending row the posted id, so saving the posted one
+    updates that row and it keeps its transaction (with any receipt merged into
+    it and its classification). No-op if the pending row isn't here or the
+    posted one already is."""
+    if find_source_transactions(plaid_transaction_id=posted_plaid_transaction_id, conn=conn):
+        return
+    with conn:
+        conn.execute(
+            "UPDATE source_transactions SET plaid_transaction_id = ?, updated_at = ?"
+            " WHERE plaid_transaction_id = ?",
+            (posted_plaid_transaction_id, utc_now_iso(), pending_plaid_transaction_id),
+        )
+
+
+def _date(value: str | None) -> datetime.date | None:
+    return datetime.date.fromisoformat(value) if value else None

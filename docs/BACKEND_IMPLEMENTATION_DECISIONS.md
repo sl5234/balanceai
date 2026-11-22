@@ -306,3 +306,65 @@ prompt. Noticed a week later: corrected on the transaction ("amount: set by you"
 **Grounded facts:**
 - [verified] Keeping source transactions as the source wrote them means
   re-syncs never conflict with user edits.
+
+## #21 — 2026-11-14 — Which source wins each field of a transaction
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #18, #19
+
+**Short description:** A transaction's fields come from its source
+transactions: for each field, the first source with a value, in the order
+Plaid, bank statement, receipt — the bank's record first. The transaction date
+(when it was paid) prefers the receipt, then Plaid's authorized_date.
+Receipt-only fields (card, tax, tip) come from the receipt. Entries are booked
+by the transaction date, else the posted date.
+**Short example:** A $40.00 receipt (Nov 8) and its $48.00 card charge
+(authorized Nov 8, posted Nov 9): amount $48.00 from Plaid, date Nov 8 from the
+receipt, tax from the receipt.
+
+**Grounded facts:**
+- [verified] The bank's amount is what actually left the account (tips,
+  surcharges, cash back make it differ from the receipt).
+- [verified] Booking by when it was paid puts an Oct 31 dinner in October.
+
+## #22 — 2026-11-14 — Matched transactions are merged after saving
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #19, #21
+
+**Short description:** Every new source transaction starts its own
+transaction; matching then merges two existing transactions (the older is
+kept, the newer deleted). One mechanism covers matching at upload or sync,
+pending → posted, re-links, and any later re-match or correction. Rejected:
+saving a new source straight into the matching transaction — it only works
+when a source arrives, so merging existing transactions would be a second
+path anyway.
+**Short example:** A receipt is saved as its own transaction; matching finds
+its bank transaction and merges the receipt into it.
+
+**Grounded facts:**
+- [verified] Merging deletes the newer transaction's id, so rejected matches
+  are stored as pairs of source transactions, whose ids never change.
+
+## #23 — 2026-11-22 — Pending → posted updates the row in place, not a merge
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #22 (narrows it)
+
+**Short description:** When Plaid posts a pending transaction, the pending
+source transaction takes the posted Plaid id and is updated in place. It isn't
+saved separately and then merged.
+**Short example:** A pending $12.50 Blue Bottle charge posts as $14.00 with a
+tip; the same row now shows $14.00.
+
+**Grounded facts:**
+- [verified] A merge would hold two Plaid sources for one transaction, which
+  the per-field merge (#21) doesn't expect.
+- [verified] Plaid gives the posted transaction a `pending_transaction_id`
+  pointing at the pending one.

@@ -7,16 +7,22 @@ whether sourced from uploaded statement PDFs or synced from Plaid.
 
 import json
 import logging
-import webbrowser
 from datetime import date
 from pathlib import Path
 
+import plaid
 from appdevcommons.hash_generator import HashGenerator
 from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
 from mcp.server.fastmcp import Context, FastMCP
 
 import balanceai_backend.parsers.chase  # noqa: F401 - register parser
-from balanceai_backend.bank_link.link import complete_link, create_hosted_link
+from balanceai_backend.bank_link.link import run_plaid_link_flow
+from balanceai_backend.bank_link.linked_banks import (
+    find_linked_bank,
+    handle_already_linked_bank,
+    resolve_duplicate_link,
+    update_link,
+)
 from balanceai_backend.bank_link.plaid_item_db import find_plaid_items as db_find_plaid_items
 from balanceai_backend.config import settings
 from balanceai_backend.constants import DEFAULT_CATEGORIES
@@ -27,6 +33,7 @@ from balanceai_backend.models import Account, AccountType, Bank, Category, Legac
 from balanceai_backend.models.consent import ShareTransactionsConsent
 from balanceai_backend.parsers import get_parser
 from balanceai_backend.prompts.categorizer import build_categorization_prompt
+from balanceai_backend.services.plaid import plaid_error_code
 from balanceai_backend.source_transactions.process_source_transactions import (
     classify_and_book_transactions,
 )
@@ -78,6 +85,9 @@ mcp = FastMCP(
     - link_bank opens a browser window and blocks for up to 5 minutes while the user
       logs into their bank on Plaid's hosted page — tell the user to check their
       browser after calling it. The Plaid access token is never returned by any tool.
+    - Never link a bank that's already linked: pass the bank's name to link_bank,
+      which checks. To get new transactions use sync_bank_transactions; to log in
+      again or add/remove accounts use update_bank_link.
     - get_bank_transactions asks the user to approve sharing transaction data before
       returning it. If the user declines, do not retry unless they ask you to.
     - After sync_bank_transactions, check whether the synced bank's accounts are in a
@@ -346,38 +356,105 @@ def categorize_transaction(account: dict, transaction: dict, category: str | Non
 
 
 @mcp.tool()
-def link_bank() -> dict:
+def link_bank(bank_name: str | None = None) -> dict:
     """
-    Connect a new bank account via Plaid Hosted Link.
+    Connect a bank via Plaid Hosted Link.
+
+    Pass bank_name whenever the user names the bank (e.g. "Acme Bank"). If that
+    bank is already linked, it isn't linked again:
+    - its login needs fixing: opens Plaid to log in again on the same
+      connection (as update_bank_link); the result has "updated": True.
+    - otherwise nothing opens; the result has "already_linked": True. With no
+      error_code, ask the user what they want: sync new transactions
+      (sync_bank_transactions), add or remove accounts (update_bank_link with
+      add_accounts=True), or log in again (update_bank_link). With an
+      error_code, the bank has a problem logging in again won't fix (e.g. it's
+      down): tell the user to try again later.
+    To connect a different login at a bank that's already linked (e.g. a
+    joint account under someone else's login), call it without bank_name.
 
     Opens a Plaid-hosted webpage in the browser where the user logs into their
     bank — the MCP client should tell the user to check their browser and log
     in. Blocks for up to 5 minutes while polling for completion. The resulting
     access token is written straight to local storage and never returned here.
 
+    Args:
+        bank_name: The bank the user named, if any.
+
     Returns:
         dict with item_id, institution_name, and bank_accounts: {"saved": [bank
         account ids], "skipped": [{"plaid_account_id", "display_name", "reason"}]} —
         accounts that couldn't be added (unsupported type, no last 4 digits, or an
-        id clash) are listed under skipped.
+        id clash) are listed under skipped. Plus "updated": True if an already
+        linked bank's login was fixed. Or, if nothing was opened:
+        {"already_linked": True, "item_id", "institution_name", "error_code"}.
+        Or, if the new link duplicated a bank that's already linked, it isn't
+        kept: {"duplicate_removed": True, "item_id", "institution_name",
+        "message"}. Pass the message on; with "login_required": True, offer
+        to log in again with update_bank_link.
 
     Raises:
         LinkExitedError: if the user exits Hosted Link, or Plaid reports an error.
         TimeoutError: if the user doesn't complete the connection within 5 minutes.
     """
-    link_token, hosted_link_url = create_hosted_link()
-    try:
-        webbrowser.open(hosted_link_url)
-    except webbrowser.Error:
-        logger.warning("Could not open a browser automatically for %s", hosted_link_url)
+    # TODO: plaid.ApiException from here reaches the user as is; raise a plain,
+    # non-technical error instead (see sync_bank_transactions).
+    linked = find_linked_bank(bank_name) if bank_name else None
+    if linked is not None:
+        response = handle_already_linked_bank(linked)
+        if response is not None:
+            return response
 
-    item = complete_link(link_token)
+    item = run_plaid_link_flow()
+    duplicate = resolve_duplicate_link(item)
+    if duplicate is not None:
+        return duplicate
     bank_accounts = save_linked_plaid_item(item)
     return {
         "item_id": item.item_id,
         "institution_name": item.institution_name,
         "bank_accounts": bank_accounts,
     }
+
+
+@mcp.tool()
+def update_bank_link(item_id: str, add_accounts: bool = False) -> dict:
+    """
+    Fix or change a bank that's already linked, instead of linking it again
+    (a new link would create a second connection for the same accounts).
+    Opens a Plaid page in the browser like link_bank; tell the user to check
+    their browser.
+
+    Use it when:
+    - A sync says the bank needs the user to log in again (expired login,
+      changed password, or access revoked at the bank): add_accounts=False.
+      This also renews the bank's consent when it's close to expiring.
+    - The user wants to add accounts (e.g. one opened since, or one not
+      picked when linking) or stop syncing some: add_accounts=True, to show
+      the account picker. Some banks show the picker either way.
+
+    The connection stays the same, so syncing continues where it left off,
+    with nothing synced twice. Afterwards, ask the user whether to sync now
+    (sync_bank_transactions); added accounts' transactions come in then.
+
+    Args:
+        item_id: The linked bank (see list_linked_banks).
+        add_accounts: Show the account picker.
+
+    Returns:
+        dict with item_id, institution_name, and bank_accounts {"saved",
+        "skipped"}: the accounts after the update.
+
+    Raises:
+        ValueError: if no bank with that item_id is linked.
+        LinkExitedError: if the user exits, or Plaid reports an error.
+        TimeoutError: if the user doesn't finish within 5 minutes.
+    """
+    items = db_find_plaid_items(item_id=item_id)
+    if not items:
+        raise ValueError("That bank isn't linked. See list_linked_banks.")
+    # TODO: plain error for plaid.ApiException (see sync_bank_transactions).
+    return update_link(items[0], add_accounts=add_accounts)
 
 
 @mcp.tool()
@@ -431,7 +508,8 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
     Returns:
         dict with transaction counts {"added", "modified", "removed"} plus
         "bank_accounts": {"saved", "skipped"} — the bank accounts created/updated
-        from the item first — "classification": {"classified",
+        from the item first — "matched" (receipts merged with their bank
+        transaction), "classification": {"classified",
         "unclassified", "errors"}, and "booking": {journal_id: {"booked",
         "transfers_paired"} or {"error"}}. Classification and booking problems are
         reported there rather than raised; the pulled transactions are saved
@@ -448,7 +526,14 @@ def sync_bank_transactions(item_id: str | None = None) -> dict:
         if len(items) > 1:
             raise ValueError("Multiple banks are linked — specify item_id (see list_linked_banks).")
         item_id = items[0].item_id
-    result = sync_source_transactions_from_plaid(item_id)
+    try:
+        result = sync_source_transactions_from_plaid(item_id)
+    except plaid.ApiException as e:
+        if plaid_error_code(e) == "ITEM_LOGIN_REQUIRED":
+            raise ValueError("Your bank needs you to log in again before it can sync.") from e
+        # TODO: raise a plain, non-technical error instead of Plaid's (log only its
+        # error_code). Same for link_bank and update_bank_link.
+        raise
     # TODO: classifying and booking here makes a first sync with a lot of history one long
     # tool call. Move it to event-driven syncing or a workflow engine.
     # See docs/BACKLOGS.md BL-7.
@@ -484,7 +569,7 @@ async def get_bank_transactions(
     if not transactions:
         return []
 
-    dates = [t.posting_date for t in transactions]
+    dates = [d for t in transactions if (d := t.posting_date or t.transaction_date)]
     result = await ctx.elicit(
         message=(
             f"Share {len(transactions)} bank transactions "

@@ -1,9 +1,9 @@
 import asyncio
 import datetime
-import webbrowser
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import plaid
 import pytest
 from balanceai_backend.bank_link.link import LinkExitedError
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
@@ -16,6 +16,7 @@ from balanceai_backend.servers.link_bank_server import (
     list_bank_accounts,
     list_linked_banks,
     sync_bank_transactions,
+    update_bank_link,
 )
 from mcp.server.elicitation import (
     AcceptedElicitation,
@@ -23,9 +24,19 @@ from mcp.server.elicitation import (
     DeclinedElicitation,
 )
 
+_SERVER = "balanceai_backend.servers.link_bank_server"
+
+
+@pytest.fixture(autouse=True)
+def no_duplicate_link():
+    """link_bank's check after Link calls Plaid; by default it finds no
+    duplicate. Tests that need one patch it themselves."""
+    with patch(f"{_SERVER}.resolve_duplicate_link", return_value=None) as mock:
+        yield mock
+
 
 class TestLinkBank:
-    def test_opens_browser_and_returns_linked_item_summary(self):
+    def test_runs_the_link_flow_and_returns_linked_item_summary(self):
         item = PlaidItem(
             item_id="item-1",
             access_token="access-sandbox-should-never-appear",
@@ -42,79 +53,100 @@ class TestLinkBank:
             ],
         }
         with (
-            patch(
-                "balanceai_backend.servers.link_bank_server.create_hosted_link",
-                return_value=("link-token-1", "https://plaid.com/hosted/abc"),
-            ),
-            patch(
-                "balanceai_backend.servers.link_bank_server.complete_link", return_value=item
-            ) as mock_complete,
-            patch(
-                "balanceai_backend.servers.link_bank_server.save_linked_plaid_item",
-                return_value=bank_accounts,
-            ) as mock_save,
-            patch("balanceai_backend.servers.link_bank_server.webbrowser.open") as mock_open,
+            patch(f"{_SERVER}.run_plaid_link_flow", return_value=item) as mock_flow,
+            patch(f"{_SERVER}.save_linked_plaid_item", return_value=bank_accounts) as mock_save,
         ):
             result = link_bank()
 
-        mock_open.assert_called_once_with("https://plaid.com/hosted/abc")
-        mock_complete.assert_called_once_with("link-token-1")
+        mock_flow.assert_called_once_with()
         mock_save.assert_called_once_with(item)
         assert result == {
             "item_id": "item-1",
             "institution_name": "Tartan Bank",
             "bank_accounts": bank_accounts,
         }
-        assert "access_token" not in result
         assert "access-sandbox-should-never-appear" not in str(result)
 
-    def test_completes_link_even_when_browser_cannot_open(self):
-        item = PlaidItem(item_id="item-1", access_token="a")
+    @pytest.mark.parametrize("error", [LinkExitedError("exited"), TimeoutError("timed out")])
+    def test_propagates_link_errors_and_saves_nothing(self, error):
         with (
-            patch(
-                "balanceai_backend.servers.link_bank_server.create_hosted_link",
-                return_value=("link-token-1", "https://plaid.com/hosted/abc"),
-            ),
-            patch("balanceai_backend.servers.link_bank_server.complete_link", return_value=item),
-            patch("balanceai_backend.servers.link_bank_server.save_linked_plaid_item"),
-            patch(
-                "balanceai_backend.servers.link_bank_server.webbrowser.open",
-                side_effect=webbrowser.Error("no browser available"),
-            ),
-        ):
-            result = link_bank()
-
-        assert result["item_id"] == "item-1"
-
-    def test_propagates_link_exited_error(self):
-        with (
-            patch(
-                "balanceai_backend.servers.link_bank_server.create_hosted_link",
-                return_value=("link-token-1", "https://plaid.com/hosted/abc"),
-            ),
-            patch(
-                "balanceai_backend.servers.link_bank_server.complete_link",
-                side_effect=LinkExitedError("user exited Hosted Link"),
-            ),
-            patch("balanceai_backend.servers.link_bank_server.webbrowser.open"),
-            pytest.raises(LinkExitedError),
+            patch(f"{_SERVER}.run_plaid_link_flow", side_effect=error),
+            patch(f"{_SERVER}.save_linked_plaid_item") as mock_save,
+            pytest.raises(type(error)),
         ):
             link_bank()
+        mock_save.assert_not_called()
 
-    def test_propagates_timeout_error(self):
+
+class TestUpdateBankLink:
+    def test_raises_when_the_bank_isnt_linked(self):
         with (
-            patch(
-                "balanceai_backend.servers.link_bank_server.create_hosted_link",
-                return_value=("link-token-1", "https://plaid.com/hosted/abc"),
-            ),
-            patch(
-                "balanceai_backend.servers.link_bank_server.complete_link",
-                side_effect=TimeoutError("timed out"),
-            ),
-            patch("balanceai_backend.servers.link_bank_server.webbrowser.open"),
-            pytest.raises(TimeoutError),
+            patch(f"{_SERVER}.db_find_plaid_items", return_value=[]),
+            patch(f"{_SERVER}.update_link") as mock_update,
+            pytest.raises(ValueError, match="isn't linked"),
+        ):
+            update_bank_link("item-missing")
+        mock_update.assert_not_called()
+
+    @pytest.mark.parametrize("add_accounts", [False, True])
+    def test_updates_the_stored_item(self, add_accounts):
+        item = PlaidItem(item_id="item-1", access_token="a", institution_name="Tartan Bank")
+        updated = {"item_id": "item-1", "institution_name": "Tartan Bank", "bank_accounts": {}}
+        with (
+            patch(f"{_SERVER}.db_find_plaid_items", return_value=[item]),
+            patch(f"{_SERVER}.update_link", return_value=updated) as mock_update,
+        ):
+            assert update_bank_link("item-1", add_accounts=add_accounts) == updated
+        mock_update.assert_called_once_with(item, add_accounts=add_accounts)
+
+
+class TestLinkBankWithBankName:
+    def test_an_already_linked_bank_returns_its_handling(self):
+        linked = PlaidItem(item_id="item-1", access_token="a", institution_name="Tartan Bank")
+        response = {"already_linked": True, "item_id": "item-1"}
+        with (
+            patch(f"{_SERVER}.find_linked_bank", return_value=linked) as mock_find,
+            patch(f"{_SERVER}.handle_already_linked_bank", return_value=response),
+            patch(f"{_SERVER}.run_plaid_link_flow") as mock_flow,
+        ):
+            assert link_bank("tartan") == response
+        mock_find.assert_called_once_with("tartan")
+        mock_flow.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("found", "handled"), [(None, None), ("linked", None)], ids=["no_match", "gone_at_plaid"]
+    )
+    def test_otherwise_links_anew(self, found, handled):
+        linked = PlaidItem(item_id="item-1", access_token="a") if found else None
+        item = PlaidItem(item_id="item-2", access_token="b", institution_name="Tartan Bank")
+        with (
+            patch(f"{_SERVER}.find_linked_bank", return_value=linked),
+            patch(f"{_SERVER}.handle_already_linked_bank", return_value=handled),
+            patch(f"{_SERVER}.run_plaid_link_flow", return_value=item),
+            patch(f"{_SERVER}.save_linked_plaid_item", return_value={"saved": [], "skipped": []}),
+        ):
+            assert link_bank("tartan")["item_id"] == "item-2"
+
+    def test_a_duplicate_link_isnt_saved(self):
+        item = PlaidItem(item_id="item-2", access_token="b")
+        duplicate = {"duplicate_removed": True, "item_id": "item-1", "message": "..."}
+        with (
+            patch(f"{_SERVER}.run_plaid_link_flow", return_value=item),
+            patch(f"{_SERVER}.resolve_duplicate_link", return_value=duplicate),
+            patch(f"{_SERVER}.save_linked_plaid_item") as mock_save,
+        ):
+            assert link_bank() == duplicate
+        mock_save.assert_not_called()
+
+    def test_without_a_name_nothing_is_looked_up(self):
+        item = PlaidItem(item_id="item-2", access_token="b")
+        with (
+            patch(f"{_SERVER}.find_linked_bank") as mock_find,
+            patch(f"{_SERVER}.run_plaid_link_flow", return_value=item),
+            patch(f"{_SERVER}.save_linked_plaid_item", return_value={"saved": [], "skipped": []}),
         ):
             link_bank()
+        mock_find.assert_not_called()
 
 
 class TestListLinkedBanks:
@@ -193,6 +225,25 @@ class TestSyncBankTransactions:
             return_value=_CLASSIFIED_AND_BOOKED,
         ) as mock:
             yield mock
+
+    def test_a_login_needed_error_says_to_log_in_again(self, fake_classifier):
+        error = plaid.ApiException(status=400)
+        error.body = '{"error_code": "ITEM_LOGIN_REQUIRED", "error_message": "..."}'
+        with (
+            patch(f"{_SERVER}.sync_source_transactions_from_plaid", side_effect=error),
+            pytest.raises(ValueError, match="log in again"),
+        ):
+            sync_bank_transactions("item-1")
+        fake_classifier.assert_not_called()
+
+    def test_other_plaid_errors_are_raised_as_is(self):
+        error = plaid.ApiException(status=500)
+        error.body = '{"error_code": "INTERNAL_SERVER_ERROR"}'
+        with (
+            patch(f"{_SERVER}.sync_source_transactions_from_plaid", side_effect=error),
+            pytest.raises(plaid.ApiException),
+        ):
+            sync_bank_transactions("item-1")
 
     def test_delegates_to_sync_transactions_by_item_id(self):
         with patch(

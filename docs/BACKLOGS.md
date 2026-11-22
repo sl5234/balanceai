@@ -101,6 +101,73 @@ account was skipped and the sync saved no raw transactions. Fixing only the
 account would re-save every transaction under new ids (BL-4), so do all three
 together. Priority: right after the receipt manual test.
 
+**Note 2026-11-14:** a re-link's new Plaid ids must be attached to the
+existing transaction (or its source transaction updated) before matching runs;
+otherwise they look unmatched and matching may pair them with a receipt
+(match_receipts_and_bank_transactions only looks at unmatched transactions).
+
+**Update 2026-11-18 — most re-links become update mode:** logging in again,
+adding accounts and dropping accounts go through Plaid's update mode on the
+existing item (same item, cursor and ids; this PR, with `link_bank(bank_name)`
+routing to it). A new item for an already-linked bank is then needed only in
+these edge cases:
+
+1. **The item no longer exists at Plaid:** deleted with `/item/remove` (e.g.
+   our future unlink, BL-3) or in Plaid's consumer portal; Plaid returns
+   `ITEM_NOT_FOUND` and update mode can't revive it.
+2. **Access revoked at the bank and update mode can't restore it:** some
+   banks and error types need a new link; which ones is to be found from the
+   error codes.
+3. **The same bank under a different login** (e.g. a joint account under a
+   partner's login): a genuinely new item, not a re-link. The check after
+   Link must compare accounts (type and last 4), not just the bank, so it
+   isn't blocked. Its accounts don't overlap, so no cutover applies.
+
+Until this is built, cases 1 and 2 behave as today: the new item's accounts
+clash and are skipped, and that bank's sync saves nothing. Nothing is
+corrupted or duplicated.
+
+**Decided design for cases 1 and 2:**
+- The accounts take over the new item's `plaid_item_id` / `plaid_account_id`;
+  the old `plaid_items` row is deleted. The item stays internal: to the user
+  it's "reconnected".
+- Cutover: new-item rows posted more than 7 days before the old item's last
+  successful sync are skipped; the old rows stand.
+- In the 7-day window (plus every old row still pending): pair new and old
+  rows strictly (account, posting date, amount, description, pending). A pair
+  is unchanged at the bank: the old row takes the new Plaid id and updates in
+  place, keeping its transaction, classification, receipt match and
+  rejections. Leftover new rows are saved new.
+- Leftover old Plaid rows (changed or gone at the bank) are deleted with
+  their journal entries. A transaction left with no source is deleted with its
+  classification, even a user-set one. A receipt stays and is re-matched on
+  the next sync; if matching misses (ambiguous, or a large correction), both
+  are booked: an accepted risk, see BL-20. Rejections involving deleted rows
+  stop applying. The user is told which classified or matched charges were
+  affected.
+- Order: sync -> match -> classify -> delete leftover old rows -> book, so
+  classification reuse copies from the old rows before they go.
+- TODO: smarter leftover pairing (e.g. same account and date, changed amount
+  or name) to save some leftovers from deletion.
+
+**Update 2026-11-22 — update mode built** (feature/transaction-matching;
+PLAID_INTEGRATION_DECISIONS.md #5, #6): `update_bank_link`; `link_bank(bank_name)`
+routes an already-linked bank before Link; after Link, a new item with the
+same accounts as a linked one is removed at Plaid. Edge case 3 works (accounts
+are compared). Still open: cases 1 and 2 (the cutover), marked `TODO(BL-5)`
+in `resolve_duplicate_link`, which today tells the user it isn't supported yet.
+
+Changes to the design above:
+- The old `plaid_items` row isn't deleted. It's soft-deleted with a new
+  `removed_at` column, and lookups skip removed items.
+- Old source transactions keep the old item's `plaid_item_id`: a true record
+  of where they came from. Rows paired with new ones move to the new item.
+- The trigger that unlinks bank accounts (`trg_plaid_items_unlink_bank_accounts`)
+  fires on delete today; it must fire when `removed_at` is set instead.
+- Plaid's "removed" list on the new item never covers the old rows (they have
+  the old item's ids). **Not decided:** whether unpaired old rows are deleted
+  (as above) or kept and flagged for the user; decide when building this.
+
 ## BL-6 — Skill for the end-to-end Plaid flow
 
 **Added:** 2026-10-06
@@ -376,6 +443,13 @@ When the posted Plaid version of a pending charge arrives, it should join the
 pending one's transaction (Plaid's pending_transaction_id) or the receipt's,
 rather than start a new one (TODO(BL-15) in classify_transactions.py).
 
+**Fixed 2026-11-22** (feature/transaction-matching): receipts and bank
+transactions are matched both ways (on upload and on sync) with the v1 rules
+above, and merged into one transaction (BACKEND_IMPLEMENTATION_DECISIONS.md
+#22); a pair the user rejected isn't merged again. Pending → posted updates the
+pending row in place (#23). Not done: catching a receipt uploaded twice
+(BL-19); asking before a match (BL-20).
+
 ## BL-16 — Raw transactions use Plaid's id as their own id (and its column is `id`)
 
 **Added:** 2026-11-10
@@ -453,6 +527,9 @@ BL-16.
   still costs one OCR call. A perceptual image hash could catch near-identical
   photos without OCR; worth trying if re-takes are common.
 
+**Note 2026-11-14:** until then, a re-uploaded receipt never matches (its bank
+transaction is already matched), so it's counted twice.
+
 ## BL-20 — The receipt consent prompt can't fix misread values
 
 **Added:** 2026-11-12
@@ -467,3 +544,64 @@ shared and that the values are right, edits any field, then approves. The
 corrected values are what's saved. Values stay between the user and the server;
 the assistant doesn't see them. First check that Claude Code shows the
 prefilled values (MCP elicitation defaults).
+
+**Note 2026-11-22 (revisit when building):** the form also shows the bank
+charge the receipt matched, before merging. Yes merges; "not this charge,
+keep separate" calls `reject_match`, so nothing is merged and nothing needs
+splitting.
+The form can't cover a receipt uploaded before its bank charge: the charge
+arrives in a later sync, which merges them without asking. Undoing a wrong
+merge there needs a `split_transaction` the user can call, which moves the
+receipt into its own transaction, unbooks both and records the rejection.
+That is possibly a separate BL; it isn't built because nothing calls it yet.
+The BL-5 cutover makes the same kind of merge: a receipt whose bank row was
+replaced is re-matched on the next sync, without a form. If that re-match is
+wrong, it's undone the same way (the possible split BL).
+
+## BL-21 — No way to delete (or stop tracking) a bank account
+
+**Added:** 2026-11-18
+**Related:** BL-2, BL-3, BL-14
+
+**Problem:** Nothing deletes a bank account, and the database refuses it while
+the account has transactions or is in a journal (foreign keys, no ON DELETE).
+
+**Options to align on:**
+- **Delete with history:** remove its source transactions, transactions and
+  journal entries (receipts included). A transfer's entry spans two accounts,
+  so the whole entry goes and the other side is booked again alone.
+- **Archive:** keep the account and its history; sync skips its transactions
+  and nothing new is booked.
+
+**Also align on delete -> sync -> re-create:** after a delete or archive, a
+sync must skip that account's transactions instead of failing (today a Plaid
+account with no bank account fails the sync, BL-2), then ask whether to
+re-create it. On re-create (or un-archive): reset the item's sync cursor and
+sync from the start. Same item, same Plaid ids, so existing rows update in
+place, and no duplicates.
+
+## BL-22 — Tools that take a Plaid item id could take a bank name
+
+**Added:** 2026-11-22
+**Related:** PLAID_INTEGRATION_DECISIONS.md #6; BL-3
+
+**Problem:** `link_bank` takes a bank name, but `update_bank_link` and other
+item tools take an `item_id`, so the assistant has to look it up with
+`list_linked_banks` first.
+
+**Proposed fix:** audit the tools that take an `item_id` and decide which
+could take a bank name instead (via `find_linked_bank`; an ambiguous name
+asks which one).
+
+## BL-23 — Bank statements and Plaid transactions for the same purchase aren't matched
+
+**Added:** 2026-11-22
+**Related:** BL-15, BL-14
+
+**Problem:** matching only pairs receipts with Plaid transactions. If a
+statement is uploaded for an account that's also linked through Plaid, each
+purchase is saved by both and booked twice.
+
+**Proposed fix (options):** match statement rows to Plaid rows (same
+account, posting date and amount); or refuse a statement for dates a
+linked account already covers.

@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -5,6 +6,8 @@ import plaid
 from balanceai_backend.config import settings
 from plaid.api.plaid_api import PlaidApi
 from plaid.model.accounts_get_request import AccountsGetRequest
+from plaid.model.item_get_request import ItemGetRequest
+from plaid.model.item_remove_request import ItemRemoveRequest
 
 _ENVIRONMENTS = {
     "sandbox": plaid.Environment.Sandbox,
@@ -80,3 +83,50 @@ def get_accounts(access_token: str) -> list[PlaidAccount]:
         )
         for account in getattr(response, "accounts", None) or []
     ]
+
+
+def plaid_error_code(error: plaid.ApiException) -> str | None:
+    """Plaid's error_code (e.g. "ITEM_LOGIN_REQUIRED") from an API error's
+    JSON body, or None if it has none."""
+    try:
+        code = json.loads(error.body or "{}").get("error_code")
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return code if isinstance(code, str) else None
+
+
+@dataclass
+class PlaidItemHealth:
+    """A linked item's state at Plaid (/item/get).
+
+    found: False if Plaid no longer has it (ITEM_NOT_FOUND: removed at Plaid).
+    error_code: the item's current error (e.g. "ITEM_LOGIN_REQUIRED"), or None
+    if it's working.
+    """
+
+    found: bool
+    error_code: str | None = None
+
+
+def get_plaid_item_health(access_token: str) -> PlaidItemHealth:
+    """Ask Plaid how a linked item is doing.
+
+    Raises:
+        plaid.ApiException: for Plaid errors other than ITEM_NOT_FOUND.
+    """
+    try:
+        item = get_client().item_get(ItemGetRequest(access_token=access_token)).item
+    except plaid.ApiException as e:
+        if plaid_error_code(e) == "ITEM_NOT_FOUND":
+            return PlaidItemHealth(found=False)
+        raise
+    error = getattr(item, "error", None)
+    return PlaidItemHealth(
+        found=True, error_code=getattr(error, "error_code", None) if error is not None else None
+    )
+
+
+def remove_plaid_item(access_token: str) -> None:
+    """Remove an item at Plaid (/item/remove): its access token stops
+    working and Plaid stops billing for it."""
+    get_client().item_remove(ItemRemoveRequest(access_token=access_token))

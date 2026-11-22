@@ -236,12 +236,10 @@ def _sources_by_transaction(conn: sqlite3.Connection) -> dict[str, list[SourceTr
 
 def _find_items_to_classify(plaid_item_id: str | None, conn: sqlite3.Connection) -> list[_Item]:
     """Unclassified transactions with their sources, skipping those whose
-    sources are all pending. A pending Plaid transaction is replaced when it
-    posts, so classifying it would be paid for twice; a receipt is never
-    pending."""
-    # TODO(BL-15): when the posted version arrives, it should join the pending
-    # one's transaction (Plaid's pending_transaction_id), or the receipt's via
-    # matching, so a classification made while pending isn't lost.
+    sources are all pending. Posting often changes the amount or name, which
+    clears the AI's classification, so classifying it while pending would be
+    paid for twice; a receipt is never pending. The posted version updates the
+    pending row (replace_pending_plaid_transaction)."""
     sources = _sources_by_transaction(conn)
     items = [
         _Item(t.transaction_id, sources.get(t.transaction_id, []))

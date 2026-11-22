@@ -78,6 +78,9 @@ from balanceai_backend.source_transactions.book_transactions import book_transac
 from balanceai_backend.source_transactions.classify_transactions import (
     classify_transactions,
 )
+from balanceai_backend.source_transactions.match_transactions import (
+    match_receipts_and_bank_transactions,
+)
 from balanceai_backend.source_transactions.sync_source_transactions_from_receipt import (
     check_receipt_account,
     read_receipt,
@@ -321,7 +324,9 @@ async def upload_receipt(
 
     Returns:
         dict with "booked" (False when the paying account isn't in a journal yet;
-        add it with update_journal) and "journal_id". No receipt details.
+        add it with update_journal), "journal_id", and "matched_bank_transaction"
+        (whether it was merged with a bank transaction already synced). No
+        receipt details.
 
     Raises:
         ValueError: if the file isn't in the receipts folder or can't be read, or
@@ -347,11 +352,21 @@ async def upload_receipt(
     if consent.action != "accept":
         raise PermissionError("User declined to book the receipt.")
 
-    sync_source_transactions_from_receipt(receipt, found.account_id, conn=conn)
+    saved = sync_source_transactions_from_receipt(receipt, found.account_id, conn=conn)
+    assert saved.transaction_id is not None
+    # The receipt starts its own transaction; merge it into its bank
+    # transaction's, if Plaid already has it (decision #22).
+    matched = match_receipts_and_bank_transactions(
+        receipt_transaction_ids=[saved.transaction_id], conn=conn
+    )
     classify_transactions(conn=conn)
     if journal:
         book_transactions(journal.journal_id, conn)
-    return {"booked": journal is not None, "journal_id": journal.journal_id if journal else None}
+    return {
+        "booked": journal is not None,
+        "journal_id": journal.journal_id if journal else None,
+        "matched_bank_transaction": bool(matched),
+    }
 
 
 @mcp.tool()

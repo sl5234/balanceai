@@ -81,7 +81,11 @@ class TestClassifyAndBookSourceTransactions:
         result = classify_and_book_transactions("ally", db)
 
         assert calls == ["classify", "personal"]
-        assert result == {"classification": CLASSIFIED, "booking": {"personal": BOOKED}}
+        assert result == {
+            "matched": 0,
+            "classification": CLASSIFIED,
+            "booking": {"personal": BOOKED},
+        }
 
     def test_books_every_journal_holding_the_banks_accounts(self, db, calls):
         result = classify_and_book_transactions("chase", db)

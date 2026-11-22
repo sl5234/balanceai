@@ -126,19 +126,27 @@ def create_schema(connection: sqlite3.Connection) -> None:
             tax               TEXT,
             tip               TEXT,
             classification    TEXT,   -- ours, as JSON; NULL until classified
+            field_sources     TEXT,   -- JSON: which source each field came from, e.g. {"amount": "plaid"}
             created_at   TEXT NOT NULL,
             updated_at   TEXT NOT NULL
         );
+
+        CREATE INDEX IF NOT EXISTS idx_transactions_account_id ON transactions(account_id);
 
         CREATE TABLE IF NOT EXISTS source_transactions (
             source_transaction_id    TEXT PRIMARY KEY,   -- ours, prefixed by source ('plaid-<uuid>')
             plaid_transaction_id  TEXT UNIQUE,        -- Plaid's transaction_id; NULL for other sources
             transaction_id           TEXT NOT NULL REFERENCES transactions(transaction_id),
+            -- How and when this was merged into another transaction ('rule' or
+            -- 'user'); NULL if it's still in the transaction it started.
+            matched_to_transaction_by  TEXT,
+            matched_to_transaction_at  TEXT,
             source         TEXT NOT NULL,
             plaid_item_id  TEXT REFERENCES plaid_items(item_id) ON DELETE SET NULL,
             account_id     TEXT NOT NULL REFERENCES bank_accounts(id) ON UPDATE CASCADE,
             plaid_account_id TEXT,
-            posting_date   TEXT NOT NULL,
+            transaction_date  TEXT,   -- when it was paid: a receipt's date, Plaid's authorized_date
+            posting_date   TEXT,      -- when the bank posted it; NULL for a receipt
             description    TEXT NOT NULL,
             amount         TEXT NOT NULL,
             category       TEXT,
@@ -159,23 +167,35 @@ def create_schema(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_source_transactions_plaid_transaction_id
             ON source_transactions(plaid_transaction_id);
         CREATE INDEX IF NOT EXISTS idx_source_transactions_transaction_id ON source_transactions(transaction_id);
+
+        -- Pairs of source transactions the user said aren't the same
+        -- transaction; matching never merges their transactions. a < b.
+        CREATE TABLE IF NOT EXISTS rejected_matches (
+            source_transaction_id_a  TEXT NOT NULL,
+            source_transaction_id_b  TEXT NOT NULL,
+            created_at               TEXT NOT NULL,
+            updated_at               TEXT NOT NULL,
+            PRIMARY KEY (source_transaction_id_a, source_transaction_id_b)
+        );
     """)
 
 
 def _check_schema_is_current(connection: sqlite3.Connection) -> None:
-    """Stop on a database from before source transactions and transactions
-    (it has a raw_transactions table): it has to be deleted and re-synced, not
+    """Stop on a database from before the current schema: it has the old
+    raw_transactions table, or source_transactions without
+    matched_to_transaction_by or transaction_date. It has to be deleted and re-synced, not
     migrated. Runs before create_schema; a new database passes.
 
     Raises:
-        RuntimeError: if the database has the old raw_transactions table.
+        RuntimeError: if the database predates the current schema.
     """
     old = connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'raw_transactions'"
     ).fetchone()
-    if old:
+    columns = {r[1] for r in connection.execute("PRAGMA table_info(source_transactions)")}
+    if old or (columns and not {"matched_to_transaction_by", "transaction_date"} <= columns):
         raise RuntimeError(
-            "The database predates source transactions. Delete it and re-sync "
+            "The database predates the current schema. Delete it and re-sync "
             "(link_bank, sync_bank_transactions, create_journal)."
         )
 
