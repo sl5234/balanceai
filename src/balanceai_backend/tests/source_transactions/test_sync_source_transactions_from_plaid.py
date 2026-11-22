@@ -27,13 +27,20 @@ from balanceai_backend.db.transaction_db import find_transactions, update_transa
 from balanceai_backend.models.bank_account import BankAccount, BankAccountType
 from balanceai_backend.models.journal import JournalAccount
 from balanceai_backend.models.plaid_item import PlaidItem
-from balanceai_backend.models.source_transaction import Classification, ClassifiedBy
+from balanceai_backend.models.source_transaction import (
+    Classification,
+    ClassifiedBy,
+    MatchedBy,
+    SourceTransaction,
+)
 from balanceai_backend.source_transactions.source_transaction_db import (
     find_source_transactions,
+    upsert_source_transaction,
 )
 from balanceai_backend.source_transactions.sync_source_transactions_from_plaid import (
     sync_source_transactions_from_plaid,
 )
+from balanceai_backend.source_transactions.transaction_grouping import merge_transactions
 
 BANK_ACCOUNT_ID = "tartan_bank:checking:0000"
 
@@ -84,6 +91,8 @@ def _plaid_txn(
     merchant_name="Starbucks",
     pending=False,
     personal_finance_category=None,
+    authorized_date=None,
+    pending_transaction_id=None,
 ):
     if personal_finance_category is None:
         personal_finance_category = SimpleNamespace(primary="FOOD_AND_DRINK")
@@ -91,11 +100,13 @@ def _plaid_txn(
         transaction_id=transaction_id,
         account_id=account_id,
         date=date(2026, 8, 19),
+        authorized_date=authorized_date,
         amount=amount,
         name=name,
         merchant_name=merchant_name,
         pending=pending,
         personal_finance_category=personal_finance_category,
+        pending_transaction_id=pending_transaction_id,
     )
 
 
@@ -456,3 +467,121 @@ class TestOurOwnIds:
         _sync_one_page(db, added=[_plaid_txn()])
         _sync_one_page(db, removed=[SimpleNamespace(transaction_id="txn-1")])
         assert find_source_transactions(conn=db) == []
+
+
+class TestDates:
+    def test_stores_when_it_was_paid_and_when_it_posted(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn(authorized_date=date(2026, 8, 17))])
+        [txn] = find_source_transactions(conn=db)
+        assert (txn.transaction_date, txn.posting_date) == (date(2026, 8, 17), date(2026, 8, 19))
+
+    def test_no_authorized_date_leaves_the_transaction_date_empty(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn()])
+        [txn] = find_source_transactions(conn=db)
+        assert (txn.transaction_date, txn.posting_date) == (None, date(2026, 8, 19))
+
+
+class TestPendingPosts:
+    """Plaid sends the posted version under a new id ("P2", pending_transaction_id
+    "P1") and removes the pending one ("P1") in the same sync."""
+
+    @staticmethod
+    def _post(db, amount=4.50):
+        _sync_one_page(
+            db,
+            added=[_plaid_txn("P2", amount=amount, pending_transaction_id="P1")],
+            removed=[SimpleNamespace(transaction_id="P1")],
+        )
+
+    @staticmethod
+    def _classify(db, classified_by: ClassifiedBy) -> Classification:
+        [pending] = find_source_transactions(conn=db)
+        classification = Classification(
+            counter_account=JournalAccount.NON_ESSENTIALS_EXPENSE,
+            category="dining",
+            counterparty="Starbucks",
+            classified_by=classified_by,
+        )
+        with db:
+            update_transaction(pending.transaction_id, classification=classification, conn=db)
+        return classification
+
+    def test_the_posted_version_updates_the_pending_row(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn("P1", pending=True)])
+        [pending] = find_source_transactions(conn=db)
+
+        self._post(db)
+
+        [posted] = find_source_transactions(conn=db)
+        assert posted.source_transaction_id == pending.source_transaction_id
+        assert posted.transaction_id == pending.transaction_id
+        assert (posted.plaid_transaction_id, posted.pending) == ("P2", False)
+        assert len(find_transactions(conn=db)) == 1
+
+    def test_a_receipt_merged_while_pending_stays_merged(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn("P1", pending=True)])
+        [pending] = find_source_transactions(conn=db)
+        upsert_source_transaction(
+            SourceTransaction(
+                source_transaction_id="receipt-1",
+                source="receipt",
+                account_id=BANK_ACCOUNT_ID,
+                transaction_date=date(2026, 8, 18),
+                description="Starbucks",
+                amount=Decimal("-4.50"),
+            ),
+            conn=db,
+        )
+        [receipt] = find_source_transactions(source_transaction_id="receipt-1", conn=db)
+        assert pending.transaction_id and receipt.transaction_id
+        kept = merge_transactions(
+            pending.transaction_id, receipt.transaction_id, MatchedBy.RULE, conn=db
+        )
+
+        self._post(db)
+
+        assert {s.transaction_id for s in find_source_transactions(conn=db)} == {kept}
+
+    def test_an_unchanged_posting_keeps_the_users_classification(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn("P1", pending=True)])
+        classification = self._classify(db, ClassifiedBy.USER)
+
+        self._post(db)
+
+        [txn] = find_transactions(conn=db)
+        assert txn.classification == classification
+
+    def test_a_changed_amount_flags_the_users_classification(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn("P1", amount=4.50, pending=True)])
+        classification = self._classify(db, ClassifiedBy.USER)
+
+        self._post(db, amount=5.40)
+
+        [txn] = find_transactions(conn=db)
+        assert txn.amount == Decimal("-5.40")
+        assert txn.classification == dataclasses.replace(classification, needs_user_review=True)
+
+    def test_a_changed_amount_clears_the_ais_classification(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn("P1", amount=4.50, pending=True)])
+        self._classify(db, ClassifiedBy.AI)
+
+        self._post(db, amount=5.40)
+
+        [txn] = find_transactions(conn=db)
+        assert txn.classification is None
+
+    def test_a_posted_transaction_without_its_pending_one_is_saved_new(self, db, linked_item):
+        self._post(db)
+
+        [posted] = find_source_transactions(conn=db)
+        assert posted.plaid_transaction_id == "P2"
+
+    def test_an_already_stored_posted_transaction_adopts_nothing(self, db, linked_item):
+        _sync_one_page(db, added=[_plaid_txn("P1", pending=True), _plaid_txn("P2")])
+
+        _sync_one_page(db, modified=[_plaid_txn("P2", pending_transaction_id="P1")])
+
+        assert sorted(s.plaid_transaction_id for s in find_source_transactions(conn=db)) == [
+            "P1",
+            "P2",
+        ]

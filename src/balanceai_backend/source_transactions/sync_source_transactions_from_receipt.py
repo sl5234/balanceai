@@ -24,6 +24,7 @@ from balanceai_backend.models.source_transaction import SourceTransaction
 from balanceai_backend.paths import RECEIPTS_DIR
 from balanceai_backend.source_transactions.source_transaction_db import (
     find_receipt_account_ids_for_card_last4,
+    find_source_transactions,
     upsert_source_transaction,
 )
 from balanceai_backend.utils.general_util import IdPrefix, generate_id, get_mime_type
@@ -129,14 +130,19 @@ def check_receipt_account(
 def sync_source_transactions_from_receipt(
     receipt: ReceiptExtraction, account_id: str, conn: sqlite3.Connection = _default_conn
 ) -> SourceTransaction:
-    """Save the receipt as a source transaction (source="receipt"). Saving the same
-    receipt again adds a second row (catching duplicates is part of BL-15)."""
+    """Save the receipt as a source transaction (source="receipt"), starting its
+    own transaction. Saving the same receipt again adds a second row (catching
+    duplicates is BL-19).
+
+    Returns:
+        The saved source transaction, with its transaction_id.
+    """
     amount = -receipt.total if receipt.kind is ReceiptKind.PURCHASE else receipt.total
     txn = SourceTransaction(
         source_transaction_id=generate_id(IdPrefix.RECEIPT),
         source="receipt",
         account_id=account_id,
-        posting_date=receipt.date,
+        transaction_date=receipt.date,  # a receipt has no posted date
         description=receipt.counterparty,
         amount=amount,
         category=receipt.category,
@@ -145,7 +151,8 @@ def sync_source_transactions_from_receipt(
         tip=receipt.tip,
     )
     upsert_source_transaction(txn, conn=conn)
-    return txn
+    [saved] = find_source_transactions(source_transaction_id=txn.source_transaction_id, conn=conn)
+    return saved
 
 
 def normalize_last4(card: str | None) -> str | None:

@@ -680,11 +680,13 @@ class TestTransactionFields:
     def test_copies_the_fields_of_a_plaid_transaction(self, db):
         upsert_source_transaction(self._plaid(), conn=db)
         [txn] = find_transactions(conn=db)
+        # No authorized_date here, so no transaction date: booked by the posted date.
         assert (txn.account_id, txn.transaction_date, txn.posted_date) == (
             "acc-1",
-            datetime.date(2026, 8, 19),
+            None,
             datetime.date(2026, 8, 19),
         )
+        assert txn.booking_date == datetime.date(2026, 8, 19)
         assert (txn.amount, txn.description, txn.category) == (
             Decimal("-4.50"),
             "Starbucks",
@@ -722,7 +724,7 @@ class TestTransactionFields:
             source_transaction_id=generate_id(IdPrefix.RECEIPT),
             source="receipt",
             account_id="acc-1",
-            posting_date=datetime.date(2026, 11, 8),
+            transaction_date=datetime.date(2026, 11, 8),
             description="Blue Bottle Coffee",
             amount=Decimal("-12.50"),
             card_last4="1234",
@@ -732,6 +734,7 @@ class TestTransactionFields:
         upsert_source_transaction(receipt, conn=db)
         [txn] = find_transactions(conn=db)
         assert txn.posted_date is None
+        assert txn.booking_date == datetime.date(2026, 11, 8)
         assert (txn.card_last4, txn.tax, txn.tip) == ("1234", Decimal("1.02"), Decimal("2.00"))
 
     def test_deleting_the_source_deletes_the_transaction(self, db):

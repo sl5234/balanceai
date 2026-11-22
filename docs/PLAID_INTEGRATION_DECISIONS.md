@@ -66,3 +66,47 @@
 **Grounded facts:**
 - [verified] User's chosen order in this conversation.
 - [verified] Plaid linking and sync into `raw_transactions` already work; creating Accounts from Plaid doesn't exist yet.
+
+## #5 — 2026-11-22 — Re-linking a bank fixes the existing item (update mode), not a new one
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #2; BL-5
+
+**Short description:** When a linked bank needs a new login or more accounts,
+Link runs in update mode on the existing item (`update_bank_link`). A new item
+is made only for a bank that isn't linked. Moving a bank onto a new item (the
+cutover) is deferred to BL-5.
+**Short example:** The bank asks you to log in again; sync says so, and
+`update_bank_link` reopens Link for that bank. The transactions, account ids
+and sync cursor stay as they were.
+
+**Grounded facts:**
+- [verified] Update mode keeps the item, access token, account ids,
+  transaction ids and sync cursor (Plaid docs).
+- [verified] Each normal Link makes a new item, and each item is billed until
+  `/item/remove` (Plaid docs).
+- [verified] Sandbox: an update-mode success fills `item_add_results` and
+  `finished_at`; leaving Link sets both `exit` and `finished_at`.
+
+## #6 — 2026-11-22 — Catch a re-link before Link (by bank name) and after it (by accounts)
+
+**Category:** system (technical)
+**Status:** accepted
+**One-way door:** no
+**Related:** #5
+
+**Short description:** Before Link, `link_bank(bank_name)` routes a bank
+that's already linked to update mode (if a login fixes it) or reports it as
+already linked. After Link, if the new item's accounts belong to a linked item,
+the new item is removed at Plaid and the old one is reported on.
+**Short example:** You link "Test Bank" without naming it and pick the same
+bank in Link. The new item is removed, and you're told to log in again on the
+existing one.
+
+**Grounded facts:**
+- [verified] Before Link we only know the name the user gives; after Link,
+  account ids (`institution:type:last4`) identify the same accounts.
+- [unverified] If the old item's login is broken, the user may log in twice
+  (once in the new Link, once in update mode); accepted as rare.

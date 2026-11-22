@@ -133,7 +133,7 @@ def _line(
     assert txn.classification is not None
     return JournalLine(
         journal_line_id=UniqueIdGenerator.generate_id(),
-        date=txn.transaction_date,
+        date=txn.booking_date,
         account=account,
         description=txn.description,
         debit=amount if is_debit else Decimal(0),

@@ -7,21 +7,26 @@ from balanceai_backend.models.source_transaction import Classification
 from balanceai_backend.models.transaction import Transaction
 from balanceai_backend.utils.general_util import IdPrefix, generate_id, utc_now_iso
 
-# Sources that are the bank's own record, so their date is the posted date.
-_BANK_SOURCES = {"plaid", "bank_statement"}
+# Sources in order of preference: the bank's record first. For each field the
+# first source with a value wins, so receipt-only fields (card, tax, tip) come
+# from the receipt (docs/BACKEND_IMPLEMENTATION_DECISIONS.md #21).
+_PREFERENCE = ("plaid", "bank_statement", "receipt")
 
-# The merged fields, in table order.
-_FIELDS = (
-    "account_id",
-    "transaction_date",
-    "posted_date",
-    "amount",
-    "description",
-    "category",
-    "card_last4",
-    "tax",
-    "tip",
-)
+# Except: when it was paid, the receipt knows best.
+_TRANSACTION_DATE_PREFERENCE = ("receipt", "plaid", "bank_statement")
+
+# Each transaction field, and the source transaction column it comes from.
+_FROM_SOURCE = {
+    "account_id": "account_id",
+    "transaction_date": "transaction_date",
+    "posted_date": "posting_date",
+    "amount": "amount",
+    "description": "description",
+    "category": "category",
+    "card_last4": "card_last4",
+    "tax": "tax",
+    "tip": "tip",
+}
 
 
 # Fields a caller may set with update_transaction; the rest come from the
@@ -32,6 +37,7 @@ _SETTABLE = {"classification"}
 def _build_transaction_row(row) -> Transaction:
     d = dict(row)
     d["classification"] = json.loads(d["classification"]) if d["classification"] else None
+    d["field_sources"] = json.loads(d["field_sources"]) if d["field_sources"] else {}
     return Transaction.from_dict(d)
 
 
@@ -61,7 +67,7 @@ def find_transactions(
 ) -> list[Transaction]:
     """Find transactions, optionally by id, by account (any of account_ids), by
     Plaid item (transactions with a source transaction from it), or only the
-    unclassified ones. Ordered by transaction date."""
+    unclassified ones. Ordered by booking date (transaction date, else posted date)."""
     query = "SELECT * FROM transactions WHERE 1=1"
     params: list = []
     if transaction_id is not None:
@@ -78,7 +84,35 @@ def find_transactions(
         params.append(plaid_item_id)
     if unclassified:
         query += " AND classification IS NULL"
-    rows = conn.execute(query + " ORDER BY transaction_date, created_at", params).fetchall()
+    rows = conn.execute(
+        query + " ORDER BY COALESCE(transaction_date, posted_date), created_at", params
+    ).fetchall()
+    return [_build_transaction_row(row) for row in rows]
+
+
+def find_unmatched_transactions(
+    source: str,
+    account_ids: list[str] | None = None,
+    transaction_ids: list[str] | None = None,
+    conn: sqlite3.Connection = _default_conn,
+) -> list[Transaction]:
+    """Transactions whose only source transaction is from this source (e.g. a
+    receipt not yet matched to its bank transaction), optionally limited to
+    these accounts and these ids."""
+    query = (
+        "SELECT t.* FROM transactions t"
+        " JOIN source_transactions s ON s.transaction_id = t.transaction_id WHERE 1=1"
+    )
+    params: list = []
+    if account_ids is not None:
+        query += f" AND t.account_id IN ({', '.join('?' * len(account_ids))})"
+        params.extend(account_ids)
+    if transaction_ids is not None:
+        query += f" AND t.transaction_id IN ({', '.join('?' * len(transaction_ids))})"
+        params.extend(transaction_ids)
+    query += " GROUP BY t.transaction_id HAVING COUNT(*) = 1 AND MAX(s.source) = ?"
+    params.append(source)
+    rows = conn.execute(query, params).fetchall()
     return [_build_transaction_row(row) for row in rows]
 
 
@@ -114,38 +148,40 @@ def update_transaction(
 
 def refresh_transaction(transaction_id: str, conn: sqlite3.Connection = _default_conn) -> None:
     """Recompute the transaction's fields from its source transactions, or
-    delete it when none are left. For now each transaction has one source
-    transaction, so each field is copied from it; matching will add per-field
-    rules. Sets updated_at only when a value changed. Doesn't commit."""
-    source = conn.execute(
-        "SELECT source, account_id, posting_date, amount, description, category,"
-        " card_last4, tax, tip FROM source_transactions WHERE transaction_id = ?"
-        " ORDER BY created_at LIMIT 1",
+    delete it when none are left. Each field comes from the first source (in
+    _PREFERENCE order; _TRANSACTION_DATE_PREFERENCE for the transaction date)
+    that has a value, and field_sources records which. Sets updated_at only
+    when something changed. Doesn't commit."""
+    rows = conn.execute(
+        "SELECT * FROM source_transactions WHERE transaction_id = ? ORDER BY created_at",
         (transaction_id,),
-    ).fetchone()
-    if source is None:
+    ).fetchall()
+    if not rows:
         conn.execute("DELETE FROM transactions WHERE transaction_id = ?", (transaction_id,))
         return
 
-    merged = {
-        "account_id": source["account_id"],
-        "transaction_date": source["posting_date"],
-        "posted_date": source["posting_date"] if source["source"] in _BANK_SOURCES else None,
-        "amount": source["amount"],
-        "description": source["description"],
-        "category": source["category"],
-        "card_last4": source["card_last4"],
-        "tax": source["tax"],
-        "tip": source["tip"],
-    }
+    merged: dict[str, str | None] = {}
+    field_sources: dict[str, str] = {}
+    for field, column in _FROM_SOURCE.items():
+        order = _TRANSACTION_DATE_PREFERENCE if field == "transaction_date" else _PREFERENCE
+        ranked = sorted(
+            rows, key=lambda r: order.index(r["source"]) if r["source"] in order else len(order)
+        )
+        winner = next((r for r in ranked if r[column] is not None), None)
+        merged[field] = winner[column] if winner is not None else None
+        if winner is not None:
+            field_sources[field] = winner["source"]
+    merged["field_sources"] = json.dumps(field_sources, sort_keys=True)
+
+    fields = list(merged)
     current = conn.execute(
-        f"SELECT {', '.join(_FIELDS)} FROM transactions WHERE transaction_id = ?",
+        f"SELECT {', '.join(fields)} FROM transactions WHERE transaction_id = ?",
         (transaction_id,),
     ).fetchone()
     if current is not None and dict(current) == merged:
         return
     conn.execute(
-        f"UPDATE transactions SET {', '.join(f'{f} = ?' for f in _FIELDS)}, updated_at = ?"
+        f"UPDATE transactions SET {', '.join(f'{f} = ?' for f in fields)}, updated_at = ?"
         " WHERE transaction_id = ?",
-        (*(merged[f] for f in _FIELDS), utc_now_iso(), transaction_id),
+        (*(merged[f] for f in fields), utc_now_iso(), transaction_id),
     )

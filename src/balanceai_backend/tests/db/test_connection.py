@@ -26,5 +26,12 @@ def test_a_new_database_passes_the_schema_check():
 def test_an_older_database_is_rejected(columns):
     db = sqlite3.connect(":memory:")
     db.execute(f"CREATE TABLE raw_transactions ({columns})")
-    with pytest.raises(RuntimeError, match="predates source transactions"):
+    with pytest.raises(RuntimeError, match="predates the current schema"):
+        connection._check_schema_is_current(db)
+
+
+def test_a_database_without_the_merge_columns_is_rejected():
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE source_transactions (source_transaction_id TEXT PRIMARY KEY)")
+    with pytest.raises(RuntimeError, match="predates the current schema"):
         connection._check_schema_is_current(db)

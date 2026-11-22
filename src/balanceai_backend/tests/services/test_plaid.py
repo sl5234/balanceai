@@ -8,8 +8,16 @@ SimpleNamespace matches that "attribute genuinely absent" behavior.
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import plaid
 import pytest
-from balanceai_backend.services.plaid import PlaidAccount, get_accounts, get_client
+from balanceai_backend.services.plaid import (
+    PlaidAccount,
+    PlaidItemHealth,
+    get_accounts,
+    get_client,
+    get_plaid_item_health,
+    plaid_error_code,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -121,3 +129,51 @@ class TestGetAccounts:
     def test_returns_empty_list_when_no_accounts(self):
         result, _ = self._get_accounts([])
         assert result == []
+
+
+class TestPlaidErrorCode:
+    @pytest.mark.parametrize(
+        ("body", "code"),
+        [
+            ('{"error_code": "ITEM_LOGIN_REQUIRED"}', "ITEM_LOGIN_REQUIRED"),
+            ("", None),
+            (None, None),
+            ("not json", None),
+            ("[1, 2]", None),
+        ],
+    )
+    def test_reads_the_error_code(self, body, code):
+        error = plaid.ApiException(status=400)
+        error.body = body
+        assert plaid_error_code(error) == code
+
+
+class TestGetPlaidItemHealth:
+    def _health(self, item=None, error=None):
+        mock_client = MagicMock()
+        if error is not None:
+            mock_client.item_get.side_effect = error
+        else:
+            mock_client.item_get.return_value = SimpleNamespace(item=item)
+        with patch("balanceai_backend.services.plaid.get_client", return_value=mock_client):
+            return get_plaid_item_health("access-1")
+
+    def test_a_working_item(self):
+        assert self._health(item=SimpleNamespace()) == PlaidItemHealth(found=True)
+
+    def test_an_item_error(self):
+        item = SimpleNamespace(error=SimpleNamespace(error_code="ITEM_LOGIN_REQUIRED"))
+        assert self._health(item=item) == PlaidItemHealth(
+            found=True, error_code="ITEM_LOGIN_REQUIRED"
+        )
+
+    def test_not_found(self):
+        error = plaid.ApiException(status=400)
+        error.body = '{"error_code": "ITEM_NOT_FOUND"}'
+        assert self._health(error=error) == PlaidItemHealth(found=False)
+
+    def test_other_errors_are_raised(self):
+        error = plaid.ApiException(status=500)
+        error.body = '{"error_code": "INTERNAL_SERVER_ERROR"}'
+        with pytest.raises(plaid.ApiException):
+            self._health(error=error)

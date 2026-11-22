@@ -24,6 +24,7 @@ from balanceai_backend.models.source_transaction import SourceTransaction
 from balanceai_backend.services.plaid import get_client
 from balanceai_backend.source_transactions.source_transaction_db import (
     delete_source_transaction_by_plaid_id,
+    replace_pending_plaid_transaction,
     upsert_source_transaction,
 )
 from balanceai_backend.utils.general_util import IdPrefix, generate_id
@@ -79,6 +80,9 @@ def _to_source_transaction(
         plaid_item_id=item_id,
         account_id=bank_account_id,
         plaid_account_id=txn.account_id,
+        # Plaid's date is when it posted; authorized_date is when it was paid
+        # (sometimes missing, e.g. for transfers).
+        transaction_date=getattr(txn, "authorized_date", None),
         posting_date=txn.date,
         description=description,
         # Plaid: positive = money out. Ours: negative = money out (see SourceTransaction.amount).
@@ -111,10 +115,15 @@ def _apply_sync_page(
     # the same bank saves them again under new Plaid transaction ids.
     # See docs/BACKLOGS.md BL-4.
     for txn in added + modified:
+        # The posted version of a pending transaction updates the pending row.
+        pending_id = getattr(txn, "pending_transaction_id", None)
+        if pending_id:
+            replace_pending_plaid_transaction(pending_id, txn.transaction_id, conn=conn)
         upsert_source_transaction(
             _to_source_transaction(txn, item_id, bank_account_id_by_plaid_account_id), conn=conn
         )
     for removed_txn in removed:
+        # A posted transaction's pending one was already replaced above: no-op.
         delete_source_transaction_by_plaid_id(removed_txn.transaction_id, conn=conn)
 
     return {"added": len(added), "modified": len(modified), "removed": len(removed)}

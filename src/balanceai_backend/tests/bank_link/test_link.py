@@ -14,170 +14,209 @@ from unittest.mock import MagicMock, patch
 import pytest
 from balanceai_backend.bank_link.link import (
     LinkExitedError,
-    complete_link,
+    _wait_for_finished_session,
     create_hosted_link,
-    poll_for_public_token,
+    run_plaid_link_flow,
 )
+from balanceai_backend.models.plaid_item import PlaidItem
+
+_LINK = "balanceai_backend.bank_link.link"
+
+
+def _created_request(mock_client):
+    return mock_client.link_token_create.call_args.args[0]
 
 
 class TestCreateHostedLink:
-    def test_returns_link_token_and_hosted_url(self):
+    def _client(self):
         mock_client = MagicMock()
         mock_client.link_token_create.return_value = SimpleNamespace(
-            link_token="link-tok-1",
-            hosted_link_url="https://hosted.plaid.com/abc",
+            link_token="link-tok-1", hosted_link_url="https://hosted.plaid.com/abc"
         )
-        with patch("balanceai_backend.bank_link.link.get_client", return_value=mock_client):
-            link_token, hosted_link_url = create_hosted_link()
+        return mock_client
 
-        assert link_token == "link-tok-1"
-        assert hosted_link_url == "https://hosted.plaid.com/abc"
-        mock_client.link_token_create.assert_called_once()
+    def test_returns_link_token_and_hosted_url(self):
+        mock_client = self._client()
+        with patch(f"{_LINK}.get_client", return_value=mock_client):
+            assert create_hosted_link() == ("link-tok-1", "https://hosted.plaid.com/abc")
+
+    def test_a_first_link_asks_for_transactions(self):
+        mock_client = self._client()
+        with patch(f"{_LINK}.get_client", return_value=mock_client):
+            create_hosted_link()
+        request = _created_request(mock_client)
+        assert [p.value for p in request.products] == ["transactions"]
+        assert "access_token" not in request
+
+    def test_update_mode_sends_the_access_token_and_no_products(self):
+        mock_client = self._client()
+        with patch(f"{_LINK}.get_client", return_value=mock_client):
+            create_hosted_link(item=PlaidItem(item_id="item-1", access_token="access-1"))
+        request = _created_request(mock_client)
+        assert request.access_token == "access-1"
+        assert "products" not in request
+        assert "update" not in request
+
+    def test_add_accounts_turns_on_the_account_picker(self):
+        mock_client = self._client()
+        with patch(f"{_LINK}.get_client", return_value=mock_client):
+            create_hosted_link(
+                item=PlaidItem(item_id="item-1", access_token="access-1"), add_accounts=True
+            )
+        assert _created_request(mock_client).update.account_selection_enabled is True
 
 
-def _success_session(public_token="public-tok-1", institution=None, accounts=None):
-    """Matches a real Plaid Sandbox Hosted Link success response, verified
-    live: session.on_success is never populated despite the SDK's model
-    schema advertising it — the actual success signal is
-    session.results.item_add_results[0]."""
-    item_add_result = SimpleNamespace(
-        public_token=public_token, institution=institution, accounts=accounts or []
+def _session(session_id="s1", finished=True, public_token=None, institution=None, exit=None):
+    """A fake Hosted Link session. Optional fields are left off entirely when
+    unset, as Plaid's SDK models do."""
+    fields: dict = {"link_session_id": session_id}
+    if finished:
+        fields["finished_at"] = "2026-11-21T10:00:00Z"
+    if public_token is not None:
+        fields["results"] = SimpleNamespace(
+            item_add_results=[
+                SimpleNamespace(public_token=public_token, institution=institution, accounts=[])
+            ]
+        )
+    if exit is not None:
+        fields["exit"] = exit
+    return SimpleNamespace(**fields)
+
+
+def _polls(*sessions_per_poll):
+    """link_token_get responses, one per poll."""
+    return [SimpleNamespace(link_sessions=list(s)) for s in sessions_per_poll]
+
+
+def _run(mock_client, **kwargs):
+    mock_client.link_token_create.return_value = SimpleNamespace(
+        link_token="link-tok-1", hosted_link_url="https://hosted.plaid.com/abc"
     )
-    return SimpleNamespace(results=SimpleNamespace(item_add_results=[item_add_result]))
+    mock_client.item_public_token_exchange.return_value = SimpleNamespace(
+        item_id="item-new", access_token="access-new"
+    )
+    with (
+        patch(f"{_LINK}.get_client", return_value=mock_client),
+        patch(f"{_LINK}.time.sleep"),
+        patch(f"{_LINK}.webbrowser.open"),
+    ):
+        return run_plaid_link_flow(**kwargs)
 
 
-class TestPollForPublicToken:
-    def test_polls_again_when_link_sessions_entirely_absent(self):
-        """Regression test: LinkTokenGetResponse.link_sessions is itself an
-        optional field that raises ApiAttributeError when unset (confirmed
-        against a real Plaid sandbox call — link_sessions isn't populated
-        until session activity exists yet), not just the fields nested
-        inside each session."""
-        no_sessions_yet = SimpleNamespace()  # no .link_sessions attribute at all
+class TestRunPlaidLinkFlow:
+    def test_a_first_link_exchanges_the_public_token_for_a_new_item(self):
         mock_client = MagicMock()
-        mock_client.link_token_get.side_effect = [
-            no_sessions_yet,
-            SimpleNamespace(link_sessions=[_success_session()]),
-        ]
+        institution = SimpleNamespace(institution_id="ins_3", name="Tartan Bank")
+        mock_client.link_token_get.side_effect = _polls(
+            [_session(public_token="public-1", institution=institution)]
+        )
 
+        item = _run(mock_client)
+
+        mock_client.item_public_token_exchange.assert_called_once()
+        assert mock_client.item_public_token_exchange.call_args.args[0].public_token == "public-1"
+        assert (item.item_id, item.access_token) == ("item-new", "access-new")
+        assert (item.institution_id, item.institution_name) == ("ins_3", "Tartan Bank")
+
+    def test_a_missing_institution_is_left_empty(self):
+        mock_client = MagicMock()
+        mock_client.link_token_get.side_effect = _polls([_session(public_token="public-1")])
+        item = _run(mock_client)
+        assert (item.institution_id, item.institution_name) == (None, None)
+
+    def test_a_result_filled_in_after_finishing_is_picked_up(self):
+        mock_client = MagicMock()
+        mock_client.link_token_get.side_effect = _polls(
+            [_session()], [_session(public_token="public-1")]
+        )
+        assert _run(mock_client).item_id == "item-new"
+
+    def test_no_result_after_finishing_raises(self):
+        mock_client = MagicMock()
+        mock_client.link_token_get.side_effect = _polls([_session()], [_session()])
+        with pytest.raises(LinkExitedError, match="without linking a bank"):
+            _run(mock_client)
+
+    def test_the_second_look_reads_the_same_session_not_a_newer_one(self):
+        mock_client = MagicMock()
+        mock_client.link_token_get.side_effect = _polls(
+            [_session("s1")],
+            [_session("s1", public_token="public-1"), _session("s2", finished=False)],
+        )
+        _run(mock_client)
+        assert mock_client.item_public_token_exchange.call_args.args[0].public_token == "public-1"
+
+    def test_update_mode_returns_the_same_item_without_exchanging(self):
+        mock_client = MagicMock()
+        mock_client.link_token_get.side_effect = _polls([_session()])
+        stored = PlaidItem(item_id="item-1", access_token="access-1")
+
+        assert _run(mock_client, item=stored) is stored
+        mock_client.item_public_token_exchange.assert_not_called()
+
+    def test_still_runs_when_no_browser_can_be_opened(self):
+        import webbrowser
+
+        mock_client = MagicMock()
+        mock_client.link_token_create.return_value = SimpleNamespace(
+            link_token="link-tok-1", hosted_link_url="https://hosted.plaid.com/abc"
+        )
+        mock_client.link_token_get.side_effect = _polls([_session()])
+        stored = PlaidItem(item_id="item-1", access_token="access-1")
         with (
-            patch("balanceai_backend.bank_link.link.get_client", return_value=mock_client),
-            patch("balanceai_backend.bank_link.link.time.sleep"),
+            patch(f"{_LINK}.get_client", return_value=mock_client),
+            patch(f"{_LINK}.time.sleep"),
+            patch(f"{_LINK}.webbrowser.open", side_effect=webbrowser.Error("no browser")),
         ):
-            public_token, _ = poll_for_public_token("link-tok-1", timeout_s=10)
+            assert run_plaid_link_flow(item=stored) is stored
 
-        assert public_token == "public-tok-1"
+
+class TestWaitForFinishedSession:
+    def _wait(self, mock_client, timeout_s=10):
+        with (
+            patch(f"{_LINK}.get_client", return_value=mock_client),
+            patch(f"{_LINK}.time.sleep"),
+        ):
+            return _wait_for_finished_session("link-tok-1", timeout_s)
+
+    def test_keeps_waiting_before_any_session_exists(self):
+        """link_sessions itself is unset until the user opens the page (seen
+        live in Sandbox)."""
+        mock_client = MagicMock()
+        mock_client.link_token_get.side_effect = [SimpleNamespace(), *_polls([_session()])]
+        assert self._wait(mock_client).link_session_id == "s1"
         assert mock_client.link_token_get.call_count == 2
 
-    def test_returns_public_token_on_first_success(self):
-        institution = SimpleNamespace(institution_id="ins_3", name="Chase")
+    def test_keeps_waiting_while_in_progress(self):
+        mock_client = MagicMock()
+        mock_client.link_token_get.side_effect = _polls([_session(finished=False)], [_session()])
+        assert self._wait(mock_client).link_session_id == "s1"
+
+    def test_an_exit_raises_with_plaids_message(self):
+        exit_info = SimpleNamespace(error=SimpleNamespace(error_message="user closed the window"))
+        mock_client = MagicMock()
+        mock_client.link_token_get.side_effect = _polls([_session(exit=exit_info)])
+        with pytest.raises(LinkExitedError, match="user closed the window"):
+            self._wait(mock_client)
+
+    def test_an_exit_without_detail_raises_a_default_message(self):
+        mock_client = MagicMock()
+        mock_client.link_token_get.side_effect = _polls([_session(exit=SimpleNamespace())])
+        with pytest.raises(LinkExitedError, match="user exited Hosted Link"):
+            self._wait(mock_client)
+
+    def test_an_older_exited_session_doesnt_end_a_newer_one(self):
+        exited = _session("s1", exit=SimpleNamespace())
+        mock_client = MagicMock()
+        mock_client.link_token_get.side_effect = _polls(
+            [exited, _session("s2", finished=False)], [exited, _session("s2")]
+        )
+        assert self._wait(mock_client).link_session_id == "s2"
+
+    def test_times_out(self):
         mock_client = MagicMock()
         mock_client.link_token_get.return_value = SimpleNamespace(
-            link_sessions=[_success_session(institution=institution)]
+            link_sessions=[_session(finished=False)]
         )
-
-        with patch("balanceai_backend.bank_link.link.get_client", return_value=mock_client):
-            public_token, item_add_result = poll_for_public_token("link-tok-1", timeout_s=10)
-
-        assert public_token == "public-tok-1"
-        assert item_add_result.institution is institution
-
-    def test_polls_again_when_pending_then_succeeds(self):
-        pending_session = SimpleNamespace(link_session_id="s1")  # no results, no exit yet
-        mock_client = MagicMock()
-        mock_client.link_token_get.side_effect = [
-            SimpleNamespace(link_sessions=[pending_session]),
-            SimpleNamespace(link_sessions=[_success_session()]),
-        ]
-
-        with (
-            patch("balanceai_backend.bank_link.link.get_client", return_value=mock_client),
-            patch("balanceai_backend.bank_link.link.time.sleep"),
-        ):
-            public_token, _ = poll_for_public_token("link-tok-1", timeout_s=10)
-
-        assert public_token == "public-tok-1"
-        assert mock_client.link_token_get.call_count == 2
-
-    def test_raises_link_exited_error_on_exit(self):
-        session = SimpleNamespace(
-            exit=SimpleNamespace(error=SimpleNamespace(error_message="user closed the window"))
-        )
-        mock_client = MagicMock()
-        mock_client.link_token_get.return_value = SimpleNamespace(link_sessions=[session])
-
-        with (
-            patch("balanceai_backend.bank_link.link.get_client", return_value=mock_client),
-            pytest.raises(LinkExitedError, match="user closed the window"),
-        ):
-            poll_for_public_token("link-tok-1", timeout_s=10)
-
-    def test_raises_link_exited_error_with_default_message_when_no_error_detail(self):
-        session = SimpleNamespace(exit=SimpleNamespace())  # exit present, but no .error
-        mock_client = MagicMock()
-        mock_client.link_token_get.return_value = SimpleNamespace(link_sessions=[session])
-
-        with (
-            patch("balanceai_backend.bank_link.link.get_client", return_value=mock_client),
-            pytest.raises(LinkExitedError, match="user exited Hosted Link"),
-        ):
-            poll_for_public_token("link-tok-1", timeout_s=10)
-
-    def test_times_out_when_never_resolved(self):
-        pending_session = SimpleNamespace(link_session_id="s1")
-        mock_client = MagicMock()
-        mock_client.link_token_get.return_value = SimpleNamespace(link_sessions=[pending_session])
-
-        with (
-            patch("balanceai_backend.bank_link.link.get_client", return_value=mock_client),
-            patch("balanceai_backend.bank_link.link.time.sleep"),
-            pytest.raises(TimeoutError, match="Timed out after"),
-        ):
-            poll_for_public_token("link-tok-1", timeout_s=0)
-
-
-class TestCompleteLink:
-    def _metadata(self, institution=None):
-        return SimpleNamespace(institution=institution)
-
-    def test_returns_unsaved_plaid_item(self):
-        metadata = self._metadata(
-            institution=SimpleNamespace(institution_id="ins_3", name="Chase"),
-        )
-        mock_client = MagicMock()
-        mock_client.item_public_token_exchange.return_value = SimpleNamespace(
-            item_id="item-1", access_token="access-sandbox-abc"
-        )
-
-        with (
-            patch("balanceai_backend.bank_link.link.get_client", return_value=mock_client),
-            patch(
-                "balanceai_backend.bank_link.link.poll_for_public_token",
-                return_value=("public-tok-1", metadata),
-            ),
-        ):
-            item = complete_link("link-tok-1")
-
-        assert item.item_id == "item-1"
-        assert item.access_token == "access-sandbox-abc"
-        assert item.institution_id == "ins_3"
-        assert item.institution_name == "Chase"
-
-    def test_handles_missing_institution_gracefully(self):
-        metadata = self._metadata(institution=None)
-        mock_client = MagicMock()
-        mock_client.item_public_token_exchange.return_value = SimpleNamespace(
-            item_id="item-1", access_token="access-sandbox-abc"
-        )
-
-        with (
-            patch("balanceai_backend.bank_link.link.get_client", return_value=mock_client),
-            patch(
-                "balanceai_backend.bank_link.link.poll_for_public_token",
-                return_value=("public-tok-1", metadata),
-            ),
-        ):
-            item = complete_link("link-tok-1")
-
-        assert item.institution_id is None
-        assert item.institution_name is None
+        with pytest.raises(TimeoutError, match="Timed out after"):
+            self._wait(mock_client, timeout_s=0)

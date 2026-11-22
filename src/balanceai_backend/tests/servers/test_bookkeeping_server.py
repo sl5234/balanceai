@@ -341,9 +341,35 @@ class TestUploadReceipt:
     def test_books_the_receipt_when_the_user_accepts(self, db, journal_id):
         ctx = _make_ctx(AcceptedElicitation(data=BookReceiptConsent()))
         result = self._upload(db, ctx)
-        assert result == {"booked": True, "journal_id": journal_id}  # no receipt details
+        assert result == {  # no receipt details
+            "booked": True,
+            "journal_id": journal_id,
+            "matched_bank_transaction": False,
+        }
         message = ctx.elicit.await_args.kwargs["message"]
         assert "Blue Bottle Coffee" in message and "matched the account's last 4" in message
+        assert len(find_booked_transactions(journal_id, conn=db)) == 1
+
+    def test_matches_a_bank_transaction_already_synced(self, db, journal_id):
+        upsert_source_transaction(
+            SourceTransaction(
+                source_transaction_id="plaid-1",
+                source="plaid",
+                account_id=self.CHECKING,
+                transaction_date=datetime.date(2026, 11, 8),
+                posting_date=datetime.date(2026, 11, 9),
+                description="SQ *BLUE BOTTLE 1234",
+                amount=Decimal("-12.50"),
+                plaid_transaction_id="p-1",
+            ),
+            conn=db,
+        )
+        ctx = _make_ctx(AcceptedElicitation(data=BookReceiptConsent()))
+
+        result = self._upload(db, ctx)
+
+        assert result["matched_bank_transaction"] is True
+        assert len(find_transactions(conn=db)) == 1
         assert len(find_booked_transactions(journal_id, conn=db)) == 1
 
     @pytest.mark.parametrize("elicit_result", [DeclinedElicitation(), CancelledElicitation()])

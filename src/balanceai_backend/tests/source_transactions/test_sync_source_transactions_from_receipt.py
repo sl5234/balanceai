@@ -184,6 +184,7 @@ class TestSyncSourceTransactionsFromReceipt:
             and saved.plaid_transaction_id is None
         )
         assert saved.source == "receipt"
+        assert (saved.transaction_date, saved.posting_date) == (datetime.date(2026, 11, 8), None)
         assert saved.amount == Decimal("-12.50")
         assert saved.description == "Blue Bottle Coffee"
         assert (saved.card_last4, saved.tax, saved.tip) == (

@@ -1,5 +1,6 @@
 """Tests for generate_journal_entry: a classified source transaction -> two lines."""
 
+import dataclasses
 import datetime
 from decimal import Decimal
 
@@ -183,3 +184,13 @@ class TestGenerateJournalEntry:
 
         with pytest.raises(ValueError, match="txn-1 isn't classified"):
             generate_journal_entry(txn, BankAccountType.CHECKING)
+
+
+def test_without_a_transaction_date_the_entry_is_dated_by_the_posted_date():
+    txn = dataclasses.replace(
+        _txn("-4.50", JournalAccount.NON_ESSENTIALS_EXPENSE),
+        transaction_date=None,
+        posted_date=datetime.date(2026, 9, 10),
+    )
+    lines = generate_journal_entry(txn, BankAccountType.CHECKING)
+    assert {line.date for line in lines} == {datetime.date(2026, 9, 10)}
