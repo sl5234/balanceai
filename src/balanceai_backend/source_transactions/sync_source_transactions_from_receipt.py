@@ -13,6 +13,7 @@ from pathlib import Path
 from balanceai_backend.db.bank_account_db import find_bank_accounts, find_cash_account_for_journal
 from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.db.journal_db import is_account_in_journal
+from balanceai_backend.models.bank_account import BankAccountType
 from balanceai_backend.models.receipt import (
     AccountMatch,
     PaymentMethod,
@@ -36,6 +37,10 @@ _UNREADABLE = "Couldn't read this receipt. Try a clearer photo."
 
 _ASK_ACCOUNT = (
     "Ask the user which account paid, then pass its account_id (from list_bank_accounts)."
+)
+_ASK_WITHDRAWAL_ACCOUNT = (
+    "Ask the user which bank account the cash came out of, then pass its account_id "
+    "(from list_bank_accounts)."
 )
 
 
@@ -81,6 +86,8 @@ def suggest_receipt_account(
 ) -> ReceiptAccount:
     """A guess at the account that paid, for the user to confirm in the consent
     prompt.
+    - Withdrawal: the bank account the cash came out of, found from the card
+      like a card receipt; never the cash account.
     - Cash: the given journal's cash account; with no journal, ask.
     - Card: first, earlier receipts with the same card (always user-confirmed);
       else, the one bank account whose own last 4 matches (mostly from Plaid).
@@ -90,7 +97,9 @@ def suggest_receipt_account(
     Raises:
         ValueError: asking for the account.
     """
-    if receipt.payment_method is PaymentMethod.CASH:
+    withdrawal = receipt.kind is ReceiptKind.WITHDRAWAL
+    ask = _ASK_WITHDRAWAL_ACCOUNT if withdrawal else _ASK_ACCOUNT
+    if receipt.payment_method is PaymentMethod.CASH and not withdrawal:
         if journal_id:
             return ReceiptAccount(
                 find_cash_account_for_journal(journal_id, conn=conn), AccountMatch.CASH
@@ -99,7 +108,7 @@ def suggest_receipt_account(
 
     card = normalize_last4(receipt.card_last4)
     if not card:
-        raise ValueError(f"The receipt doesn't show how it was paid. {_ASK_ACCOUNT}")
+        raise ValueError(f"The receipt doesn't show how it was paid. {ask}")
 
     accounts = find_receipt_account_ids_for_card_last4(card, conn=conn)
     match = AccountMatch.HISTORY
@@ -110,21 +119,30 @@ def suggest_receipt_account(
         journal_id is None or is_account_in_journal(accounts[0], journal_id, conn=conn)
     ):
         return ReceiptAccount(accounts[0], match)
-    raise ValueError(f"Couldn't tell which account paid. {_ASK_ACCOUNT}")
+    raise ValueError(f"Couldn't tell which account paid. {ask}")
 
 
 def check_receipt_account(
-    account_id: str, journal_id: str | None = None, conn: sqlite3.Connection = _default_conn
+    account_id: str,
+    journal_id: str | None = None,
+    kind: ReceiptKind | None = None,
+    conn: sqlite3.Connection = _default_conn,
 ) -> None:
     """Check an account the user gave.
 
     Raises:
-        ValueError: if it doesn't exist, or isn't in journal_id.
+        ValueError: if it doesn't exist, isn't in journal_id, or is a cash
+            account for a withdrawal.
     """
-    if not find_bank_accounts(id=account_id, conn=conn):
+    accounts = find_bank_accounts(id=account_id, conn=conn)
+    if not accounts:
         raise ValueError(f"No bank account with id {account_id}. See list_bank_accounts.")
     if journal_id is not None and not is_account_in_journal(account_id, journal_id, conn=conn):
         raise ValueError(f"Bank account {account_id} isn't in journal {journal_id}.")
+    if kind is ReceiptKind.WITHDRAWAL and accounts[0].account_type is BankAccountType.CASH:
+        raise ValueError(
+            f"A withdrawal comes out of a bank account, not cash. {_ASK_WITHDRAWAL_ACCOUNT}"
+        )
 
 
 def sync_source_transactions_from_receipt(
@@ -137,7 +155,8 @@ def sync_source_transactions_from_receipt(
     Returns:
         The saved source transaction, with its transaction_id.
     """
-    amount = -receipt.total if receipt.kind is ReceiptKind.PURCHASE else receipt.total
+    # A purchase or a withdrawal is money out of the account; a refund is money in.
+    amount = receipt.total if receipt.kind is ReceiptKind.REFUND else -receipt.total
     txn = SourceTransaction(
         source_transaction_id=generate_id(IdPrefix.RECEIPT),
         source="receipt",

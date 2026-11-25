@@ -153,6 +153,21 @@ class TestSuggestReceiptAccount:
         with pytest.raises(ValueError, match="doesn't show how it was paid"):
             suggest_receipt_account(receipt, conn=db)
 
+    def test_withdrawal_uses_the_bank_account_not_cash(self, db):
+        receipt = _receipt(
+            kind=ReceiptKind.WITHDRAWAL, payment_method=PaymentMethod.CASH, card_last4="0000"
+        )
+        assert suggest_receipt_account(receipt, "j1", conn=db) == ReceiptAccount(
+            CHECKING, AccountMatch.LAST4
+        )
+
+    def test_withdrawal_without_a_last4_asks_for_the_bank_account(self, db):
+        receipt = _receipt(
+            kind=ReceiptKind.WITHDRAWAL, payment_method=PaymentMethod.CASH, card_last4=None
+        )
+        with pytest.raises(ValueError, match="which bank account the cash came out of"):
+            suggest_receipt_account(receipt, "j1", conn=db)
+
     def test_cash_placeholder_never_matches_a_card(self, db):
         """Card numbers are digits only, so no card can come out as the cash
         account's placeholder last 4."""
@@ -171,6 +186,13 @@ class TestCheckReceiptAccount:
     def test_account_in_another_journal(self, db):
         with pytest.raises(ValueError, match="isn't in journal"):
             check_receipt_account(OTHER_CHECKING, "j1", conn=db)
+
+    def test_withdrawal_from_the_cash_account_is_rejected(self, db):
+        with pytest.raises(ValueError, match="not cash"):
+            check_receipt_account("cash:cash:j1", "j1", ReceiptKind.WITHDRAWAL, conn=db)
+
+    def test_withdrawal_from_a_bank_account_passes(self, db):
+        check_receipt_account(CHECKING, "j1", ReceiptKind.WITHDRAWAL, conn=db)
 
 
 class TestSyncSourceTransactionsFromReceipt:
@@ -198,6 +220,12 @@ class TestSyncSourceTransactionsFromReceipt:
             _receipt(kind=ReceiptKind.REFUND), CARD, conn=db
         )
         assert txn.amount == Decimal("12.50")
+
+    def test_withdrawal_is_money_out(self, db):
+        txn = sync_source_transactions_from_receipt(
+            _receipt(kind=ReceiptKind.WITHDRAWAL, card_last4="0000"), CHECKING, conn=db
+        )
+        assert txn.amount == Decimal("-12.50")
 
     def test_saving_the_same_receipt_twice_adds_two_rows(self, db):
         """Ids are random, so duplicates aren't caught here (BL-15)."""

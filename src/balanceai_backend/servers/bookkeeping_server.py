@@ -336,7 +336,7 @@ async def upload_receipt(
     """
     receipt = read_receipt(resolve_receipt_path(file_name))
     if account_id:
-        check_receipt_account(account_id, journal_id, conn=conn)
+        check_receipt_account(account_id, journal_id, receipt.kind, conn=conn)
         found = ReceiptAccount(account_id, AccountMatch.USER)
     else:
         found = suggest_receipt_account(receipt, journal_id, conn=conn)

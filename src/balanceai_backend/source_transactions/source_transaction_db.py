@@ -58,10 +58,12 @@ def find_source_transactions(
     account_id: str | None = None,
     source: str | None = None,
     transaction_id: str | None = None,
+    category_detailed: str | None = None,
     conn: sqlite3.Connection = _default_conn,
 ) -> list[SourceTransaction]:
     """Find source transactions, optionally filtered by our id, Plaid's id,
-    plaid_item_id, account_id, source, and/or the transaction they belong to."""
+    plaid_item_id, account_id, source, the transaction they belong to, and/or
+    the source's detailed category."""
     query = "SELECT * FROM source_transactions WHERE 1=1"
     params: list = []
     if source_transaction_id is not None:
@@ -82,6 +84,9 @@ def find_source_transactions(
     if transaction_id is not None:
         query += " AND transaction_id = ?"
         params.append(transaction_id)
+    if category_detailed is not None:
+        query += " AND category_detailed = ?"
+        params.append(category_detailed)
     query += " ORDER BY COALESCE(transaction_date, posting_date)"
     rows = conn.execute(query, params).fetchall()
     return [_build_source_transaction(row) for row in rows]

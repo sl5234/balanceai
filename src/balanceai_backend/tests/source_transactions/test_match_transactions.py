@@ -29,6 +29,7 @@ from balanceai_backend.source_transactions.transaction_grouping import reject_ma
 CARD = "test_bank:credit_card:1234"
 OTHER_CARD = "test_bank:credit_card:5678"
 DAY = datetime.date(2026, 11, 8)
+WITHDRAWAL = "TRANSFER_OUT_WITHDRAWAL"
 
 
 @pytest.fixture
@@ -68,7 +69,13 @@ def _receipt(
 
 
 def _bank(
-    db, sid="plaid-1", amount="-12.50", day=DAY, name="SQ *BLUE BOTTLE 1234", account=CARD
+    db,
+    sid="plaid-1",
+    amount="-12.50",
+    day=DAY,
+    name="SQ *BLUE BOTTLE 1234",
+    account=CARD,
+    category_detailed=None,
 ) -> str:
     upsert_source_transaction(
         SourceTransaction(
@@ -79,6 +86,7 @@ def _bank(
             posting_date=day + datetime.timedelta(days=1),
             description=name,
             amount=Decimal(amount),
+            category_detailed=category_detailed,
             plaid_transaction_id=f"p-{sid}",
         ),
         conn=db,
@@ -197,6 +205,44 @@ class TestMatching:
     def test_a_purchase_doesnt_match_a_refund(self, db):
         _receipt(db, amount="-12.50")
         _bank(db, amount="12.50")
+        assert _match(db) == []
+
+    def test_a_withdrawal_merges_on_the_exact_amount_whatever_the_names(self, db):
+        _receipt(db, amount="-60.00", name="Test Bank, N.A.")
+        _bank(db, amount="-60.00", name="WITHDRAWAL 03/14", category_detailed=WITHDRAWAL)
+        assert len(_match(db)) == 1
+        assert _merged(db, "receipt-1", "plaid-1")
+
+    def test_a_withdrawal_off_by_a_cent_doesnt_merge(self, db):
+        _receipt(db, amount="-60.00", name="Test Bank, N.A.")
+        _bank(db, amount="-60.01", name="WITHDRAWAL 03/14", category_detailed=WITHDRAWAL)
+        assert _match(db) == []
+
+    def test_a_withdrawal_outside_the_date_window_doesnt_merge(self, db):
+        _receipt(db, amount="-60.00", name="Test Bank, N.A.")
+        _bank(
+            db,
+            amount="-60.00",
+            day=DAY + datetime.timedelta(days=8),
+            name="WITHDRAWAL",
+            category_detailed=WITHDRAWAL,
+        )
+        assert _match(db) == []
+
+    def test_two_matching_withdrawals_are_ambiguous(self, db):
+        _receipt(db, amount="-60.00", name="Test Bank, N.A.")
+        _bank(db, "plaid-1", amount="-60.00", name="WITHDRAWAL", category_detailed=WITHDRAWAL)
+        _bank(db, "plaid-2", amount="-60.00", name="WITHDRAWAL", category_detailed=WITHDRAWAL)
+        assert _match(db) == []
+
+    def test_a_non_withdrawal_still_needs_matching_names(self, db):
+        _receipt(db, amount="-60.00", name="Test Bank, N.A.")
+        _bank(
+            db,
+            amount="-60.00",
+            name="WITHDRAWAL",
+            category_detailed="TRANSFER_OUT_ACCOUNT_TRANSFER",
+        )
         assert _match(db) == []
 
     def test_already_merged_transactions_are_left_alone(self, db):

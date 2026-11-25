@@ -24,7 +24,7 @@ from balanceai_backend.services.plaid import (
 _ITEM_ERRORS_FIXABLE_BY_UPDATE = {"ITEM_LOGIN_REQUIRED"}
 
 
-def update_link(
+async def update_link(
     item: PlaidItem, add_accounts: bool = False, conn: sqlite3.Connection = _default_conn
 ) -> dict:
     """Run update mode on a linked item (log in again; with add_accounts,
@@ -33,7 +33,7 @@ def update_link(
     Returns:
         {"item_id", "institution_name", "bank_accounts": {"saved", "skipped"}}
     """
-    run_plaid_link_flow(item, add_accounts=add_accounts)
+    await run_plaid_link_flow(item, add_accounts=add_accounts)
     return {
         "item_id": item.item_id,
         "institution_name": item.institution_name,
@@ -41,7 +41,7 @@ def update_link(
     }
 
 
-def handle_already_linked_bank(
+async def handle_already_linked_bank(
     linked: PlaidItem, conn: sqlite3.Connection = _default_conn
 ) -> dict | None:
     """link_bank's response for a bank that's already linked:
@@ -56,7 +56,7 @@ def handle_already_linked_bank(
     if not health.found:
         return None
     if health.error_code in _ITEM_ERRORS_FIXABLE_BY_UPDATE:
-        return {**update_link(linked, conn=conn), "updated": True}
+        return {**(await update_link(linked, conn=conn)), "updated": True}
     return {
         "already_linked": True,
         "item_id": linked.item_id,
