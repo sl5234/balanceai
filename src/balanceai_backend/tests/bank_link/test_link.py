@@ -8,9 +8,11 @@ MagicMock would auto-generate a truthy child for any attribute access, which
 would silently defeat the getattr(..., None) branches under test.
 """
 
+import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import anyio
 import pytest
 from balanceai_backend.bank_link.link import (
     LinkExitedError,
@@ -97,10 +99,10 @@ def _run(mock_client, **kwargs):
     )
     with (
         patch(f"{_LINK}.get_client", return_value=mock_client),
-        patch(f"{_LINK}.time.sleep"),
+        patch(f"{_LINK}.anyio.sleep", new_callable=AsyncMock),
         patch(f"{_LINK}.webbrowser.open"),
     ):
-        return run_plaid_link_flow(**kwargs)
+        return asyncio.run(run_plaid_link_flow(**kwargs))
 
 
 class TestRunPlaidLinkFlow:
@@ -165,19 +167,19 @@ class TestRunPlaidLinkFlow:
         stored = PlaidItem(item_id="item-1", access_token="access-1")
         with (
             patch(f"{_LINK}.get_client", return_value=mock_client),
-            patch(f"{_LINK}.time.sleep"),
+            patch(f"{_LINK}.anyio.sleep", new_callable=AsyncMock),
             patch(f"{_LINK}.webbrowser.open", side_effect=webbrowser.Error("no browser")),
         ):
-            assert run_plaid_link_flow(item=stored) is stored
+            assert asyncio.run(run_plaid_link_flow(item=stored)) is stored
 
 
 class TestWaitForFinishedSession:
     def _wait(self, mock_client, timeout_s=10):
         with (
             patch(f"{_LINK}.get_client", return_value=mock_client),
-            patch(f"{_LINK}.time.sleep"),
+            patch(f"{_LINK}.anyio.sleep", new_callable=AsyncMock),
         ):
-            return _wait_for_finished_session("link-tok-1", timeout_s)
+            return asyncio.run(_wait_for_finished_session("link-tok-1", timeout_s))
 
     def test_keeps_waiting_before_any_session_exists(self):
         """link_sessions itself is unset until the user opens the page (seen
@@ -220,3 +222,56 @@ class TestWaitForFinishedSession:
         )
         with pytest.raises(TimeoutError, match="Timed out after"):
             self._wait(mock_client, timeout_s=0)
+
+
+class TestWaitingDoesntBlock:
+    """The wait yields between polls: other tool calls run meanwhile, and a
+    cancelled tool call stops polling."""
+
+    def _never_finishing_client(self):
+        mock_client = MagicMock()
+        mock_client.link_token_get.return_value = SimpleNamespace(
+            link_sessions=[_session(finished=False)]
+        )
+        return mock_client
+
+    def test_other_tasks_run_while_waiting(self):
+        mock_client = self._never_finishing_client()
+        ticks = []
+
+        async def scenario():
+            async def tick():
+                while True:
+                    ticks.append(1)
+                    await anyio.sleep(0.01)
+
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(tick)
+                with pytest.raises(TimeoutError):
+                    await _wait_for_finished_session("link-tok-1", 0.2)
+                tg.cancel_scope.cancel()
+
+        with (
+            patch(f"{_LINK}.get_client", return_value=mock_client),
+            patch(f"{_LINK}._POLL_INTERVAL_S", 0.02),
+        ):
+            asyncio.run(scenario())
+        assert len(ticks) > 5
+
+    def test_cancelling_stops_polling(self):
+        mock_client = self._never_finishing_client()
+
+        async def scenario():
+            with anyio.move_on_after(0.1):
+                await _wait_for_finished_session("link-tok-1", 60)
+            polls_at_cancel = mock_client.link_token_get.call_count
+            await anyio.sleep(0.1)
+            return polls_at_cancel
+
+        with (
+            patch(f"{_LINK}.get_client", return_value=mock_client),
+            patch(f"{_LINK}._POLL_INTERVAL_S", 0.02),
+        ):
+            polls_at_cancel = asyncio.run(scenario())
+        assert polls_at_cancel > 0
+        assert mock_client.link_token_get.call_count == polls_at_cancel

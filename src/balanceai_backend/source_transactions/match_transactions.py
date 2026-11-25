@@ -15,6 +15,7 @@ from balanceai_backend.db.connection import conn as _default_conn
 from balanceai_backend.db.transaction_db import find_unmatched_transactions
 from balanceai_backend.models.source_transaction import MatchedBy
 from balanceai_backend.models.transaction import Transaction
+from balanceai_backend.source_transactions.source_transaction_db import find_source_transactions
 from balanceai_backend.source_transactions.transaction_grouping import (
     is_rejected_match,
     merge_transactions,
@@ -28,11 +29,15 @@ _DAYS_BEFORE = 2
 # ... or after it (posting takes 1-3 business days; weekends, holidays and
 # merchants that send charges late stretch that).
 _DAYS_AFTER = 7
-# The bank's amount may be higher than the receipt's by up to this much: a tip,
-# or a fee added after the receipt was printed. Never lower.
+# The bank's amount may be up to 30% higher than the receipt's: a tip, or a fee
+# added after the receipt was printed. Never lower.
 _MAX_OVER_RECEIPT = Decimal("0.30")
 # Card-processor prefixes that banks put in front of merchant names.
 _PROCESSOR_PREFIX = re.compile(r"^(sq|tst|sp|pp|paypal|py)\s*\*\s*")
+# Plaid's detailed category for cash taken out at an ATM or teller. Its
+# description names no merchant ("WITHDRAWAL 03/14"), so a withdrawal matches
+# on the exact amount and the date alone.
+_WITHDRAWAL = "TRANSFER_OUT_WITHDRAWAL"
 
 
 def match_receipts_and_bank_transactions(
@@ -55,22 +60,33 @@ def match_receipts_and_bank_transactions(
     )
     if not receipts:
         return []
-    bank_transactions = find_unmatched_transactions(
-        "plaid", account_ids=list({r.account_id for r in receipts}), conn=conn
-    )
-    candidates = _find_candidates(receipts, bank_transactions, conn)
+    account_ids = list({r.account_id for r in receipts})
+    bank_transactions = find_unmatched_transactions("plaid", account_ids=account_ids, conn=conn)
+    withdrawals = {
+        s.transaction_id
+        for a in account_ids
+        for s in find_source_transactions(
+            account_id=a, source="plaid", category_detailed=_WITHDRAWAL, conn=conn
+        )
+        if s.transaction_id is not None
+    }
+    candidates = _find_candidates(receipts, bank_transactions, withdrawals, conn)
     return _merge_unambiguous(candidates, conn)
 
 
 def _find_candidates(
-    receipts: list[Transaction], bank_transactions: list[Transaction], conn: sqlite3.Connection
+    receipts: list[Transaction],
+    bank_transactions: list[Transaction],
+    withdrawals: set[str],
+    conn: sqlite3.Connection,
 ) -> dict[str, list[Transaction]]:
-    """For each receipt, the bank transactions that fit and weren't rejected."""
+    """For each receipt, the bank transactions that fit and weren't rejected.
+    withdrawals: the ids of the bank transactions that are cash withdrawals."""
     return {
         r.transaction_id: [
             b
             for b in bank_transactions
-            if _is_candidate(r, b)
+            if _is_candidate(r, b, b.transaction_id in withdrawals)
             and not is_rejected_match(r.transaction_id, b.transaction_id, conn)
         ]
         for r in receipts
@@ -103,15 +119,20 @@ def _merge_unambiguous(
     return merged
 
 
-def _is_candidate(receipt: Transaction, bank_txn: Transaction) -> bool:
-    """Same account, money in the same direction, and dates, amounts and
-    merchant names that match."""
-    return (
+def _is_candidate(receipt: Transaction, bank_txn: Transaction, is_withdrawal: bool) -> bool:
+    """Same account, money in the same direction, dates that match, and either
+    the exact amount (a cash withdrawal, whose bank description names no
+    merchant) or amounts and merchant names that match."""
+    if not (
         receipt.account_id == bank_txn.account_id
         and (receipt.amount < 0) == (bank_txn.amount < 0)
         and _dates_match(receipt, bank_txn)
-        and _amounts_match(receipt.amount, bank_txn.amount)
-        and _names_match(receipt.description, bank_txn.description)
+    ):
+        return False
+    if is_withdrawal:
+        return receipt.amount == bank_txn.amount
+    return _amounts_match(receipt.amount, bank_txn.amount) and _names_match(
+        receipt.description, bank_txn.description
     )
 
 

@@ -1,5 +1,6 @@
+import asyncio
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from balanceai_backend.bank_link.linked_banks import (
@@ -66,9 +67,11 @@ class TestHandleAlreadyLinkedBank:
     def _handle(self, health, updated=None):
         with (
             patch(f"{_MODULE}.get_plaid_item_health", return_value=health),
-            patch(f"{_MODULE}.update_link", return_value=updated) as mock_update,
+            patch(
+                f"{_MODULE}.update_link", new_callable=AsyncMock, return_value=updated
+            ) as mock_update,
         ):
-            return handle_already_linked_bank(_LINKED), mock_update
+            return asyncio.run(handle_already_linked_bank(_LINKED)), mock_update
 
     def test_a_working_bank_opens_nothing(self):
         result, mock_update = self._handle(PlaidItemHealth(found=True))
@@ -106,10 +109,12 @@ class TestUpdateLink:
     def test_runs_update_mode_and_refreshes_accounts(self, db, add_accounts):
         accounts = {"saved": ["tartan_bank:checking:0000"], "skipped": []}
         with (
-            patch(f"{_MODULE}.run_plaid_link_flow", return_value=_LINKED) as mock_flow,
+            patch(
+                f"{_MODULE}.run_plaid_link_flow", new_callable=AsyncMock, return_value=_LINKED
+            ) as mock_flow,
             patch(f"{_MODULE}.sync_bank_accounts_from_plaid", return_value=accounts),
         ):
-            result = update_link(_LINKED, add_accounts=add_accounts, conn=db)
+            result = asyncio.run(update_link(_LINKED, add_accounts=add_accounts, conn=db))
         mock_flow.assert_called_once_with(_LINKED, add_accounts=add_accounts)
         assert result == {
             "item_id": "item-1",

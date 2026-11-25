@@ -53,10 +53,12 @@ class TestLinkBank:
             ],
         }
         with (
-            patch(f"{_SERVER}.run_plaid_link_flow", return_value=item) as mock_flow,
+            patch(
+                f"{_SERVER}.run_plaid_link_flow", new_callable=AsyncMock, return_value=item
+            ) as mock_flow,
             patch(f"{_SERVER}.save_linked_plaid_item", return_value=bank_accounts) as mock_save,
         ):
-            result = link_bank()
+            result = asyncio.run(link_bank())
 
         mock_flow.assert_called_once_with()
         mock_save.assert_called_once_with(item)
@@ -70,11 +72,11 @@ class TestLinkBank:
     @pytest.mark.parametrize("error", [LinkExitedError("exited"), TimeoutError("timed out")])
     def test_propagates_link_errors_and_saves_nothing(self, error):
         with (
-            patch(f"{_SERVER}.run_plaid_link_flow", side_effect=error),
+            patch(f"{_SERVER}.run_plaid_link_flow", new_callable=AsyncMock, side_effect=error),
             patch(f"{_SERVER}.save_linked_plaid_item") as mock_save,
             pytest.raises(type(error)),
         ):
-            link_bank()
+            asyncio.run(link_bank())
         mock_save.assert_not_called()
 
 
@@ -82,10 +84,10 @@ class TestUpdateBankLink:
     def test_raises_when_the_bank_isnt_linked(self):
         with (
             patch(f"{_SERVER}.db_find_plaid_items", return_value=[]),
-            patch(f"{_SERVER}.update_link") as mock_update,
+            patch(f"{_SERVER}.update_link", new_callable=AsyncMock) as mock_update,
             pytest.raises(ValueError, match="isn't linked"),
         ):
-            update_bank_link("item-missing")
+            asyncio.run(update_bank_link("item-missing"))
         mock_update.assert_not_called()
 
     @pytest.mark.parametrize("add_accounts", [False, True])
@@ -94,9 +96,11 @@ class TestUpdateBankLink:
         updated = {"item_id": "item-1", "institution_name": "Tartan Bank", "bank_accounts": {}}
         with (
             patch(f"{_SERVER}.db_find_plaid_items", return_value=[item]),
-            patch(f"{_SERVER}.update_link", return_value=updated) as mock_update,
+            patch(
+                f"{_SERVER}.update_link", new_callable=AsyncMock, return_value=updated
+            ) as mock_update,
         ):
-            assert update_bank_link("item-1", add_accounts=add_accounts) == updated
+            assert asyncio.run(update_bank_link("item-1", add_accounts=add_accounts)) == updated
         mock_update.assert_called_once_with(item, add_accounts=add_accounts)
 
 
@@ -106,10 +110,14 @@ class TestLinkBankWithBankName:
         response = {"already_linked": True, "item_id": "item-1"}
         with (
             patch(f"{_SERVER}.find_linked_bank", return_value=linked) as mock_find,
-            patch(f"{_SERVER}.handle_already_linked_bank", return_value=response),
-            patch(f"{_SERVER}.run_plaid_link_flow") as mock_flow,
+            patch(
+                f"{_SERVER}.handle_already_linked_bank",
+                new_callable=AsyncMock,
+                return_value=response,
+            ),
+            patch(f"{_SERVER}.run_plaid_link_flow", new_callable=AsyncMock) as mock_flow,
         ):
-            assert link_bank("tartan") == response
+            assert asyncio.run(link_bank("tartan")) == response
         mock_find.assert_called_once_with("tartan")
         mock_flow.assert_not_called()
 
@@ -121,31 +129,35 @@ class TestLinkBankWithBankName:
         item = PlaidItem(item_id="item-2", access_token="b", institution_name="Tartan Bank")
         with (
             patch(f"{_SERVER}.find_linked_bank", return_value=linked),
-            patch(f"{_SERVER}.handle_already_linked_bank", return_value=handled),
-            patch(f"{_SERVER}.run_plaid_link_flow", return_value=item),
+            patch(
+                f"{_SERVER}.handle_already_linked_bank",
+                new_callable=AsyncMock,
+                return_value=handled,
+            ),
+            patch(f"{_SERVER}.run_plaid_link_flow", new_callable=AsyncMock, return_value=item),
             patch(f"{_SERVER}.save_linked_plaid_item", return_value={"saved": [], "skipped": []}),
         ):
-            assert link_bank("tartan")["item_id"] == "item-2"
+            assert asyncio.run(link_bank("tartan"))["item_id"] == "item-2"
 
     def test_a_duplicate_link_isnt_saved(self):
         item = PlaidItem(item_id="item-2", access_token="b")
         duplicate = {"duplicate_removed": True, "item_id": "item-1", "message": "..."}
         with (
-            patch(f"{_SERVER}.run_plaid_link_flow", return_value=item),
+            patch(f"{_SERVER}.run_plaid_link_flow", new_callable=AsyncMock, return_value=item),
             patch(f"{_SERVER}.resolve_duplicate_link", return_value=duplicate),
             patch(f"{_SERVER}.save_linked_plaid_item") as mock_save,
         ):
-            assert link_bank() == duplicate
+            assert asyncio.run(link_bank()) == duplicate
         mock_save.assert_not_called()
 
     def test_without_a_name_nothing_is_looked_up(self):
         item = PlaidItem(item_id="item-2", access_token="b")
         with (
             patch(f"{_SERVER}.find_linked_bank") as mock_find,
-            patch(f"{_SERVER}.run_plaid_link_flow", return_value=item),
+            patch(f"{_SERVER}.run_plaid_link_flow", new_callable=AsyncMock, return_value=item),
             patch(f"{_SERVER}.save_linked_plaid_item", return_value={"saved": [], "skipped": []}),
         ):
-            link_bank()
+            asyncio.run(link_bank())
         mock_find.assert_not_called()
 
 

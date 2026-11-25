@@ -82,9 +82,11 @@ mcp = FastMCP(
       before calling categorize_transaction. Only proceed without one if the user explicitly
       says they don't have a category to provide.
     - Monetary amounts are in USD unless otherwise noted.
-    - link_bank opens a browser window and blocks for up to 5 minutes while the user
+    - link_bank opens a browser window and waits up to 5 minutes while the user
       logs into their bank on Plaid's hosted page — tell the user to check their
-      browser after calling it. The Plaid access token is never returned by any tool.
+      browser after calling it, and that if they close the page without
+      finishing, they press Esc to stop waiting (the same for update_bank_link).
+      The Plaid access token is never returned by any tool.
     - Never link a bank that's already linked: pass the bank's name to link_bank,
       which checks. To get new transactions use sync_bank_transactions; to log in
       again or add/remove accounts use update_bank_link.
@@ -356,7 +358,7 @@ def categorize_transaction(account: dict, transaction: dict, category: str | Non
 
 
 @mcp.tool()
-def link_bank(bank_name: str | None = None) -> dict:
+async def link_bank(bank_name: str | None = None) -> dict:
     """
     Connect a bank via Plaid Hosted Link.
 
@@ -375,8 +377,11 @@ def link_bank(bank_name: str | None = None) -> dict:
 
     Opens a Plaid-hosted webpage in the browser where the user logs into their
     bank — the MCP client should tell the user to check their browser and log
-    in. Blocks for up to 5 minutes while polling for completion. The resulting
-    access token is written straight to local storage and never returned here.
+    in. Waits up to 5 minutes for them to finish; cancelling the tool call
+    stops waiting. Closing the Plaid page doesn't end the wait (only Plaid's
+    own X does): tell the user that if they close it, they press Esc to cancel,
+    then link again. The resulting access token is written straight to local
+    storage and never returned here.
 
     Args:
         bank_name: The bank the user named, if any.
@@ -401,11 +406,11 @@ def link_bank(bank_name: str | None = None) -> dict:
     # non-technical error instead (see sync_bank_transactions).
     linked = find_linked_bank(bank_name) if bank_name else None
     if linked is not None:
-        response = handle_already_linked_bank(linked)
+        response = await handle_already_linked_bank(linked)
         if response is not None:
             return response
 
-    item = run_plaid_link_flow()
+    item = await run_plaid_link_flow()
     duplicate = resolve_duplicate_link(item)
     if duplicate is not None:
         return duplicate
@@ -418,12 +423,12 @@ def link_bank(bank_name: str | None = None) -> dict:
 
 
 @mcp.tool()
-def update_bank_link(item_id: str, add_accounts: bool = False) -> dict:
+async def update_bank_link(item_id: str, add_accounts: bool = False) -> dict:
     """
     Fix or change a bank that's already linked, instead of linking it again
     (a new link would create a second connection for the same accounts).
     Opens a Plaid page in the browser like link_bank; tell the user to check
-    their browser.
+    their browser. Waits up to 5 minutes; cancelling the tool call stops waiting.
 
     Use it when:
     - A sync says the bank needs the user to log in again (expired login,
@@ -454,7 +459,7 @@ def update_bank_link(item_id: str, add_accounts: bool = False) -> dict:
     if not items:
         raise ValueError("That bank isn't linked. See list_linked_banks.")
     # TODO: plain error for plaid.ApiException (see sync_bank_transactions).
-    return update_link(items[0], add_accounts=add_accounts)
+    return await update_link(items[0], add_accounts=add_accounts)
 
 
 @mcp.tool()

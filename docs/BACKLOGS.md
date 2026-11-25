@@ -48,27 +48,20 @@ it, so the only way to unlink today is deleting from the database directly.
 the access token is revoked, not just forgotten locally) and then deletes the
 item.
 
-## BL-4 — Re-linking a bank duplicates its raw transactions
-
-**Added:** 2026-10-05
-**Related:** BL-3
-
-**Problem:** Raw transactions are kept when a Plaid item is unlinked (only
-`plaid_item_id` is cleared), since a closed account can't be re-fetched and
-Plaid only returns ~24 months. But `raw_transactions.id` is Plaid's
-`transaction_id`, and a new link issues new ids for the same real purchases —
-so the next sync saves them again alongside the old rows.
-
-**Proposed fix (options):**
-- Replace: on re-link, delete the account's old Plaid rows for the dates the
-  new sync covers; keep older ones.
-- Match: our own generated id plus a `plaid_transaction_id` column; match
-  incoming transactions to existing rows by account + date + amount +
-  description (by count) and update instead of inserting.
-
-**Update 2026-11-11:** rows now have our own id and Plaid's in
-`plaid_transaction_id` (BL-16). What's left is matching a re-link's new Plaid
-ids to existing rows, part of BL-5.
+**Decided 2026-11-23 — unlink means stop syncing, not erase:**
+- `unlink_bank(bank_name)` finds the item (`find_linked_bank`), asks the user
+  to confirm ("Stop syncing Acme Bank? Its history stays."), calls
+  `/item/remove` (revokes access, stops billing), then soft-deletes the item:
+  a new `plaid_items.removed_at` column (shared with BL-5), not a delete.
+  Lookups skip removed items, so it leaves `list_linked_banks` and sync.
+- Kept: the bank accounts (only their Plaid columns are cleared; they stay in
+  their journals), every synced transaction, its classification and receipt
+  matches, and the journal entries.
+- The trigger that clears the accounts' Plaid columns fires on delete today;
+  it must fire when `removed_at` is set (same change as BL-5).
+- Unlink before any DB wipe: `/item/remove` needs the access token, so items
+  whose token was wiped can only be removed by Plaid support.
+- Re-linking an unlinked bank: later (BL-5 case 1).
 
 ## BL-5 — Re-linking an already-linked bank isn't handled correctly
 
@@ -400,108 +393,6 @@ can't be added, so `upload_receipt` can't book to it.
 
 **Priority:** right after BL-5.
 
-## BL-15 — Receipts and Plaid transactions for the same purchase aren't matched
-
-**Added:** 2026-11-10
-**Related:** BACKEND_IMPLEMENTATION_DECISIONS.md #18; BL-4, BL-5
-
-**Problem:** A card receipt and the Plaid charge for the same purchase are both
-booked, so the purchase counts twice. Example (made up): a receipt "Blue Bottle
-Coffee Roasters", 2026-10-24, −12.50 on a card, and Plaid's "Blue Bottle
-Coffee", 2026-10-25, −12.50 on the same card.
-
-**Proposed fix:** match both ways — on receipt upload (against Plaid rows) and
-on every Plaid sync (against receipts) — so arrival order doesn't matter. The
-receipt wins (#18): the Plaid row is linked to it (e.g. a `receipt_id` column)
-and not booked; if already booked, its entry is removed. v1 rules (no AI):
-- same account;
-- amount: exact; for dining, the charge may be up to 30% above the receipt (tip);
-- date: Plaid date from 2 days before to 7 days after the receipt date;
-- merchant: normalized names where one contains the other, or the first word
-  matches (e.g. "blue bottle coffee roasters" / "blue bottle coffee");
-- exactly one candidate, else leave unmatched and log it.
-
-Uses the separate ids from BL-16.
-
-- Also catch a receipt uploaded twice (raw transaction ids are random now, so
-  re-uploading makes a second row).
-- Open: pending → posted. Plaid removes the pending transaction and adds the
-  posted one under a new id, so a receipt matched to the pending row would lose
-  its link and the posted row would be booked again. Likely fix: when an added
-  transaction's `pending_transaction_id` matches a stored row, update that row
-  (new `plaid_transaction_id`, amount, date) and keep our id, classification
-  and receipt link; the later "removed" then finds nothing. To check: whether
-  every institution sets `pending_transaction_id`, and posted rows whose
-  pending one we never saw.
-
-**Priority:** right after the first round of receipt testing.
-
-**Update 2026-11-12:** matching now means putting source transactions under one
-transaction (BACKEND_IMPLEMENTATION_DECISIONS.md #19); the classifier already
-sends all of a transaction's sources and reuses classifications per source.
-When the posted Plaid version of a pending charge arrives, it should join the
-pending one's transaction (Plaid's pending_transaction_id) or the receipt's,
-rather than start a new one (TODO(BL-15) in classify_transactions.py).
-
-**Fixed 2026-11-22** (feature/transaction-matching): receipts and bank
-transactions are matched both ways (on upload and on sync) with the v1 rules
-above, and merged into one transaction (BACKEND_IMPLEMENTATION_DECISIONS.md
-#22); a pair the user rejected isn't merged again. Pending → posted updates the
-pending row in place (#23). Not done: catching a receipt uploaded twice
-(BL-19); asking before a match (BL-20).
-
-## BL-16 — Raw transactions use Plaid's id as their own id (and its column is `id`)
-
-**Added:** 2026-11-10
-**Related:** BL-4, BL-5, BL-15, BL-17 (merged in)
-**Status:** fixed 2026-11-11 (DB wiped and re-synced, no migration)
-
-**Problem:** A Plaid row's `raw_transactions.id` is Plaid's `transaction_id`;
-a receipt's is our own hash. So ids have two formats, and a re-link (new Plaid
-ids for the same purchases) can't keep the same row.
-
-**Proposed fix:** every raw transaction gets our own generated id; Plaid's id
-moves to a `plaid_transaction_id` column (unique, null for other sources).
-Plaid sync finds rows by `plaid_transaction_id` for added / modified / removed.
-`journal_lines.raw_transaction_id` keeps pointing at our id. A re-link then
-updates `plaid_transaction_id` on the matched row instead of adding a new one
-(BL-4, BL-5). Existing data: `journal_lines.raw_transaction_id` (plain text,
-no foreign key) still holds the old Plaid ids, so a migration must rewrite it
-to the new ids along with `raw_transactions.id`; or wipe the DB and rebook,
-since booking rebuilds every line from raw transactions.
-
-Also rename `raw_transactions.id` → `raw_transaction_id` (and `RawTransaction.id`),
-so the name matches `journal_lines.raw_transaction_id` (was BL-17).
-
-**Fix (2026-11-11):** `raw_transaction_id` is ours (UniqueIdGenerator) for every
-source; Plaid's id is in `plaid_transaction_id`, and Plaid sync finds rows by
-it (`upsert_raw_transaction` keeps the stored id; `removed` deletes by Plaid
-id). The server stops on a database from before this change and asks to wipe
-it.
-
-## BL-17 — Rename raw_transactions.id to raw_transaction_id
-
-Merged into BL-16 (2026-11-11).
-
-## BL-18 — Tables don't record when rows were created or last changed
-
-**Added:** 2026-11-10
-**Related:** BL-16, BL-17
-**Status:** fixed 2026-11-11 (DB columns and models)
-
-**Problem:** Only `journals`, `plaid_items` and `report_definitions` have
-`created_at`, and no table has `updated_at`. `raw_transactions`,
-`journal_lines`, `bank_accounts`, `journal_bank_accounts` and
-`plaid_sync_cursors` have neither, so there's no way to tell when a
-transaction arrived, was reclassified, or when an entry was booked.
-
-**Proposed fix:** `created_at` and `updated_at` (UTC ISO 8601 text) on every
-table. Set both on insert; on update, change only `updated_at` (upserts must
-keep the original `created_at` on conflict). SQLite can't add a column with a
-`CURRENT_TIMESTAMP` default to an existing table, so set them in code (or with
-triggers). Existing rows: null, or do it in the same migration / DB wipe as
-BL-16.
-
 ## BL-19 — Avoid AI cost on re-syncs and re-uploaded receipts
 
 **Added:** 2026-11-11
@@ -605,3 +496,194 @@ purchase is saved by both and booked twice.
 **Proposed fix (options):** match statement rows to Plaid rows (same
 account, posting date and amount); or refuse a statement for dates a
 linked account already covers.
+
+## BL-24 — Use cases aren't each checked by a test
+
+**Added:** 2026-11-22
+**Related:** docs/product/USE_CASES.md
+
+**Problem:** docs/product/USE_CASES.md lists what a user does and what to
+expect (R1–R9, P1, L1–L10). Most are covered piece by piece by unit tests
+(matching, merging, routing), but no test follows a use case's steps from
+start to finish, so the cases and the code can drift apart.
+
+**Proposed fix:**
+- Review the use cases with the user (missing or wrong ones); reviewed ones
+  move from "Not reviewed" to "Reviewed".
+- One test per use case, named after its id (e.g. `test_r2_receipt_then_sync_merges`),
+  following its steps through the tools:
+  - unit tests (in-memory DB, Plaid and the AI faked) where that's enough:
+    R1–R9, P1, L1–L10;
+  - integration tests only where the real AI matters (e.g. R8's redo of an AI
+    classification after a merge).
+- When a use case is added or changed, its test changes with it.
+
+## BL-25 — Finishing Plaid Link after the tool stops waiting loses the link
+
+**Added:** 2026-11-23
+**Related:** BL-3, PLAID_INTEGRATION_DECISIONS.md #5
+
+**Problem:** `link_bank` and `update_bank_link` wait up to 5 minutes for the
+user to finish on Plaid's page. If the user finishes later (e.g. stepped away),
+nobody claims the result: the bank isn't saved, the user has to link again,
+and Plaid may keep (and bill) the unclaimed connection. Closing the page also
+isn't an exit to Plaid, so the tool waits the full time unless the user presses
+Esc.
+
+**Options to think through later:** a longer wait in the tool call; or
+finishing the link after the tool call returns (e.g. in the background); or
+both. Weigh: whether the assistant is blocked meanwhile, cancelling, client
+timeouts, and a server restart mid-wait.
+
+## BL-26 — Two orphaned Production Plaid items need removing
+
+**Added:** 2026-11-23
+**Related:** BL-3
+
+**Problem:** Two Production items (called `foo` and `bar` here; their real ids
+stay out of the repo) were linked and claimed, but their access tokens were
+lost when the DB was wiped. Nothing here can use or remove them, and Plaid may
+keep billing for them. `/item/remove` needs the access token, so no tool can
+remove them; my.plaid.com needs an account we don't have.
+
+**How they were found:**
+1. dashboard.plaid.com → Logs, environment Production.
+2. Filter for `/item/public_token/exchange`: each successful call is a claimed
+   item (its `item_id` is in the response).
+3. For each of those `item_id`s, look for an `/item/remove` call. The ones
+   without one are still live: `foo` and `bar`.
+
+**Fix:** a Plaid support ticket (from the Dashboard) asking them to remove
+`foo` and `bar` and stop billing, since the access tokens were lost.
+Optionally, remove BalanceAI/Plaid from the bank's connected apps meanwhile.
+To avoid this again: unlink (BL-3) before any DB wipe.
+
+# Done
+
+Closed entries, kept for history.
+
+## BL-4 — Re-linking a bank duplicates its raw transactions
+
+**Added:** 2026-10-05
+**Related:** BL-3
+**Status:** merged into BL-5 (2026-11-22)
+
+**Problem:** Raw transactions are kept when a Plaid item is unlinked (only
+`plaid_item_id` is cleared), since a closed account can't be re-fetched and
+Plaid only returns ~24 months. But `raw_transactions.id` is Plaid's
+`transaction_id`, and a new link issues new ids for the same real purchases —
+so the next sync saves them again alongside the old rows.
+
+**Proposed fix (options):**
+- Replace: on re-link, delete the account's old Plaid rows for the dates the
+  new sync covers; keep older ones.
+- Match: our own generated id plus a `plaid_transaction_id` column; match
+  incoming transactions to existing rows by account + date + amount +
+  description (by count) and update instead of inserting.
+
+**Update 2026-11-11:** rows now have our own id and Plaid's in
+`plaid_transaction_id` (BL-16). What's left is matching a re-link's new Plaid
+ids to existing rows, part of BL-5.
+
+## BL-15 — Receipts and Plaid transactions for the same purchase aren't matched
+
+**Added:** 2026-11-10
+**Related:** BACKEND_IMPLEMENTATION_DECISIONS.md #18; BL-4, BL-5
+**Status:** fixed 2026-11-22 (PR #15)
+
+**Problem:** A card receipt and the Plaid charge for the same purchase are both
+booked, so the purchase counts twice. Example (made up): a receipt "Blue Bottle
+Coffee Roasters", 2026-10-24, −12.50 on a card, and Plaid's "Blue Bottle
+Coffee", 2026-10-25, −12.50 on the same card.
+
+**Proposed fix:** match both ways — on receipt upload (against Plaid rows) and
+on every Plaid sync (against receipts) — so arrival order doesn't matter. The
+receipt wins (#18): the Plaid row is linked to it (e.g. a `receipt_id` column)
+and not booked; if already booked, its entry is removed. v1 rules (no AI):
+- same account;
+- amount: exact; for dining, the charge may be up to 30% above the receipt (tip);
+- date: Plaid date from 2 days before to 7 days after the receipt date;
+- merchant: normalized names where one contains the other, or the first word
+  matches (e.g. "blue bottle coffee roasters" / "blue bottle coffee");
+- exactly one candidate, else leave unmatched and log it.
+
+Uses the separate ids from BL-16.
+
+- Also catch a receipt uploaded twice (raw transaction ids are random now, so
+  re-uploading makes a second row).
+- Open: pending → posted. Plaid removes the pending transaction and adds the
+  posted one under a new id, so a receipt matched to the pending row would lose
+  its link and the posted row would be booked again. Likely fix: when an added
+  transaction's `pending_transaction_id` matches a stored row, update that row
+  (new `plaid_transaction_id`, amount, date) and keep our id, classification
+  and receipt link; the later "removed" then finds nothing. To check: whether
+  every institution sets `pending_transaction_id`, and posted rows whose
+  pending one we never saw.
+
+**Priority:** right after the first round of receipt testing.
+
+**Update 2026-11-12:** matching now means putting source transactions under one
+transaction (BACKEND_IMPLEMENTATION_DECISIONS.md #19); the classifier already
+sends all of a transaction's sources and reuses classifications per source.
+When the posted Plaid version of a pending charge arrives, it should join the
+pending one's transaction (Plaid's pending_transaction_id) or the receipt's,
+rather than start a new one (TODO(BL-15) in classify_transactions.py).
+
+**Fixed 2026-11-22** (feature/transaction-matching): receipts and bank
+transactions are matched both ways (on upload and on sync) with the v1 rules
+above, and merged into one transaction (BACKEND_IMPLEMENTATION_DECISIONS.md
+#22); a pair the user rejected isn't merged again. Pending → posted updates the
+pending row in place (#23). Not done: catching a receipt uploaded twice
+(BL-19); asking before a match (BL-20).
+
+## BL-16 — Raw transactions use Plaid's id as their own id (and its column is `id`)
+
+**Added:** 2026-11-10
+**Related:** BL-4, BL-5, BL-15, BL-17 (merged in)
+**Status:** fixed 2026-11-11 (DB wiped and re-synced, no migration)
+
+**Problem:** A Plaid row's `raw_transactions.id` is Plaid's `transaction_id`;
+a receipt's is our own hash. So ids have two formats, and a re-link (new Plaid
+ids for the same purchases) can't keep the same row.
+
+**Proposed fix:** every raw transaction gets our own generated id; Plaid's id
+moves to a `plaid_transaction_id` column (unique, null for other sources).
+Plaid sync finds rows by `plaid_transaction_id` for added / modified / removed.
+`journal_lines.raw_transaction_id` keeps pointing at our id. A re-link then
+updates `plaid_transaction_id` on the matched row instead of adding a new one
+(BL-4, BL-5). Existing data: `journal_lines.raw_transaction_id` (plain text,
+no foreign key) still holds the old Plaid ids, so a migration must rewrite it
+to the new ids along with `raw_transactions.id`; or wipe the DB and rebook,
+since booking rebuilds every line from raw transactions.
+
+Also rename `raw_transactions.id` → `raw_transaction_id` (and `RawTransaction.id`),
+so the name matches `journal_lines.raw_transaction_id` (was BL-17).
+
+**Fix (2026-11-11):** `raw_transaction_id` is ours (UniqueIdGenerator) for every
+source; Plaid's id is in `plaid_transaction_id`, and Plaid sync finds rows by
+it (`upsert_raw_transaction` keeps the stored id; `removed` deletes by Plaid
+id). The server stops on a database from before this change and asks to wipe
+it.
+
+## BL-17 — Rename raw_transactions.id to raw_transaction_id
+
+Merged into BL-16 (2026-11-11).
+
+## BL-18 — Tables don't record when rows were created or last changed
+
+**Added:** 2026-11-10
+**Related:** BL-16, BL-17
+**Status:** fixed 2026-11-11 (DB columns and models)
+
+**Problem:** Only `journals`, `plaid_items` and `report_definitions` have
+`created_at`, and no table has `updated_at`. `raw_transactions`,
+`journal_lines`, `bank_accounts`, `journal_bank_accounts` and
+`plaid_sync_cursors` have neither, so there's no way to tell when a
+transaction arrived, was reclassified, or when an entry was booked.
+
+**Proposed fix:** `created_at` and `updated_at` (UTC ISO 8601 text) on every
+table. Set both on insert; on update, change only `updated_at` (upserts must
+keep the original `created_at` on conflict). SQLite can't add a column with a
+`CURRENT_TIMESTAMP` default to an existing table, so set them in code (or with
+triggers). Existing rows: null, or do it in the same migration / DB wipe as
+BL-16.

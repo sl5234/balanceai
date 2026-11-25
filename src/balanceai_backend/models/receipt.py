@@ -15,6 +15,7 @@ class PaymentMethod(StrEnum):
 class ReceiptKind(StrEnum):
     PURCHASE = "purchase"  # money out (also bills, paying a person, donations)
     REFUND = "refund"  # money back, e.g. a return slip
+    WITHDRAWAL = "withdrawal"  # cash taken out of a bank account: an ATM or teller slip
 
 
 class ReceiptExtraction(BaseModel):
@@ -26,7 +27,10 @@ class ReceiptExtraction(BaseModel):
         description="Who was paid or who refunded: a store, company or person, "
         "e.g. 'Blue Bottle Coffee'"
     )
-    kind: ReceiptKind = Field(description="purchase (money out) or refund (money back)")
+    kind: ReceiptKind = Field(
+        description="purchase (money out), refund (money back), or withdrawal (an ATM "
+        "or teller slip for cash taken out of a bank account)"
+    )
     total: Decimal = Field(
         description="Amount paid or refunded, as a positive number, including tax and "
         "tip if printed"

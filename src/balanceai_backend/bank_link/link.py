@@ -7,6 +7,7 @@ import logging
 import time
 import webbrowser
 
+import anyio
 from plaid.model.country_code import CountryCode
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
 from plaid.model.link_token_create_hosted_link import LinkTokenCreateHostedLink
@@ -61,7 +62,7 @@ def create_hosted_link(
     return response.link_token, response.hosted_link_url
 
 
-def run_plaid_link_flow(
+async def run_plaid_link_flow(
     item: PlaidItem | None = None,
     add_accounts: bool = False,
     timeout_s: int = _DEFAULT_TIMEOUT_S,
@@ -80,6 +81,10 @@ def run_plaid_link_flow(
         LinkExitedError: the user exited, Plaid reported an error, or a first
             link finished without linking a bank.
         TimeoutError: the user didn't finish within timeout_s.
+
+    Waits with anyio.sleep, so the server keeps handling other tool calls,
+    and a cancelled tool call stops polling at once (closing the browser tab
+    isn't an exit to Plaid; only Link's own X is).
     """
     is_initial_link = item is None
     link_token, hosted_link_url = create_hosted_link(item=item, add_accounts=add_accounts)
@@ -88,16 +93,16 @@ def run_plaid_link_flow(
     except webbrowser.Error:
         logger.warning("Could not open a browser automatically for %s", hosted_link_url)
 
-    session = _wait_for_finished_session(link_token, timeout_s)
+    session = await _wait_for_finished_session(link_token, timeout_s)
     if not is_initial_link:
         # A finished update-mode session with no exit is success (seen live in
         # Sandbox). It also carries an item_add_result, which isn't needed.
         assert item is not None
         return item
-    return _exchange_public_token_for_item(_get_item_add_result(link_token, session))
+    return _exchange_public_token_for_item(await _get_item_add_result(link_token, session))
 
 
-def _get_item_add_result(link_token: str, session):
+async def _get_item_add_result(link_token: str, session):
     """A finished first-link session's result. In Sandbox the result arrives
     before the session is marked finished; as a safety net, if it's missing,
     look at the same session once more (`session` is a snapshot; by id, since
@@ -108,7 +113,7 @@ def _get_item_add_result(link_token: str, session):
     """
     result = _read_item_add_result(session)
     if result is None:
-        time.sleep(_POLL_INTERVAL_S)
+        await anyio.sleep(_POLL_INTERVAL_S)
         result = _read_item_add_result(
             _find_session(link_token, getattr(session, "link_session_id", None))
         )
@@ -160,7 +165,7 @@ def _find_session(link_token: str, link_session_id: str | None):
     )
 
 
-def _wait_for_finished_session(link_token: str, timeout_s: int):
+async def _wait_for_finished_session(link_token: str, timeout_s: float):
     """Poll every _POLL_INTERVAL_S until the newest session finishes
     (finished_at set). Only the newest counts: an earlier session the user
     exited doesn't end a later one still in progress.
@@ -177,25 +182,33 @@ def _wait_for_finished_session(link_token: str, timeout_s: int):
         TimeoutError: it didn't finish within timeout_s.
     """
     deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        sessions = _sessions(link_token)
-        session = sessions[-1] if sessions else None
-        exit_info = getattr(session, "exit", None) if session is not None else None
-        if exit_info is not None:
-            error = getattr(exit_info, "error", None)
-            raise LinkExitedError(
-                error.error_message if error is not None else "user exited Hosted Link"
-            )
-        if session is not None and getattr(session, "finished_at", None):
-            return session
-        time.sleep(_POLL_INTERVAL_S)
+    logger.info("Waiting for the user to finish Plaid Link")
+    try:
+        while time.monotonic() < deadline:
+            sessions = _sessions(link_token)
+            session = sessions[-1] if sessions else None
+            exit_info = getattr(session, "exit", None) if session is not None else None
+            if exit_info is not None:
+                logger.info("Plaid Link exited")
+                error = getattr(exit_info, "error", None)
+                raise LinkExitedError(
+                    error.error_message if error is not None else "user exited Hosted Link"
+                )
+            if session is not None and getattr(session, "finished_at", None):
+                logger.info("Plaid Link finished")
+                return session
+            await anyio.sleep(_POLL_INTERVAL_S)
+    except anyio.get_cancelled_exc_class():
+        logger.info("Plaid Link wait cancelled")
+        raise
+    logger.info("Plaid Link wait timed out after %ss", timeout_s)
     raise TimeoutError(f"Timed out after {timeout_s}s waiting for Hosted Link completion")
 
 
 if __name__ == "__main__":
     print("Opening Plaid in your browser to connect your bank...")
     try:
-        linked_item = run_plaid_link_flow()
+        linked_item = anyio.run(run_plaid_link_flow)
     except LinkExitedError as e:
         print(f"Link did not complete: {e}")
         raise SystemExit(2) from e
